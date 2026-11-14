@@ -1,4 +1,4 @@
-#include "apex/worldgen/biome.hpp"
+#include "falcon/worldgen/biome.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -6,7 +6,7 @@
 #include <cstring>
 #include <limits>
 
-namespace apex::worldgen {
+namespace falcon::worldgen {
 
 // ===============================================================================================================
 // SHA-256
@@ -738,4 +738,4 @@ BiomeId BiomeSource::biomeAt(Context& ctx, int x, int y, int z) const {
 
 BiomeId BiomeSource::biomeAt(int x, int y, int z) const { return biomeAt(threadContext(), x, y, z); }
 
-}  // namespace apex::worldgen
+}  // namespace falcon::worldgen

@@ -1,4 +1,4 @@
-#include "apex/world/item_registry.hpp"
+#include "falcon/world/item_registry.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -8,7 +8,7 @@
 #include <mutex>
 #include <stdexcept>
 
-namespace apex {
+namespace falcon {
 namespace fs = std::filesystem;
 using nlohmann::json;
 
@@ -436,4 +436,4 @@ const ItemRegistry& itemRegistry() {
     return *g_items;
 }
 
-}  // namespace apex
+}  // namespace falcon

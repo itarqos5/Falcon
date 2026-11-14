@@ -1,10 +1,10 @@
-#include "apex/platform/key_names.hpp"
+#include "falcon/platform/key_names.hpp"
 
-#include "apex/util/text_util.hpp"
+#include "falcon/util/text_util.hpp"
 
 #include <GLFW/glfw3.h>
 
-namespace apex {
+namespace falcon {
 namespace {
 
 // The keys whose name is the character they print (SDL names them that way; the rest have names like "Space").
@@ -42,4 +42,4 @@ std::string layoutKeyName(int glfwKey) {
     return encodeUtf8(upperCase(chars[0]));
 }
 
-}  // namespace apex
+}  // namespace falcon

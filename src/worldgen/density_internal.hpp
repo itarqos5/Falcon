@@ -2,14 +2,14 @@
 
 // The compiled form of a density-function graph (shared by the builder and the evaluators). Private to src/worldgen.
 
-#include "apex/worldgen/density.hpp"
-#include "apex/worldgen/noise.hpp"
+#include "falcon/worldgen/density.hpp"
+#include "falcon/worldgen/noise.hpp"
 
 #include <cstdint>
 #include <memory>
 #include <vector>
 
-namespace apex::worldgen::detail {
+namespace falcon::worldgen::detail {
 
 enum class Op : std::uint8_t {
     Constant,
@@ -129,4 +129,4 @@ void forEachChild(const GraphData& g, const Node& n, F&& f) {
     }
 }
 
-}  // namespace apex::worldgen::detail
+}  // namespace falcon::worldgen::detail

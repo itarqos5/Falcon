@@ -1,13 +1,13 @@
-#include "apex/worldgen/overworld_generator.hpp"
+#include "falcon/worldgen/overworld_generator.hpp"
 
-#include "apex/worldgen/java_math.hpp"
+#include "falcon/worldgen/java_math.hpp"
 
 #include <algorithm>
 #include <atomic>
 #include <cmath>
 #include <cstring>
 
-namespace apex::worldgen {
+namespace falcon::worldgen {
 
 namespace {
 
@@ -555,4 +555,4 @@ const char* worldPresetFor(NewWorldType type) {
     return nullptr;
 }
 
-}  // namespace apex::worldgen
+}  // namespace falcon::worldgen

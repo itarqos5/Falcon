@@ -1,10 +1,10 @@
-#include "apex/game/now_playing_toast.hpp"
+#include "falcon/game/now_playing_toast.hpp"
 
 #include <algorithm>
 #include <array>
 #include <cmath>
 
-namespace apex {
+namespace falcon {
 namespace {
 
 constexpr int kPadding = 7;
@@ -97,4 +97,4 @@ void NowPlayingToast::render(GuiGraphics& graphics, double nowMillis) {
     graphics.popPose();
 }
 
-}  // namespace apex
+}  // namespace falcon

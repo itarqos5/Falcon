@@ -1,11 +1,11 @@
-#include "apex/gfx/shader.hpp"
+#include "falcon/gfx/shader.hpp"
 
 #include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
 
-namespace apex {
+namespace falcon {
 namespace {
 
 gl::GLuint compile(gl::GLenum type, const char* source, const char* name) {
@@ -75,4 +75,4 @@ gl::GLint ShaderProgram::uniform(const char* name) const {
     return gl::GetUniformLocation(id_, name);
 }
 
-}  // namespace apex
+}  // namespace falcon

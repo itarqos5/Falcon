@@ -1,6 +1,6 @@
-#include "apex/world/inventory.hpp"
+#include "falcon/world/inventory.hpp"
 
-namespace apex {
+namespace falcon {
 
 int Inventory::freeSlot() const {
     for (int i = 0; i < kMainSize; ++i) {
@@ -136,4 +136,4 @@ int Inventory::countOf(Item wanted) const {
     return total;
 }
 
-}  // namespace apex
+}  // namespace falcon

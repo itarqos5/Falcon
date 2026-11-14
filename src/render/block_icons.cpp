@@ -1,9 +1,9 @@
-#include "apex/render/block_icons.hpp"
+#include "falcon/render/block_icons.hpp"
 
 #include <algorithm>
 #include <cmath>
 
-namespace apex {
+namespace falcon {
 namespace {
 
 struct Vtx {
@@ -144,4 +144,4 @@ BlockIcons::Slot BlockIcons::slot(Block block) {
     return {static_cast<float>((index % kColumns) * kSize), static_cast<float>((index / kColumns) * kSize)};
 }
 
-}  // namespace apex
+}  // namespace falcon

@@ -1,14 +1,14 @@
-#include "apex/game/gamemode_switcher_screen.hpp"
+#include "falcon/game/gamemode_switcher_screen.hpp"
 
-#include "apex/game/game_session.hpp"
-#include "apex/game/item_render.hpp"
-#include "apex/game/key_mappings.hpp"
-#include "apex/world/item_registry.hpp"
-#include "apex/world/item_stack.hpp"
+#include "falcon/game/game_session.hpp"
+#include "falcon/game/item_render.hpp"
+#include "falcon/game/key_mappings.hpp"
+#include "falcon/world/item_registry.hpp"
+#include "falcon/world/item_stack.hpp"
 
 #include <string>
 
-namespace apex {
+namespace falcon {
 
 namespace {
 
@@ -122,4 +122,4 @@ void GameModeSwitcherScreen::switchToPicked() {
     if (services_.session != nullptr) services_.session->requestGameType(gameTypeOfSlot(picked_));
 }
 
-}  // namespace apex
+}  // namespace falcon

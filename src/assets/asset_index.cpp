@@ -1,4 +1,4 @@
-#include "apex/assets/asset_index.hpp"
+#include "falcon/assets/asset_index.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -7,7 +7,7 @@
 #include <iterator>
 #include <system_error>
 
-namespace apex {
+namespace falcon {
 namespace fs = std::filesystem;
 
 std::optional<AssetIndex> AssetIndex::open(const fs::path& assetsDir) {
@@ -67,4 +67,4 @@ std::vector<fs::path> candidateAssetIndexDirs() {
     return dirs;
 }
 
-}  // namespace apex
+}  // namespace falcon

@@ -1,13 +1,13 @@
-#include "apex/worldgen/noise.hpp"
+#include "falcon/worldgen/noise.hpp"
 
-#include "apex/worldgen/java_math.hpp"
+#include "falcon/worldgen/java_math.hpp"
 
 #include <bit>
 #include <climits>
 #include <cmath>
 #include <utility>
 
-namespace apex::worldgen {
+namespace falcon::worldgen {
 
 namespace {
 
@@ -377,4 +377,4 @@ float BlendedNoise::sample(std::int32_t x, std::int32_t y, std::int32_t z) const
     return lerpf(t, lo, hi);
 }
 
-}  // namespace apex::worldgen
+}  // namespace falcon::worldgen

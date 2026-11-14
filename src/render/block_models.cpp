@@ -1,4 +1,4 @@
-#include "apex/render/block_models.hpp"
+#include "falcon/render/block_models.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -7,7 +7,7 @@
 #include <cstdio>
 #include <cstdlib>
 
-namespace apex {
+namespace falcon {
 using nlohmann::json;
 
 namespace {
@@ -826,16 +826,16 @@ std::vector<ModelQuad> BlockModels::iconQuads(Block block) const {
     return out;
 }
 
-}  // namespace apex
+}  // namespace falcon
 
 // ---------------------------------------------------------------------------------------------------------------
 // Biome tints
 
-#include "apex/world/chunk.hpp"
-#include "apex/worldgen/biome.hpp"
-#include "apex/worldgen/legacy_noise.hpp"
+#include "falcon/world/chunk.hpp"
+#include "falcon/worldgen/biome.hpp"
+#include "falcon/worldgen/legacy_noise.hpp"
 
-namespace apex {
+namespace falcon {
 
 void BlockModels::setBiomes(const worldgen::BiomeRegistry* biomes) {
     biomeColors_.clear();
@@ -904,4 +904,4 @@ bool BlockModels::fillTints(const std::shared_ptr<const BiomeGrid>* biomes, int 
     return true;
 }
 
-}  // namespace apex
+}  // namespace falcon

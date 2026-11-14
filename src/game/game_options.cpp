@@ -1,8 +1,8 @@
-#include "apex/game/game_options.hpp"
+#include "falcon/game/game_options.hpp"
 
 #include <sstream>
 
-namespace apex {
+namespace falcon {
 namespace {
 
 constexpr const char* kPartKeys[7] = {"modelPart_cape", "modelPart_jacket", "modelPart_left_sleeve",
@@ -264,4 +264,4 @@ void GameOptions::load(const OptionsFile& f) {
     realmsNotifications = f.getBool("realmsNotifications", realmsNotifications);
 }
 
-}  // namespace apex
+}  // namespace falcon

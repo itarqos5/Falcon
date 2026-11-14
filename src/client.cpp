@@ -1,41 +1,41 @@
-#include "apex/client.hpp"
+#include "falcon/client.hpp"
 
-#include "apex/audio/audio_engine.hpp"
-#include "apex/audio/music_manager.hpp"
-#include "apex/audio/sound_system.hpp"
-#include "apex/assets/asset_locator.hpp"
-#include "apex/assets/image.hpp"
-#include "apex/assets/resource_manager.hpp"
-#include "apex/gfx/gl.hpp"
-#include "apex/gfx/gui_renderer.hpp"
-#include "apex/gfx/panorama_renderer.hpp"
-#include "apex/gfx/texture_manager.hpp"
-#include "apex/platform/dialog.hpp"
-#include "apex/platform/memory.hpp"
-#include "apex/platform/window.hpp"
-#include "apex/resource_reloader.hpp"
-#include "apex/text/font.hpp"
-#include "apex/text/language.hpp"
-#include "apex/ui/gui_graphics.hpp"
-#include "apex/game/game_options.hpp"
-#include "apex/ui/gui_scale.hpp"
-#include "apex/game/now_playing_toast.hpp"
-#include "apex/game/game_session.hpp"
-#include "apex/game/game_ui.hpp"
-#include "apex/game/in_game_screen.hpp"
-#include "apex/game/lighting_audit.hpp"
-#include "apex/game/vanilla_compare.hpp"
-#include "apex/game/screen_services.hpp"
-#include "apex/util/options_file.hpp"
-#include "apex/util/task_pool.hpp"
-#include "apex/util/text_util.hpp"
-#include "apex/game/edition_badge.hpp"
-#include "apex/game/panorama.hpp"
-#include "apex/game/splash_manager.hpp"
-#include "apex/ui/sprite_manager.hpp"
-#include "apex/game/title_screen.hpp"
-#include "apex/world/level_info.hpp"
-#include "apex/version.hpp"
+#include "falcon/audio/audio_engine.hpp"
+#include "falcon/audio/music_manager.hpp"
+#include "falcon/audio/sound_system.hpp"
+#include "falcon/assets/asset_locator.hpp"
+#include "falcon/assets/image.hpp"
+#include "falcon/assets/resource_manager.hpp"
+#include "falcon/gfx/gl.hpp"
+#include "falcon/gfx/gui_renderer.hpp"
+#include "falcon/gfx/panorama_renderer.hpp"
+#include "falcon/gfx/texture_manager.hpp"
+#include "falcon/platform/dialog.hpp"
+#include "falcon/platform/memory.hpp"
+#include "falcon/platform/window.hpp"
+#include "falcon/resource_reloader.hpp"
+#include "falcon/text/font.hpp"
+#include "falcon/text/language.hpp"
+#include "falcon/ui/gui_graphics.hpp"
+#include "falcon/game/game_options.hpp"
+#include "falcon/ui/gui_scale.hpp"
+#include "falcon/game/now_playing_toast.hpp"
+#include "falcon/game/game_session.hpp"
+#include "falcon/game/game_ui.hpp"
+#include "falcon/game/in_game_screen.hpp"
+#include "falcon/game/lighting_audit.hpp"
+#include "falcon/game/vanilla_compare.hpp"
+#include "falcon/game/screen_services.hpp"
+#include "falcon/util/options_file.hpp"
+#include "falcon/util/task_pool.hpp"
+#include "falcon/util/text_util.hpp"
+#include "falcon/game/edition_badge.hpp"
+#include "falcon/game/panorama.hpp"
+#include "falcon/game/splash_manager.hpp"
+#include "falcon/ui/sprite_manager.hpp"
+#include "falcon/game/title_screen.hpp"
+#include "falcon/world/level_info.hpp"
+#include "falcon/version.hpp"
 
 #include <algorithm>
 #include <array>
@@ -53,7 +53,7 @@
 #include <thread>
 #include <vector>
 
-namespace apex {
+namespace falcon {
 namespace {
 
 constexpr const char* kGameVersion = "26.3";
@@ -458,7 +458,7 @@ ClientOptions parseOptions(int argc, const char* const* argv) {
 Client::Client(ClientOptions options) : options_(std::move(options)) {}
 
 std::string_view Client::name() const noexcept { return "Falcon"; }
-std::string_view Client::version() const noexcept { return APEX_VERSION_STRING; }
+std::string_view Client::version() const noexcept { return FALCON_VERSION_STRING; }
 
 int Client::run() {
     std::printf("%s v%s (targeting Minecraft Java %s)\n", name().data(), version().data(),
@@ -526,13 +526,8 @@ int Client::run() {
         : appData != nullptr ? std::filesystem::path(appData) / ".minecraft"
                              : std::filesystem::path(".minecraft");
     const std::filesystem::path optionsPath = gameDir / "falcon_options.txt";
-    // This client was called Apex Client first and kept its settings in apex_options.txt: until the new file
-    // exists, those are what is read. The old file is never changed or deleted.
-    const std::filesystem::path legacyOptionsPath = gameDir / "apex_options.txt";
-    std::error_code optionsEc;
-    const bool readLegacyOptions = !std::filesystem::exists(optionsPath, optionsEc) && std::filesystem::exists(legacyOptionsPath, optionsEc);
     const bool persistOptions = !options_.capturePath || options_.gameDir.has_value();
-    OptionsFile optionsFile = OptionsFile::load(readLegacyOptions ? legacyOptionsPath : optionsPath);
+    OptionsFile optionsFile = OptionsFile::load(optionsPath);
     GameOptions gameOptions;
     gameOptions.load(optionsFile);
     if (options_.language) gameOptions.language = *options_.language;
@@ -1118,4 +1113,4 @@ int Client::run() {
     return 0;
 }
 
-}  // namespace apex
+}  // namespace falcon

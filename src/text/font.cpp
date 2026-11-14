@@ -1,7 +1,7 @@
-#include "apex/text/font.hpp"
+#include "falcon/text/font.hpp"
 
-#include "apex/assets/zip_archive.hpp"
-#include "apex/util/text_util.hpp"
+#include "falcon/assets/zip_archive.hpp"
+#include "falcon/util/text_util.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -9,7 +9,7 @@
 #include <cstring>
 #include <stdexcept>
 
-namespace apex {
+namespace falcon {
 using nlohmann::json;
 
 // Builds a FontData (CPU only) from a font definition.
@@ -362,4 +362,4 @@ const Glyph& Font::glyph(char32_t codePoint) const {
     return missing_;
 }
 
-}  // namespace apex
+}  // namespace falcon

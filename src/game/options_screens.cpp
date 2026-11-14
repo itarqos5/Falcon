@@ -1,13 +1,13 @@
-#include "apex/game/options_screens.hpp"
+#include "falcon/game/options_screens.hpp"
 
-#include "apex/game/options_video_screens.hpp"
-#include "apex/util/text_util.hpp"
+#include "falcon/game/options_video_screens.hpp"
+#include "falcon/util/text_util.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
 
-namespace apex {
+namespace falcon {
 namespace {
 
 std::string fixed(double v, int decimals) {
@@ -228,4 +228,4 @@ void OnlineOptionsScreen::addOptions() {
                         "options.realmsNotifications.tooltip", kBigWidth));
 }
 
-}  // namespace apex
+}  // namespace falcon

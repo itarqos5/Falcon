@@ -1,10 +1,10 @@
-#include "apex/game/splash_manager.hpp"
+#include "falcon/game/splash_manager.hpp"
 
-#include "apex/util/text_util.hpp"
+#include "falcon/util/text_util.hpp"
 
 #include <sstream>
 
-namespace apex {
+namespace falcon {
 namespace {
 
 // The game drops the one splash line whose String.hashCode() is this value.
@@ -39,4 +39,4 @@ std::optional<std::string> SplashManager::pick(int month, int day, std::mt19937&
     return splashes_[dist(rng)];
 }
 
-}  // namespace apex
+}  // namespace falcon

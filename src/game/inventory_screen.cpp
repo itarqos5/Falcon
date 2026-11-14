@@ -1,15 +1,15 @@
-#include "apex/game/inventory_screen.hpp"
+#include "falcon/game/inventory_screen.hpp"
 
-#include "apex/game/game_session.hpp"
-#include "apex/game/item_names.hpp"
-#include "apex/game/item_render.hpp"
-#include "apex/util/text_util.hpp"
+#include "falcon/game/game_session.hpp"
+#include "falcon/game/item_names.hpp"
+#include "falcon/game/item_render.hpp"
+#include "falcon/util/text_util.hpp"
 
 #include <GLFW/glfw3.h>
 
 #include <algorithm>
 
-namespace apex {
+namespace falcon {
 namespace {
 
 constexpr std::uint32_t kLabelColor = 0xFF404040u;  // -12566464
@@ -250,4 +250,4 @@ void CreativeScreen::onClose() {
     Screen::onClose();
 }
 
-}  // namespace apex
+}  // namespace falcon

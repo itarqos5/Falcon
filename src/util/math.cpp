@@ -1,8 +1,8 @@
-#include "apex/util/math.hpp"
+#include "falcon/util/math.hpp"
 
 #include <cmath>
 
-namespace apex {
+namespace falcon {
 
 float clampedMap(float value, float inMin, float inMax, float outMin, float outMax) {
     const float t = clampf((value - inMin) / (inMax - inMin), 0.0f, 1.0f);
@@ -115,4 +115,4 @@ void Pose2D::apply(float x, float y, float& outX, float& outY) const {
     outY = b * x + d * y + f;
 }
 
-}  // namespace apex
+}  // namespace falcon

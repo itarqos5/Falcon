@@ -1,8 +1,8 @@
-#include "apex/game/key_mappings.hpp"
+#include "falcon/game/key_mappings.hpp"
 
-#include "apex/platform/key_names.hpp"
-#include "apex/text/language.hpp"
-#include "apex/util/text_util.hpp"
+#include "falcon/platform/key_names.hpp"
+#include "falcon/text/language.hpp"
+#include "falcon/util/text_util.hpp"
 
 #include <GLFW/glfw3.h>
 
@@ -10,7 +10,7 @@
 #include <map>
 #include <numeric>
 
-namespace apex {
+namespace falcon {
 namespace {
 
 struct NamedKey {
@@ -284,4 +284,4 @@ std::string keyDisplayName(const KeyId& key, const Language& language) {
     return id.substr(std::string_view("key.keyboard.").size());
 }
 
-}  // namespace apex
+}  // namespace falcon

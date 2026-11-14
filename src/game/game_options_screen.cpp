@@ -1,6 +1,6 @@
-#include "apex/game/game_options_screen.hpp"
+#include "falcon/game/game_options_screen.hpp"
 
-namespace apex {
+namespace falcon {
 
 std::unique_ptr<CycleButton> GameOptionsScreen::optionToggle(const std::string& captionKey, bool GameOptions::*field,
                                                              const std::string& tooltipKey, int width) {
@@ -28,4 +28,4 @@ std::unique_ptr<CycleButton> GameOptionsScreen::makeNarratorButton() {
     return button;
 }
 
-}  // namespace apex
+}  // namespace falcon

@@ -6,7 +6,7 @@ read: 0 and 1 mean OpenGL, 2 Vulkan). It takes effect the next time the game sta
 
 ## What works today
 
-Only OpenGL can draw the game. `effectiveGraphicsApi()` (`apex/gfx/graphics_api.hpp`) is the one place that decides what really runs: it
+Only OpenGL can draw the game. `effectiveGraphicsApi()` (`falcon/gfx/graphics_api.hpp`) is the one place that decides what really runs: it
 returns the chosen API when `graphicsApiRenders()` says it can render, otherwise OpenGL, with a one-line reason that the start-up log
 prints (`[falcon] graphics API: opengl - the vulkan renderer is not built yet: drawing with opengl`) and the Vulkan button's tooltip
 repeats. A new API (Vulkan first, Metal after) is one enum value plus its ids and names in that header; the setting screen, the options

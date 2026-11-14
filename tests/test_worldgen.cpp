@@ -9,15 +9,15 @@
 // All numbers are copied into this file; the tests that need the game's worldgen JSON (noise parameters, density
 // functions, noise settings) find it through locateAssets() and print a skip message when it is not there.
 
-#include "apex/assets/asset_locator.hpp"
-#include "apex/worldgen/chunk_fill.hpp"
-#include "apex/worldgen/density.hpp"
-#include "apex/worldgen/java_math.hpp"
-#include "apex/worldgen/json_tree.hpp"
-#include "apex/worldgen/noise.hpp"
-#include "apex/worldgen/noise_router.hpp"
-#include "apex/worldgen/random.hpp"
-#include "apex/worldgen/random_state.hpp"
+#include "falcon/assets/asset_locator.hpp"
+#include "falcon/worldgen/chunk_fill.hpp"
+#include "falcon/worldgen/density.hpp"
+#include "falcon/worldgen/java_math.hpp"
+#include "falcon/worldgen/json_tree.hpp"
+#include "falcon/worldgen/noise.hpp"
+#include "falcon/worldgen/noise_router.hpp"
+#include "falcon/worldgen/random.hpp"
+#include "falcon/worldgen/random_state.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -34,7 +34,7 @@
 #include <utility>
 #include <vector>
 
-using namespace apex::worldgen;
+using namespace falcon::worldgen;
 
 namespace {
 
@@ -1791,7 +1791,7 @@ int main() {    std::printf("worldgen tests\n");
     testSyntheticGraphs();
     testFillHelpers();
 
-    const apex::AssetSearchResult assets = apex::locateAssets(std::nullopt);
+    const falcon::AssetSearchResult assets = falcon::locateAssets(std::nullopt);
     if (!assets.location) {
         std::printf("  (tests that need the game's worldgen data skipped: game assets not found)\n");
     } else {

@@ -1,6 +1,6 @@
-#include "apex/gfx/graphics_api.hpp"
+#include "falcon/gfx/graphics_api.hpp"
 
-namespace apex {
+namespace falcon {
 
 std::string_view graphicsApiId(GraphicsApi api) {
     switch (api) {
@@ -49,4 +49,4 @@ std::string graphicsApiTooltip(GraphicsApi api) {
     return text;
 }
 
-}  // namespace apex
+}  // namespace falcon

@@ -1,7 +1,7 @@
-#include "apex/worldgen/material.hpp"
+#include "falcon/worldgen/material.hpp"
 
-#include "apex/worldgen/java_math.hpp"
-#include "apex/worldgen/legacy_noise.hpp"
+#include "falcon/worldgen/java_math.hpp"
+#include "falcon/worldgen/legacy_noise.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -12,7 +12,7 @@
 #include <map>
 #include <set>
 
-namespace apex::worldgen {
+namespace falcon::worldgen {
 
 // ===============================================================================================================
 BlockFacts::BlockFacts(const BlockRegistry& r) : flags_(r.stateCount(), 0) {
@@ -1003,4 +1003,4 @@ void MaterialSystem::buildSurface(Workspace& ws, const SurfaceTarget& t) const {
     }
 }
 
-}  // namespace apex::worldgen
+}  // namespace falcon::worldgen

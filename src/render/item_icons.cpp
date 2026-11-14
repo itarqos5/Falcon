@@ -1,4 +1,4 @@
-#include "apex/render/item_icons.hpp"
+#include "falcon/render/item_icons.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -13,7 +13,7 @@
 #include <windows.h>
 #endif
 
-namespace apex {
+namespace falcon {
 using nlohmann::json;
 
 namespace {
@@ -768,4 +768,4 @@ ItemIcons::Slot ItemIcons::slot(const ItemStack& stack) {
     return {static_cast<float>((index % kColumns) * kMaxSize), static_cast<float>((index / kColumns) * kMaxSize)};
 }
 
-}  // namespace apex
+}  // namespace falcon

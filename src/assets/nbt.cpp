@@ -1,4 +1,4 @@
-#include "apex/assets/nbt.hpp"
+#include "falcon/assets/nbt.hpp"
 
 #include <stb_image.h>  // declarations only; also provides the raw-deflate decoder we reuse
 
@@ -6,7 +6,7 @@
 #include <array>
 #include <cstring>
 
-namespace apex {
+namespace falcon {
 namespace {
 
 constexpr int kMaxDepth = 512;  // the game's own limit
@@ -464,4 +464,4 @@ std::vector<unsigned char> gzipStored(const std::vector<unsigned char>& data) {
     return out;
 }
 
-}  // namespace apex
+}  // namespace falcon

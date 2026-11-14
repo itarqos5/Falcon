@@ -1,4 +1,4 @@
-#include "apex/text/language.hpp"
+#include "falcon/text/language.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -6,7 +6,7 @@
 #include <iterator>
 #include <stdexcept>
 
-namespace apex {
+namespace falcon {
 namespace {
 
 // Adds the entries of every copy of lang/<code>.json (the game's, then each pack's, a later one
@@ -74,4 +74,4 @@ std::vector<LanguageInfo> loadLanguageList(const ResourceManager& resources) {
     return list;
 }
 
-}  // namespace apex
+}  // namespace falcon

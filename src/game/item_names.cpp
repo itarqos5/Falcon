@@ -1,9 +1,9 @@
-#include "apex/game/item_names.hpp"
+#include "falcon/game/item_names.hpp"
 
 #include <cmath>
 #include <cstdio>
 
-namespace apex {
+namespace falcon {
 namespace {
 
 // Replaces the first "%s" of a translation with `value` (the game's %s / %1$s placeholders, which is all these strings use).
@@ -78,4 +78,4 @@ std::vector<TooltipLine> itemTooltipLines(const ItemStack& stack, const Language
     return lines;
 }
 
-}  // namespace apex
+}  // namespace falcon

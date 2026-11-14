@@ -1,11 +1,11 @@
-#include "apex/world/terrain.hpp"
+#include "falcon/world/terrain.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <numeric>
 #include <random>
 
-namespace apex {
+namespace falcon {
 namespace {
 
 std::uint64_t splitmix(std::uint64_t x) {
@@ -165,4 +165,4 @@ TerrainGenerator::Spawn TerrainGenerator::findSpawn() const {
     return {0.5, surfaceHeight(0, 0) + 1.0, 0.5};
 }
 
-}  // namespace apex
+}  // namespace falcon

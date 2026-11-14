@@ -1,6 +1,6 @@
-#include "apex/game/menu_background.hpp"
+#include "falcon/game/menu_background.hpp"
 
-namespace apex {
+namespace falcon {
 
 void renderMenuBackground(GuiGraphics& graphics, Panorama& panorama, const GameOptions& options,
                           int guiWidth, int guiHeight, float deltaTicks, int tintTop) {
@@ -8,4 +8,4 @@ void renderMenuBackground(GuiGraphics& graphics, Panorama& panorama, const GameO
     graphics.fill(0, tintTop, guiWidth, guiHeight, 0x40000000u);
 }
 
-}  // namespace apex
+}  // namespace falcon

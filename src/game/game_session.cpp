@@ -1,15 +1,15 @@
-#include "apex/game/game_session.hpp"
+#include "falcon/game/game_session.hpp"
 
-#include "apex/game/block_placement.hpp"
-#include "apex/world/block_outlines.hpp"
-#include "apex/game/creative_tabs.hpp"
-#include "apex/game/item_names.hpp"
-#include "apex/game/item_render.hpp"
-#include "apex/game/menu_background.hpp"
-#include "apex/platform/memory.hpp"
-#include "apex/util/text_util.hpp"
-#include "apex/world/recipes.hpp"
-#include "apex/world/water_fog.hpp"
+#include "falcon/game/block_placement.hpp"
+#include "falcon/world/block_outlines.hpp"
+#include "falcon/game/creative_tabs.hpp"
+#include "falcon/game/item_names.hpp"
+#include "falcon/game/item_render.hpp"
+#include "falcon/game/menu_background.hpp"
+#include "falcon/platform/memory.hpp"
+#include "falcon/util/text_util.hpp"
+#include "falcon/world/recipes.hpp"
+#include "falcon/world/water_fog.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -23,7 +23,7 @@
 
 #include <GLFW/glfw3.h>
 
-namespace apex {
+namespace falcon {
 namespace {
 
 constexpr double kReach = 5.0;
@@ -865,4 +865,4 @@ std::vector<std::string> GameSession::benchmarkReport() const {
     return lines;
 }
 
-}  // namespace apex
+}  // namespace falcon

@@ -1,6 +1,6 @@
-#include "apex/util/base64.hpp"
+#include "falcon/util/base64.hpp"
 
-namespace apex {
+namespace falcon {
 namespace {
 
 constexpr char kAlphabet[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -58,4 +58,4 @@ std::optional<std::vector<unsigned char>> base64Decode(std::string_view text) {
     return out;
 }
 
-}  // namespace apex
+}  // namespace falcon

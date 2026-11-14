@@ -1,7 +1,7 @@
-#include "apex/render/world_renderer.hpp"
+#include "falcon/render/world_renderer.hpp"
 
-#include "apex/world/block_outlines.hpp"
-#include "apex/world/block_position.hpp"
+#include "falcon/world/block_outlines.hpp"
+#include "falcon/world/block_position.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -9,7 +9,7 @@
 #include <cstdio>
 #include <cstdlib>
 
-namespace apex {
+namespace falcon {
 namespace {
 
 constexpr char kWorldVertex[] = R"(#version 330 core
@@ -1097,9 +1097,9 @@ bool WorldRenderer::setBlock(int x, int y, int z, Block block) {
     return true;
 }
 
-}  // namespace apex
+}  // namespace falcon
 
-namespace apex {
+namespace falcon {
 
 TerrainGenerator::Spawn WorldRenderer::findSpawn() const {
     if (overworld_) {
@@ -1111,9 +1111,9 @@ TerrainGenerator::Spawn WorldRenderer::findSpawn() const {
 
 int WorldRenderer::surfaceHeight(int x, int z) const { return overworld_ ? overworld_->surfaceHeightAt(x, z) : generator_.surfaceHeight(x, z); }
 
-}  // namespace apex
+}  // namespace falcon
 
-namespace apex {
+namespace falcon {
 
 void WorldRenderer::lightAt(int x, int y, int z, int& sky, int& block) const {
     sky = 15;
@@ -1163,4 +1163,4 @@ void WorldRenderer::drawHeld(const Matrix4f& mvp, const std::vector<MeshVertex>&
     gl::BindVertexArray(0);
 }
 
-}  // namespace apex
+}  // namespace falcon

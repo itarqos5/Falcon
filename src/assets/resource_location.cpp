@@ -1,6 +1,6 @@
-#include "apex/assets/resource_location.hpp"
+#include "falcon/assets/resource_location.hpp"
 
-namespace apex {
+namespace falcon {
 
 ResourceLocation ResourceLocation::parse(std::string_view text) {
     const auto colon = text.find(':');
@@ -18,4 +18,4 @@ ResourceLocation ResourceLocation::decorated(std::string_view prefix,
     return ResourceLocation(ns, std::move(p));
 }
 
-}  // namespace apex
+}  // namespace falcon

@@ -1,12 +1,12 @@
-#include "apex/render/hand_renderer.hpp"
+#include "falcon/render/hand_renderer.hpp"
 
-#include "apex/render/world_renderer.hpp"
+#include "falcon/render/world_renderer.hpp"
 
 #include <algorithm>
 #include <array>
 #include <cmath>
 
-namespace apex {
+namespace falcon {
 namespace {
 
 constexpr double kPi = 3.14159265358979323846;
@@ -470,4 +470,4 @@ void HandRenderer::render(WorldRenderer& world, const HandFrame& frame) {
     world.drawHeld(mvp, vertices);
 }
 
-}  // namespace apex
+}  // namespace falcon

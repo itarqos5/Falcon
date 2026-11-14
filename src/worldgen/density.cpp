@@ -11,14 +11,14 @@
 //      x-lerp, then y by repeated addition of a step), and the nodes above them combine columns elementwise. A column
 //      is 384 floats, so all the temporaries stay in the L1 cache.
 
-#include "apex/worldgen/java_math.hpp"
+#include "falcon/worldgen/java_math.hpp"
 #include "density_internal.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <memory>
 
-namespace apex::worldgen {
+namespace falcon::worldgen {
 
 using namespace detail;
 
@@ -570,4 +570,4 @@ void DensityFunction::fillVolume(const DensityVolume& v, float* out) const {
     runVolume(g, g.plans[static_cast<std::size_t>(plan_)], threadEvaluator(*graph_), v, out);
 }
 
-}  // namespace apex::worldgen
+}  // namespace falcon::worldgen

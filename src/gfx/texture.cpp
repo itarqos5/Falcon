@@ -1,10 +1,10 @@
-#include "apex/gfx/texture.hpp"
+#include "falcon/gfx/texture.hpp"
 
 #include <stdexcept>
 #include <utility>
 #include <vector>
 
-namespace apex {
+namespace falcon {
 namespace {
 
 void setSampling(gl::GLenum target, FilterMode filter, bool withR) {
@@ -150,4 +150,4 @@ void CubeMapTexture::bind(unsigned unit) const {
     gl::BindTexture(gl::TEXTURE_CUBE_MAP, id_);
 }
 
-}  // namespace apex
+}  // namespace falcon

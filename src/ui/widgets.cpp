@@ -1,11 +1,11 @@
-#include "apex/ui/widgets.hpp"
+#include "falcon/ui/widgets.hpp"
 
-#include "apex/util/text_util.hpp"
+#include "falcon/util/text_util.hpp"
 
 #include <algorithm>
 #include <cmath>
 
-namespace apex {
+namespace falcon {
 namespace {
 
 constexpr std::uint32_t kActiveText = 0x00FFFFFFu;
@@ -319,4 +319,4 @@ void SliderWidget::renderContents(GuiGraphics& graphics) {
     drawCentredLabel(graphics, message_, x, y, width, height, active, alpha);
 }
 
-}  // namespace apex
+}  // namespace falcon

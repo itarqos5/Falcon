@@ -1,4 +1,4 @@
-#include "apex/audio/audio_engine.hpp"
+#include "falcon/audio/audio_engine.hpp"
 
 // The MA_* feature switches come from CMake, shared with miniaudio_impl.cpp.
 #include <miniaudio.h>
@@ -8,7 +8,7 @@
 #include <cstring>
 #include <utility>
 
-namespace apex {
+namespace falcon {
 namespace {
 
 constexpr std::size_t kMaxVoices = 64;
@@ -420,4 +420,4 @@ void AudioEngine::render(float* out, int frames) {
     framesRendered_ += static_cast<std::uint64_t>(frames);
 }
 
-}  // namespace apex
+}  // namespace falcon

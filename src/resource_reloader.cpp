@@ -1,6 +1,6 @@
-#include "apex/resource_reloader.hpp"
+#include "falcon/resource_reloader.hpp"
 
-#include "apex/game/edition_badge.hpp"
+#include "falcon/game/edition_badge.hpp"
 
 #include <algorithm>
 #include <array>
@@ -11,7 +11,7 @@
 #include <iterator>
 #include <unordered_set>
 
-namespace apex {
+namespace falcon {
 namespace {
 
 using Clock = std::chrono::steady_clock;
@@ -377,4 +377,4 @@ void ResourceReloader::commit(Job& job) {
     if (job.hasFaces && job.cubeAllocated) targets_.panorama.replaceCubeMap(job.cube);
 }
 
-}  // namespace apex
+}  // namespace falcon

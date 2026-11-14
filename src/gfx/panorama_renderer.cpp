@@ -1,12 +1,12 @@
-#include "apex/gfx/panorama_renderer.hpp"
+#include "falcon/gfx/panorama_renderer.hpp"
 
-#include "apex/util/math.hpp"
+#include "falcon/util/math.hpp"
 
 #include <array>
 #include <stdexcept>
 #include <string>
 
-namespace apex {
+namespace falcon {
 namespace {
 
 const char* const kVertexSource = R"(#version 330 core
@@ -221,4 +221,4 @@ void PanoramaRenderer::drawCube(float pitchDegrees, float yawDegrees, int frameb
     gl::BindVertexArray(0);
 }
 
-}  // namespace apex
+}  // namespace falcon

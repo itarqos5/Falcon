@@ -1,4 +1,4 @@
-#include "apex/gfx/mipmaps.hpp"
+#include "falcon/gfx/mipmaps.hpp"
 
 #include <algorithm>
 #include <array>
@@ -7,7 +7,7 @@
 #include <deque>
 #include <limits>
 
-namespace apex {
+namespace falcon {
 
 namespace {
 
@@ -253,4 +253,4 @@ std::vector<Image> generateMipLevels(Image base, int maxLevel, MipmapStrategy st
     return levels;
 }
 
-}  // namespace apex
+}  // namespace falcon

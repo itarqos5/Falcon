@@ -1,13 +1,13 @@
-#include "apex/assets/zip_archive.hpp"
+#include "falcon/assets/zip_archive.hpp"
 
-#include "apex/platform/mapped_file.hpp"
+#include "falcon/platform/mapped_file.hpp"
 
 #include <stb_image.h>  // declarations only; also provides the raw-deflate decoder we reuse
 
 #include <algorithm>
 #include <cstring>
 
-namespace apex {
+namespace falcon {
 namespace {
 
 std::uint16_t u16(const unsigned char* d, std::size_t at) {
@@ -121,4 +121,4 @@ std::optional<std::string> ZipArchive::readText(const std::string& name) const {
     return std::string(bytes->begin(), bytes->end());
 }
 
-}  // namespace apex
+}  // namespace falcon

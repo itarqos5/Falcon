@@ -1,10 +1,10 @@
-#include "apex/assets/asset_locator.hpp"
+#include "falcon/assets/asset_locator.hpp"
 
 #include <algorithm>
 #include <cstdlib>
 #include <system_error>
 
-namespace apex {
+namespace falcon {
 namespace fs = std::filesystem;
 
 namespace {
@@ -60,10 +60,6 @@ AssetSearchResult locateAssets(const std::optional<fs::path>& explicitDir) {
         tryAuthoritative(env, "FALCON_ASSETS_DIR");
         return result;
     }
-    if (const char* env = std::getenv("APEX_ASSETS_DIR"); env != nullptr && *env != '\0') {  // its name before the rename
-        tryAuthoritative(env, "APEX_ASSETS_DIR");
-        return result;
-    }
 
     // horizon-launcher keeps an unpacked copy of the 26.3 assets per launcher build.
     if (const char* appdata = std::getenv("APPDATA"); appdata != nullptr) {
@@ -93,4 +89,4 @@ AssetSearchResult locateAssets(const std::optional<fs::path>& explicitDir) {
     return result;
 }
 
-}  // namespace apex
+}  // namespace falcon

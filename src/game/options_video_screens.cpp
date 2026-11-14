@@ -1,14 +1,14 @@
-#include "apex/game/options_video_screens.hpp"
+#include "falcon/game/options_video_screens.hpp"
 
-#include "apex/game/key_binds_screen.hpp"
-#include "apex/util/text_util.hpp"
+#include "falcon/game/key_binds_screen.hpp"
+#include "falcon/util/text_util.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <type_traits>
 
-namespace apex {
+namespace falcon {
 namespace {
 
 std::string fixed(double v, int decimals) {
@@ -387,4 +387,4 @@ void MouseSettingsScreen::addOptions() {
             optionToggle("options.allowCursorChanges", &GameOptions::allowCursorChanges, "options.allowCursorChanges.tooltip"));
 }
 
-}  // namespace apex
+}  // namespace falcon

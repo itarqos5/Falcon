@@ -1,12 +1,12 @@
-#include "apex/worldgen/aquifer.hpp"
+#include "falcon/worldgen/aquifer.hpp"
 
-#include "apex/worldgen/java_math.hpp"
+#include "falcon/worldgen/java_math.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <limits>
 
-namespace apex::worldgen {
+namespace falcon::worldgen {
 
 // ===============================================================================================================
 // Shared, lock-free column cache
@@ -365,4 +365,4 @@ Aquifer::Substance Aquifer::computeSubstance(int x, int y, int z, double density
     return toSubstance(state);
 }
 
-}  // namespace apex::worldgen
+}  // namespace falcon::worldgen

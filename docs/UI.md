@@ -1,17 +1,17 @@
 # The UI library
 
-Falcon has a small Minecraft-style UI library (`apex_ui`, headers in `include/apex/ui/`,
+Falcon has a small Minecraft-style UI library (`falcon_ui`, headers in `include/falcon/ui/`,
 sources in `src/ui/`). It gives you the game's buttons, sliders, text boxes, lists, tooltips and
 screens, drawn with the game's own sprites and font, and it is the only thing the game's screens use
 to build their interface.
 
 ```
-apex_base   assets, text/fonts, OpenGL, the window        (src/{util,assets,text,gfx,platform})
-apex_ui     widgets, screens, layout, tooltips            (src/ui)         depends on apex_base only
-apex_core   the game: sound, packs, worlds, every screen  (src/{game,audio,packs,world})
+falcon_base   assets, text/fonts, OpenGL, the window        (src/{util,assets,text,gfx,platform})
+falcon_ui     widgets, screens, layout, tooltips            (src/ui)         depends on falcon_base only
+falcon_core   the game: sound, packs, worlds, every screen  (src/{game,audio,packs,world})
 ```
 
-The build enforces the layering: `apex_ui` cannot include anything from the game. It learns what it
+The build enforces the layering: `falcon_ui` cannot include anything from the game. It learns what it
 needs through one interface, `UiContext` (translations, the font, the backdrop behind menus), which
 the game implements once (`GameUiContext`).
 
@@ -55,7 +55,7 @@ Every widget has `tooltip` (a string shown in the game's tooltip box on hover), 
 
 ## Layout
 
-`apex/ui/layout.hpp` and `apex/ui/metrics.hpp`. Positions truncate like the game's layout code.
+`falcon/ui/layout.hpp` and `falcon/ui/metrics.hpp`. Positions truncate like the game's layout code.
 
 ```cpp
 layout::centeredX(width_, 200);                         // x that centres a 200 wide widget
@@ -116,4 +116,4 @@ settings (`services_.options`) and adds `optionToggle(caption, &GameOptions::fie
 Implement `UiContext` (`text`, `font`, `drawBackdrop`; optionally `drawBackdropFrom`, whose darkening starts
 lower down, for a screen with its own header strip), implement `ScreenNavigator` (push/pop,
 `ui()`), and call `screen->resize(w, h)` / `render(...)` each frame. The game does this in
-`src/client.cpp` (`ClientNavigator`) and `include/apex/game/game_ui.hpp` (`GameUiContext`).
+`src/client.cpp` (`ClientNavigator`) and `include/falcon/game/game_ui.hpp` (`GameUiContext`).

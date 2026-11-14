@@ -1,4 +1,4 @@
-#include "apex/platform/mapped_file.hpp"
+#include "falcon/platform/mapped_file.hpp"
 
 #include <fstream>
 #include <iterator>
@@ -8,7 +8,7 @@
 #include <windows.h>
 #endif
 
-namespace apex {
+namespace falcon {
 
 std::shared_ptr<const MappedFile> MappedFile::open(const std::filesystem::path& file) {
     std::shared_ptr<MappedFile> result(new MappedFile());
@@ -51,4 +51,4 @@ MappedFile::~MappedFile() {
 #endif
 }
 
-}  // namespace apex
+}  // namespace falcon

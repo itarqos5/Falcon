@@ -57,7 +57,7 @@ an *unpacked* `assets` folder (the one that contains `minecraft/textures`, `mine
 On startup it looks for assets in this order:
 
 1. `--assets <dir>`
-2. the `FALCON_ASSETS_DIR` environment variable (the old name `APEX_ASSETS_DIR` still works)
+2. the `FALCON_ASSETS_DIR` environment variable
 3. the newest `26.3\assets` tree under `%APPDATA%\horizon-launcher\versions\*\.local\horizon-client\`
 
 A plain `.minecraft` folder is not enough: the title screen needs the button sprites, logo, font
@@ -147,7 +147,7 @@ with stb_vorbis and played through a small software mixer on a miniaudio output 
 
 `Falcon.exe` is a GUI-subsystem program, so double-clicking it opens only the game window. If you
 start it from a terminal the log output still appears there; startup failures (e.g. assets not found)
-show in a message box. Configure with `-DAPEX_CONSOLE=ON` to keep a console window instead.
+show in a message box. Configure with `-DFALCON_CONSOLE=ON` to keep a console window instead.
 
 The icon is the Falcon logo (`resources/falcon_icon.png`, a transparent 512 px master). At build time
 `tools/make_ico.cpp` scales it to 16, 24, 32, 48, 64, 128 and 256 px and packs them into an `.ico`, which
@@ -159,34 +159,29 @@ same resource at run time, so it is sharp at any display scaling. To change the 
 On Windows the window's title bar and caption buttons are dark (the DWM "immersive dark mode" attribute,
 Windows 10 version 1809 and later), to match the menus, whatever the system theme is.
 
-The program was called Apex Client before the rename. Its settings file used to be `apex_options.txt`:
-Falcon reads that file until `falcon_options.txt` exists, and never changes or deletes it. The internal
-names (the `apex` C++ namespace, the `apex_*` libraries, `APEX_*` CMake options) are unchanged; the project
-folder itself is now called Falcon.
-
 ## Layout
 
 The code is three libraries, each depending only on the one before it (the build enforces this):
 
 ```
 Falcon/
-â”œâ”€â”€ CMakeLists.txt, CMakePresets.json
-â”œâ”€â”€ docs/UI.md          how to use the UI library: add a button, a screen, a settings screen
-â”œâ”€â”€ include/apex/ + src/
-â”‚   â”œâ”€â”€ util/ assets/ text/ gfx/ platform/
-â”‚   â”‚                   apex_base  - asset reading + layered resource packs, fonts, OpenGL, the window,
-â”‚   â”‚                                NBT read/write, styled (coloured) text
-â”‚   â”œâ”€â”€ ui/             apex_ui    - the Minecraft-style UI library: widgets, Screen, ListScreen,
-â”‚   â”‚                                ConfirmScreen, ScrollList, tooltips, layout helpers, UiContext
-â”‚   â””â”€â”€ game/ audio/ packs/ world/ net/ render/ resource_reloader  client.cpp
-â”‚                       apex_core  - the game: every concrete screen, sound, packs, worlds,
-â”‚                                    servers.dat, server status pings, the loop
-â””â”€â”€ tests/              unit tests for everything that needs no GL context (CTest)
+├── CMakeLists.txt, CMakePresets.json
+├── docs/UI.md          how to use the UI library: add a button, a screen, a settings screen
+├── include/falcon/ + src/
+│   ├── util/ assets/ text/ gfx/ platform/
+│   │                   falcon_base  - asset reading + layered resource packs, fonts, OpenGL, the window,
+│   │                                NBT read/write, styled (coloured) text
+│   ├── ui/             falcon_ui    - the Minecraft-style UI library: widgets, Screen, ListScreen,
+│   │                                ConfirmScreen, ScrollList, tooltips, layout helpers, UiContext
+│   └── game/ audio/ packs/ world/ net/ render/ resource_reloader  client.cpp
+│                       falcon_core  - the game: every concrete screen, sound, packs, worlds,
+│                                    servers.dat, server status pings, the loop
+└── tests/              unit tests for everything that needs no GL context (CTest)
 ```
 
 ## UI library
 
-Every screen is built from `apex_ui` (see `docs/UI.md`): a screen's `init()` adds its widgets with
+Every screen is built from `falcon_ui` (see `docs/UI.md`): a screen's `init()` adds its widgets with
 one-line helpers (`addButton`, `addIconButton`, `addLockedButton`, `addLabel`, `addEditBox`,
 `addSlider`), positioned with `layout::` and `metrics::`; settings screens derive from `ListScreen`
 and just list their rows. The library knows nothing about the game: it gets translations, the font
@@ -207,13 +202,13 @@ and the menu backdrop through the `UiContext` interface the game implements.
   (the game's default "Menu Background Blur" of 5) and a 25% black tint, a "FOV: Normal" slider
   (30-110, drag or click), Online..., the ten settings buttons in the game's 2x5 grid, and Done.
   Done and Escape return to the main menu. The settings buttons are inert for now.
-- **Music & Sounds** (Options â†’ "Music & Sounds..."): a volume slider per sound category (Master
+- **Music & Sounds** (Options → "Music & Sounds..."): a volume slider per sound category (Master
   full width, the rest two per row, "Master Volume: OFF" only at exactly 0%), Device, Closed
   Captions, Directional Audio, Music Frequency and Music Toast. The rows scroll at the default
   window size (mouse wheel 12px per notch, draggable scrollbar). Sliders apply live, click on
   release, and on the title screen play each category's preview sound; cycle buttons step on click
   and go backwards on shift+click.
-- **Resource Packs** (Options â†’ "Resource Packs..."): Available and Selected lists with the game's
+- **Resource Packs** (Options → "Resource Packs..."): Available and Selected lists with the game's
   three built-in packs (Default, High Contrast, Programmer Art) plus anything in
   `.minecraft/resourcepacks` (folders and zips, with icon, title and two-line description). Hover a
   row for the select / unselect / move arrows; the search box filters live; Done and Escape keep the
@@ -432,7 +427,7 @@ running next to it keeps the machine.
   the loading area could never finish and the screen stayed up for good.
 - **Chat** opens with the Chat key (empty) or the Command key (a `/`), like the game: a full-width input box with a blinking caret,
   the log at the bottom-left that fades each message out over 200 ticks, Up/Down for the sent-message history, PageUp/PageDown and
-  the wheel to scroll, and Â§ colour codes. There is no server, so a message shows as `<Player> ...` and a `/command` gets the game's
+  the wheel to scroll, and § colour codes. There is no server, so a message shows as `<Player> ...` and a `/command` gets the game's
   "Unknown or incomplete command" reply; nothing is actually executed.
 - **Grass, leaves and water follow the biome** (the game's colour maps, overrides, the swamp and dark-forest modifiers, blended over a
   5 x 5 area like the default Biome Blend).
@@ -527,7 +522,7 @@ then the offhand are tried first when picking something up).
   time they are needed, a creative tab's in the background, and kept in one 1536 x 768 atlas. The "gui" transform, and the first-person,
   third-person, ground, fixed, head and shelf ones, are kept merged child-over-parent in `BlockModels::itemModelInfo()` for the hand
   stage to come. No enchantment glint yet.
-- **Tests** (`apex_item_tests`, part of `check`): the registry against facts from the game's files, stacking, the click rules as
+- **Tests** (`falcon_item_tests`, part of `check`): the registry against facts from the game's files, stacking, the click rules as
   tables of click sequences, recipe matching, creative tab contents against `creative-inventory.json`, item model resolution and a
   picture of every item.
 
@@ -566,7 +561,7 @@ All of these follow the 26.3 layouts and strings (read from the game's classes),
   is meant to follow). Only OpenGL draws the game so far: Vulkan is remembered but OpenGL runs, and the start-up log and the
   button's tooltip say so. What a real second backend needs, measured on this code, and the order to build it in is in
   [docs/RENDERING.md](docs/RENDERING.md).
-- **Key Binds** (Controls â†’ "Key Binds..."): all 62 actions of the 26.3 client in the game's eight
+- **Key Binds** (Controls → "Key Binds..."): all 62 actions of the 26.3 client in the game's eight
   categories (Movement, Miscellaneous, Multiplayer, Gameplay, Inventory, Creative Mode, Spectator,
   Debug), sorted by their names in the current language like the game does, each with its key button
   and a Reset button. Click a key button (it reads `> KEY <`, underlined), then press a key or click

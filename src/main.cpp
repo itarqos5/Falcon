@@ -1,5 +1,5 @@
-#include "apex/client.hpp"
-#include "apex/platform/dialog.hpp"
+#include "falcon/client.hpp"
+#include "falcon/platform/dialog.hpp"
 
 #include <cstdio>
 #include <cstring>
@@ -21,22 +21,22 @@ bool isAutomatedRun(int argc, char** argv) {
 int main(int argc, char** argv) {
     // The exe is built for the GUI subsystem (no console window); this reconnects the log output
     // when it was launched from a terminal.
-    apex::attachParentConsole();
+    falcon::attachParentConsole();
 
     try {
-        apex::ClientOptions options = apex::parseOptions(argc, argv);
+        falcon::ClientOptions options = falcon::parseOptions(argc, argv);
         if (options.showHelp) {
-            std::fputs(apex::usageText().c_str(), stdout);
+            std::fputs(falcon::usageText().c_str(), stdout);
             return 0;
         }
-        apex::Client client(std::move(options));
+        falcon::Client client(std::move(options));
         return client.run();
     } catch (const std::exception& e) {
         if (isAutomatedRun(argc, argv)) {
             std::fprintf(stderr, "[falcon] fatal: %s\n", e.what());
             std::fflush(stderr);
         } else {
-            apex::showErrorDialog("Falcon", e.what());
+            falcon::showErrorDialog("Falcon", e.what());
         }
         return 1;
     }

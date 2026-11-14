@@ -1,11 +1,11 @@
-#include "apex/game/edition_badge.hpp"
+#include "falcon/game/edition_badge.hpp"
 
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <vector>
 
-namespace apex {
+namespace falcon {
 namespace {
 
 using Rgba = std::array<std::uint8_t, 4>;
@@ -277,4 +277,4 @@ bool installCppEditionBadge(const ResourceManager& resources, TextureManager& te
     return true;
 }
 
-}  // namespace apex
+}  // namespace falcon

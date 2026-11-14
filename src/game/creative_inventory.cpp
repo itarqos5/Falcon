@@ -1,8 +1,8 @@
-#include "apex/game/creative_inventory.hpp"
+#include "falcon/game/creative_inventory.hpp"
 
 #include <algorithm>
 
-namespace apex {
+namespace falcon {
 
 // ---------------------------------------------------------------------------------------------------------------
 // The picker menu
@@ -230,4 +230,4 @@ void CreativeInventory::slotClicked(const SlotView* view, int slotId, int button
     menu.clicked(slot == nullptr ? slotId : slot->index, button, type);
 }
 
-}  // namespace apex
+}  // namespace falcon

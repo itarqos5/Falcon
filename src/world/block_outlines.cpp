@@ -1,4 +1,4 @@
-#include "apex/world/block_outlines.hpp"
+#include "falcon/world/block_outlines.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -9,7 +9,7 @@
 #include <stdexcept>
 #include <unordered_map>
 
-namespace apex {
+namespace falcon {
 
 namespace fs = std::filesystem;
 using json = nlohmann::json;
@@ -328,4 +328,4 @@ const BlockOutlines& blockOutlines() {
     return *g_outlines;
 }
 
-}  // namespace apex
+}  // namespace falcon

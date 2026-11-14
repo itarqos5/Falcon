@@ -1,4 +1,4 @@
-#include "apex/audio/ogg.hpp"
+#include "falcon/audio/ogg.hpp"
 
 #include <algorithm>
 
@@ -6,7 +6,7 @@
 #define STB_VORBIS_HEADER_ONLY
 #include <stb_vorbis.c>
 
-namespace apex {
+namespace falcon {
 
 struct OggStream::Impl {
     std::vector<unsigned char> data;  // must outlive `vorbis`
@@ -62,4 +62,4 @@ std::optional<PcmSound> decodeOgg(const std::vector<unsigned char>& bytes) {
     return sound;
 }
 
-}  // namespace apex
+}  // namespace falcon

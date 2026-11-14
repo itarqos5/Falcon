@@ -1,4 +1,4 @@
-#include "apex/world/block_registry.hpp"
+#include "falcon/world/block_registry.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -10,7 +10,7 @@
 #include <stdexcept>
 #include <type_traits>
 
-namespace apex {
+namespace falcon {
 namespace fs = std::filesystem;
 using nlohmann::json;
 using nlohmann::ordered_json;
@@ -681,4 +681,4 @@ const CommonBlocks& commonBlocks() {
     return g_common;
 }
 
-}  // namespace apex
+}  // namespace falcon

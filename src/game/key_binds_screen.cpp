@@ -1,6 +1,6 @@
-#include "apex/game/key_binds_screen.hpp"
+#include "falcon/game/key_binds_screen.hpp"
 
-#include "apex/util/text_util.hpp"
+#include "falcon/util/text_util.hpp"
 
 #include <algorithm>
 #include <functional>
@@ -9,7 +9,7 @@
 #include <cmath>
 #include <numbers>
 
-namespace apex {
+namespace falcon {
 namespace {
 
 constexpr std::uint32_t kYellow = 0xFFFF55u;  // ChatFormatting.YELLOW: the brackets and arrows
@@ -227,4 +227,4 @@ void KeyBindsScreen::render(GuiGraphics& graphics, int mouseX, int mouseY, const
     Screen::render(graphics, mouseX, mouseY, time);
 }
 
-}  // namespace apex
+}  // namespace falcon

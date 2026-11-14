@@ -1,4 +1,4 @@
-#include "apex/platform/file_lock.hpp"
+#include "falcon/platform/file_lock.hpp"
 
 #include <system_error>
 
@@ -7,7 +7,7 @@
 #include <windows.h>
 #endif
 
-namespace apex {
+namespace falcon {
 
 LockProbe probeSessionLock(const std::filesystem::path& lockFile) {
 #ifdef _WIN32
@@ -30,4 +30,4 @@ LockProbe probeSessionLock(const std::filesystem::path& lockFile) {
 #endif
 }
 
-}  // namespace apex
+}  // namespace falcon

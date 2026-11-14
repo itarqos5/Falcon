@@ -1,4 +1,4 @@
-#include "apex/world/water_fog.hpp"
+#include "falcon/world/water_fog.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -6,7 +6,7 @@
 #include <cmath>
 #include <fstream>
 
-namespace apex {
+namespace falcon {
 
 float waterVision(int ticksUnderwater, bool eyesInWater) {
     if (!eyesInWater) return 0.0f;
@@ -91,4 +91,4 @@ const WaterFog& WaterFogTable::forBiome(std::string_view name) const {
     return it == fogs_.end() ? default_ : it->second;
 }
 
-}  // namespace apex
+}  // namespace falcon

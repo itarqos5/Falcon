@@ -1,12 +1,12 @@
-#include "apex/game/vanilla_compare.hpp"
+#include "falcon/game/vanilla_compare.hpp"
 
-#include "apex/assets/nbt.hpp"
-#include "apex/assets/resource_manager.hpp"
-#include "apex/world/block_registry.hpp"
-#include "apex/world/chunk.hpp"
-#include "apex/world/decoration.hpp"
-#include "apex/world/level_info.hpp"
-#include "apex/worldgen/overworld_generator.hpp"
+#include "falcon/assets/nbt.hpp"
+#include "falcon/assets/resource_manager.hpp"
+#include "falcon/world/block_registry.hpp"
+#include "falcon/world/chunk.hpp"
+#include "falcon/world/decoration.hpp"
+#include "falcon/world/level_info.hpp"
+#include "falcon/worldgen/overworld_generator.hpp"
 
 #include <stb_image.h>  // (the declaration of stbi_zlib_decode_malloc)
 
@@ -22,7 +22,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace apex {
+namespace falcon {
 
 namespace fs = std::filesystem;
 
@@ -413,4 +413,4 @@ int runVanillaCompare(const ResourceManager& resources, const fs::path& gameData
     return 0;
 }
 
-}  // namespace apex
+}  // namespace falcon

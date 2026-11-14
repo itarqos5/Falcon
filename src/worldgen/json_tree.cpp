@@ -1,4 +1,4 @@
-#include "apex/worldgen/json_tree.hpp"
+#include "falcon/worldgen/json_tree.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -6,7 +6,7 @@
 #include <fstream>
 #include <iterator>
 
-namespace apex::worldgen {
+namespace falcon::worldgen {
 
 const JsonValue* JsonValue::find(std::string_view key) const {
     if (kind != Kind::Object) return nullptr;
@@ -157,4 +157,4 @@ bool parseJsonFile(const std::filesystem::path& path, JsonValue& out, std::strin
     return true;
 }
 
-}  // namespace apex::worldgen
+}  // namespace falcon::worldgen

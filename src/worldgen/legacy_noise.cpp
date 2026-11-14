@@ -1,11 +1,11 @@
-#include "apex/worldgen/legacy_noise.hpp"
+#include "falcon/worldgen/legacy_noise.hpp"
 
-#include "apex/worldgen/java_math.hpp"
+#include "falcon/worldgen/java_math.hpp"
 
 #include <algorithm>
 #include <cmath>
 
-namespace apex::worldgen {
+namespace falcon::worldgen {
 
 namespace {
 
@@ -143,10 +143,10 @@ float BiomeTemperatureNoise::lapse(float temperature, int x, int y, int z, int s
     return temperature;
 }
 
-}  // namespace apex::worldgen
+}  // namespace falcon::worldgen
 
-namespace apex::worldgen {
+namespace falcon::worldgen {
 
 double BiomeTemperatureNoise::biomeInfo(double x, double z) const { return info_.getValue(x, z, false); }
 
-}  // namespace apex::worldgen
+}  // namespace falcon::worldgen

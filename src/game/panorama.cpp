@@ -1,8 +1,8 @@
-#include "apex/game/panorama.hpp"
+#include "falcon/game/panorama.hpp"
 
-#include "apex/util/math.hpp"
+#include "falcon/util/math.hpp"
 
-namespace apex {
+namespace falcon {
 
 void Panorama::render(GuiGraphics& graphics, float deltaTicks, int blurRadius) {
     if (shouldSpin_) spin_ = wrapDegrees(spin_ + deltaTicks * speed_ * 0.1f);
@@ -19,4 +19,4 @@ void Panorama::render(GuiGraphics& graphics, float deltaTicks, int blurRadius) {
                   128);
 }
 
-}  // namespace apex
+}  // namespace falcon

@@ -1,6 +1,6 @@
-#include "apex/game/item_render.hpp"
+#include "falcon/game/item_render.hpp"
 
-namespace apex {
+namespace falcon {
 
 void drawItem(GuiGraphics& g, ItemIcons& icons, const ItemStack& stack, int x, int y) {
     if (stack.isEmpty()) return;
@@ -29,4 +29,4 @@ void drawItemStack(GuiGraphics& g, ItemIcons& icons, const ItemStack& stack, int
     drawItemDecorations(g, stack, x, y, countText, countArgb);
 }
 
-}  // namespace apex
+}  // namespace falcon

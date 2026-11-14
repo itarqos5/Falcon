@@ -1,4 +1,4 @@
-#include "apex/world/chunk_cache.hpp"
+#include "falcon/world/chunk_cache.hpp"
 
 #include <stb_image.h>  // (only the declarations: stbi_zlib_decode_malloc)
 
@@ -9,7 +9,7 @@
 // stb_image_write.h compiles its zlib compressor into image.cpp with external linkage; it is declared here to be used.
 extern "C" unsigned char* stbi_zlib_compress(unsigned char* data, int data_len, int* out_len, int quality);
 
-namespace apex {
+namespace falcon {
 
 namespace {
 
@@ -212,4 +212,4 @@ void ChunkCache::setBudget(std::size_t bytes) {
     budget_ = bytes;
 }
 
-}  // namespace apex
+}  // namespace falcon

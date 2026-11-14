@@ -1,15 +1,15 @@
-#include "apex/game/pack_selection_screen.hpp"
+#include "falcon/game/pack_selection_screen.hpp"
 
-#include "apex/platform/dialog.hpp"
-#include "apex/text/text_layout.hpp"
-#include "apex/game/menu_background.hpp"
+#include "falcon/platform/dialog.hpp"
+#include "falcon/text/text_layout.hpp"
+#include "falcon/game/menu_background.hpp"
 
 #include <algorithm>
 #include <cctype>
 #include <filesystem>
 #include <system_error>
 
-namespace apex {
+namespace falcon {
 namespace {
 
 constexpr int kListWidth = 200;
@@ -296,4 +296,4 @@ void PackSelectionScreen::onClose() {
     navigator_.pop();
 }
 
-}  // namespace apex
+}  // namespace falcon

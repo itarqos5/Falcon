@@ -7,13 +7,13 @@
 // Everything is embedded or lives next to this file; the tests that need the game's JSON data find it through
 // locateAssets() and print a skip message when it is not there.
 
-#include "apex/assets/asset_locator.hpp"
-#include "apex/platform/memory.hpp"
-#include "apex/world/block_registry.hpp"
-#include "apex/worldgen/aquifer.hpp"
-#include "apex/worldgen/biome.hpp"
-#include "apex/worldgen/material.hpp"
-#include "apex/worldgen/overworld_generator.hpp"
+#include "falcon/assets/asset_locator.hpp"
+#include "falcon/platform/memory.hpp"
+#include "falcon/world/block_registry.hpp"
+#include "falcon/worldgen/aquifer.hpp"
+#include "falcon/worldgen/biome.hpp"
+#include "falcon/worldgen/material.hpp"
+#include "falcon/worldgen/overworld_generator.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -32,11 +32,11 @@
 #include <utility>
 #include <vector>
 
-#ifndef APEX_TEST_DATA_DIR
-#define APEX_TEST_DATA_DIR "tests/data"
+#ifndef FALCON_TEST_DATA_DIR
+#define FALCON_TEST_DATA_DIR "tests/data"
 #endif
 
-using namespace apex::worldgen;
+using namespace falcon::worldgen;
 
 namespace {
 
@@ -375,7 +375,7 @@ bool loadTruth(const std::filesystem::path& file, Truth& out) {
     return !r.bad() && out.chunks.size() == count;
 }
 
-std::filesystem::path testDataPath(const char* name) { return std::filesystem::path(APEX_TEST_DATA_DIR) / name; }
+std::filesystem::path testDataPath(const char* name) { return std::filesystem::path(FALCON_TEST_DATA_DIR) / name; }
 
 struct CompareStats {
     long blocks = 0;
@@ -403,7 +403,7 @@ std::vector<TieCell> columnTieCells(const OverworldGenerator& gen, int x, int z)
     BiomeSource::Context ctx(src);
     std::set<std::array<int, 3>> seen;
     std::vector<TieCell> out;
-    for (int y = apex::kMinY; y <= apex::kMaxY; ++y) {
+    for (int y = falcon::kMinY; y <= falcon::kMaxY; ++y) {
         const BiomeSource::QuartPos q = src.zoom(x, y, z);
         const int qy = std::clamp(q.y, -16, 79);
         if (!seen.insert({q.x, qy, q.z}).second) continue;
@@ -471,7 +471,7 @@ std::vector<BiomeId> tiedAlternatives(const BiomeSource& src, BiomeSource::Conte
 // Why does a column differ from the dump? Only the game's R-tree can answer a tie between two biomes either way. This builds
 // the surface of the chunk again with the zoom's quart cells for the differing blocks answering one of the other tied biomes,
 // cell by cell: the column must then equal the dump. A difference that no tie answer repairs is a real bug.
-bool explainColumnWithTieFlips(const OverworldGenerator& gen, const TruthChunk& tc, const std::vector<TruthColumn>& cols, const std::vector<apex::Block>& pal, int column,
+bool explainColumnWithTieFlips(const OverworldGenerator& gen, const TruthChunk& tc, const std::vector<TruthColumn>& cols, const std::vector<falcon::Block>& pal, int column,
                                const DenseChunk& fill, const std::vector<float>& surfaceLevel, BiomeSource::Context& ctx, std::map<std::array<int, 3>, BiomeId>& cache) {
     const BiomeSource& src = gen.biomeSource();
     const int x = tc.cx * 16 + (column & 15), z = tc.cz * 16 + (column >> 4);
@@ -491,11 +491,11 @@ bool explainColumnWithTieFlips(const OverworldGenerator& gen, const TruthChunk& 
     };
     const auto differingY = [&](const DenseChunk& d) {
         std::vector<int> ys;
-        const apex::Block* got = &d.blocks[static_cast<std::size_t>(apex::kWorldHeight) * static_cast<std::size_t>(column)];
+        const falcon::Block* got = &d.blocks[static_cast<std::size_t>(falcon::kWorldHeight) * static_cast<std::size_t>(column)];
         int y = 319;
         for (const auto& [len, p] : col.runs) {
             for (int i = 0; i < len; ++i, --y) {
-                if (got[y - apex::kMinY] != pal[static_cast<std::size_t>(p)]) ys.push_back(y);
+                if (got[y - falcon::kMinY] != pal[static_cast<std::size_t>(p)]) ys.push_back(y);
             }
         }
         return ys;
@@ -530,7 +530,7 @@ bool explainColumnWithTieFlips(const OverworldGenerator& gen, const TruthChunk& 
     return differingY(d).empty();
 }
 
-long explainWithTieFlip(const OverworldGenerator& gen, const TruthChunk& tc, const std::vector<TruthColumn>& cols, const std::vector<apex::Block>& pal, const std::vector<int>& columns) {
+long explainWithTieFlip(const OverworldGenerator& gen, const TruthChunk& tc, const std::vector<TruthColumn>& cols, const std::vector<falcon::Block>& pal, const std::vector<int>& columns) {
     DenseChunk fill;
     gen.generateDense(tc.cx, tc.cz, OverworldGenerator::Stage::Fill, fill);
     std::vector<float> surfaceLevel(256);
@@ -547,16 +547,16 @@ long explainWithTieFlip(const OverworldGenerator& gen, const TruthChunk& tc, con
 
 
 // Compares one stage's dense output with the dump. Prints the first few mismatches of a chunk.
-void compareStage(const OverworldGenerator& gen, const apex::BlockRegistry& registry, const std::vector<apex::Block>& pal, const char* stage, const TruthChunk& tc,
+void compareStage(const OverworldGenerator& gen, const falcon::BlockRegistry& registry, const std::vector<falcon::Block>& pal, const char* stage, const TruthChunk& tc,
                   const std::vector<TruthColumn>& cols, const DenseChunk& dense, CompareStats& st, const std::vector<std::string>* biomeNames) {
     int shown = 0;
     long chunkMismatches = 0;
-    const int minY = apex::kMinY;
+    const int minY = falcon::kMinY;
     std::vector<int> excused;
     for (int z = 0; z < 16; ++z) {
         for (int x = 0; x < 16; ++x) {
             const TruthColumn& col = cols[static_cast<std::size_t>(x + 16 * z)];
-            const apex::Block* got = &dense.blocks[static_cast<std::size_t>(apex::kWorldHeight) * static_cast<std::size_t>(x + 16 * z)];
+            const falcon::Block* got = &dense.blocks[static_cast<std::size_t>(falcon::kWorldHeight) * static_cast<std::size_t>(x + 16 * z)];
             int y = 319;
             long columnMismatches = 0;
             int firstBadY = 0;
@@ -564,8 +564,8 @@ void compareStage(const OverworldGenerator& gen, const apex::BlockRegistry& regi
             for (const auto& [len, p] : col.runs) {
                 for (int i = 0; i < len; ++i, --y) {
                     ++st.blocks;
-                    const apex::Block want = pal[static_cast<std::size_t>(p)];
-                    const apex::Block have = got[y - minY];
+                    const falcon::Block want = pal[static_cast<std::size_t>(p)];
+                    const falcon::Block have = got[y - minY];
                     if (want != have) {
                         if (columnMismatches++ == 0) firstBadY = y;
                         if (lines.size() < 3) {
@@ -633,8 +633,8 @@ void compareStage(const OverworldGenerator& gen, const apex::BlockRegistry& regi
     }
 }
 
-void testChunks(const OverworldGenerator& gen, const apex::BlockRegistry& registry, const Truth& truth) {
-    std::vector<apex::Block> pal;
+void testChunks(const OverworldGenerator& gen, const falcon::BlockRegistry& registry, const Truth& truth) {
+    std::vector<falcon::Block> pal;
     for (const std::string& name : truth.palette) {
         const auto b = registry.parse(name);
         if (!b) {
@@ -716,7 +716,7 @@ const AqVec kAqVecs[] = {
 #include "data/aquifer_df_vectors.inc"
 };
 
-void testPrimitives(const OverworldGenerator& gen, const apex::BlockRegistry& registry) {
+void testPrimitives(const OverworldGenerator& gen, const falcon::BlockRegistry& registry) {
     const NoiseRouter& router = gen.router();
     const RandomState& rs = *router.randomState();
 
@@ -812,15 +812,15 @@ void testChunkObject(const OverworldGenerator& gen) {
         DenseChunk dense;
         gen.generateDense(cx, cz, OverworldGenerator::Stage::Surface, dense);
         ChunkExtras extras;
-        const std::shared_ptr<apex::Chunk> chunk = gen.generate(cx, cz, extras);
-        const std::shared_ptr<apex::Chunk> plain = gen.generate(cx, cz);
+        const std::shared_ptr<falcon::Chunk> chunk = gen.generate(cx, cz, extras);
+        const std::shared_ptr<falcon::Chunk> plain = gen.generate(cx, cz);
         long bad = 0, solid = 0;
         for (int z = 0; z < 16; ++z) {
             for (int x = 0; x < 16; ++x) {
-                for (int y = apex::kMinY; y < apex::kMaxY; ++y) {
-                    const apex::Block want = dense.blocks[static_cast<std::size_t>(y - apex::kMinY) + 384u * static_cast<std::size_t>(x + 16 * z)];
+                for (int y = falcon::kMinY; y < falcon::kMaxY; ++y) {
+                    const falcon::Block want = dense.blocks[static_cast<std::size_t>(y - falcon::kMinY) + 384u * static_cast<std::size_t>(x + 16 * z)];
                     if (chunk->at(x, y, z) != want || plain->at(x, y, z) != want) ++bad;
-                    if (want != apex::Block::Air) ++solid;
+                    if (want != falcon::Block::Air) ++solid;
                 }
             }
         }
@@ -835,9 +835,9 @@ void testChunkObject(const OverworldGenerator& gen) {
                 const int of = extras.heightmaps.oceanFloor[static_cast<std::size_t>(i)];
                 const int mb = extras.heightmaps.motionBlocking[static_cast<std::size_t>(i)];
                 if (!(ws >= mb && mb >= of)) ++hbad;
-                if (ws - 1 >= apex::kMinY && chunk->at(x, ws - 1, z) == apex::Block::Air) ++hbad;
-                if (ws < apex::kMaxY && chunk->at(x, ws, z) != apex::Block::Air) ++hbad;
-                if (gen.blockFacts().blocksMotion(chunk->at(x, of - 1, z)) == false && of > apex::kMinY) ++hbad;
+                if (ws - 1 >= falcon::kMinY && chunk->at(x, ws - 1, z) == falcon::Block::Air) ++hbad;
+                if (ws < falcon::kMaxY && chunk->at(x, ws, z) != falcon::Block::Air) ++hbad;
+                if (gen.blockFacts().blocksMotion(chunk->at(x, of - 1, z)) == false && of > falcon::kMinY) ++hbad;
                 // the biome storage is the quart-resolution noise biome
                 const BiomeId b = extras.biomes.atBlock(x, 64, z);
                 if (b != gen.biomeSource().noiseBiome(cx * 4 + (x >> 2), 64 >> 2, cz * 4 + (z >> 2))) ++hbad;
@@ -847,27 +847,27 @@ void testChunkObject(const OverworldGenerator& gen) {
     }
     // a chunk deep in the ocean has uniform sections that are shared, not copied
     {
-        const std::shared_ptr<apex::Chunk> a = gen.generate(0, 0);
-        const std::shared_ptr<apex::Chunk> b = gen.generate(0, 0);
+        const std::shared_ptr<falcon::Chunk> a = gen.generate(0, 0);
+        const std::shared_ptr<falcon::Chunk> b = gen.generate(0, 0);
         CHECK(a->sections[23] == nullptr && b->sections[23] == nullptr);  // all air at the top
         CHECK(a->sections[0] != nullptr);
         std::size_t shared = 0;
-        for (int i = 0; i < apex::kSectionCount; ++i) {
+        for (int i = 0; i < falcon::kSectionCount; ++i) {
             if (a->sections[static_cast<std::size_t>(i)] && a->sections[static_cast<std::size_t>(i)]->isUniform() &&
                 a->sections[static_cast<std::size_t>(i)] == b->sections[static_cast<std::size_t>(i)]) {
                 ++shared;
             }
         }
-        std::printf("  chunk (0,0): %zu of %d sections are shared uniform sections, %zu bytes\n", shared, apex::kSectionCount, a->memoryBytes());
+        std::printf("  chunk (0,0): %zu of %d sections are shared uniform sections, %zu bytes\n", shared, falcon::kSectionCount, a->memoryBytes());
     }
 }
 
-std::uint64_t chunkChecksum(const apex::Chunk& chunk) {
+std::uint64_t chunkChecksum(const falcon::Chunk& chunk) {
     std::uint64_t h = 0xcbf29ce484222325ull;
-    for (int y = apex::kMinY; y < apex::kMaxY; ++y) {
+    for (int y = falcon::kMinY; y < falcon::kMaxY; ++y) {
         for (int z = 0; z < 16; ++z) {
             for (int x = 0; x < 16; ++x) {
-                h ^= apex::stateId(chunk.at(x, y, z));
+                h ^= falcon::stateId(chunk.at(x, y, z));
                 h *= 0x100000001b3ull;
             }
         }
@@ -895,9 +895,9 @@ void testThreads(const OverworldGenerator& gen) {
 
     // Generating a chunk again (a second instance, other query history) gives the same blocks; another seed does not.
     std::string error;
-    const std::filesystem::path gameData = apex::locateAssets(std::nullopt).location->root.parent_path();
-    const std::filesystem::path cache = std::filesystem::temp_directory_path() / "apex_worldgen_chunk_test";
-    const auto registry = apex::BlockRegistry::loadFromGameData(gameData, cache, error);
+    const std::filesystem::path gameData = falcon::locateAssets(std::nullopt).location->root.parent_path();
+    const std::filesystem::path cache = std::filesystem::temp_directory_path() / "falcon_worldgen_chunk_test";
+    const auto registry = falcon::BlockRegistry::loadFromGameData(gameData, cache, error);
     if (registry) {
         auto again = OverworldGenerator::create(gameData, *registry, 12345, error);
         auto other = OverworldGenerator::create(gameData, *registry, -987654321, error);
@@ -915,13 +915,13 @@ void testThreads(const OverworldGenerator& gen) {
             for (const auto& [cx, cz] : {std::pair{1874999, -1874999}, std::pair{-1875000, 1875000}}) {
                 const auto a = again->generate(cx, cz);
                 const auto b = again->generate(cx, cz);
-                CHECK(chunkChecksum(*a) == chunkChecksum(*b) && a->at(0, apex::kMinY, 0) != apex::Block::Air);
+                CHECK(chunkChecksum(*a) == chunkChecksum(*b) && a->at(0, falcon::kMinY, 0) != falcon::Block::Air);
             }
         }
     }
 }
 
-void testPresetsAndSpawn(const GameData& gd, const apex::BlockRegistry& registry, const OverworldGenerator& gen) {
+void testPresetsAndSpawn(const GameData& gd, const falcon::BlockRegistry& registry, const OverworldGenerator& gen) {
     GeneratorOptions normal, amplified, large, single;
     std::string error;
     CHECK(loadWorldPreset(gd.root, "minecraft:normal", normal, error) && normal.noiseSettings == "minecraft:overworld" && normal.singleBiome.empty());
@@ -948,7 +948,7 @@ void testPresetsAndSpawn(const GameData& gd, const apex::BlockRegistry& registry
             CHECK(tallest > tallestNormal);
             ChunkExtras extras;
             const auto chunk = amp->generate(3, -4, extras);
-            CHECK(chunk && chunk->at(0, apex::kMinY, 0) != apex::Block::Air);
+            CHECK(chunk && chunk->at(0, falcon::kMinY, 0) != falcon::Block::Air);
         }
         auto lg = OverworldGenerator::create(gd.root, registry, 12345, error, large);
         CHECK(lg && lg->generate(2, 2) != nullptr);
@@ -973,7 +973,7 @@ void testPresetsAndSpawn(const GameData& gd, const apex::BlockRegistry& registry
     const auto chunk = gen.generate(static_cast<int>(std::floor(sp.x)) >> 4, static_cast<int>(std::floor(sp.z)) >> 4);
     const int lx = static_cast<int>(std::floor(sp.x)) & 15, lz = static_cast<int>(std::floor(sp.z)) & 15;
     const int sy = static_cast<int>(sp.y);
-    CHECK(chunk->at(lx, sy, lz) == apex::Block::Air && chunk->at(lx, sy - 1, lz) != apex::Block::Air && !gen.blockFacts().isFluid(chunk->at(lx, sy - 1, lz)));
+    CHECK(chunk->at(lx, sy, lz) == falcon::Block::Air && chunk->at(lx, sy - 1, lz) != falcon::Block::Air && !gen.blockFacts().isFluid(chunk->at(lx, sy - 1, lz)));
     // other seeds: a spawn is always found, on dry ground with air above
     for (const std::int64_t seed : {1ll, -1ll, 987654321ll, 42ll, 2024ll}) {
         auto other = OverworldGenerator::create(gd.root, registry, seed, error);
@@ -982,19 +982,19 @@ void testPresetsAndSpawn(const GameData& gd, const apex::BlockRegistry& registry
         const OverworldGenerator::Spawn s = other->findSpawn();
         const int bx = static_cast<int>(std::floor(s.x)), bz = static_cast<int>(std::floor(s.z)), by = static_cast<int>(s.y);
         const auto c = other->generate(bx >> 4, bz >> 4);
-        const apex::Block below = c->at(bx & 15, by - 1, bz & 15);
+        const falcon::Block below = c->at(bx & 15, by - 1, bz & 15);
         std::printf("  spawn for seed %lld: %d %d %d (%s)\n", static_cast<long long>(seed), bx, by, bz, std::string(other->biomeNameAt(bx, by, bz)).c_str());
-        CHECK(by >= other->seaLevel() && c->at(bx & 15, by, bz & 15) == apex::Block::Air && !other->blockFacts().isFluid(below) && !other->blockFacts().isAir(below));
+        CHECK(by >= other->seaLevel() && c->at(bx & 15, by, bz & 15) == falcon::Block::Air && !other->blockFacts().isFluid(below) && !other->blockFacts().isAir(below));
     }
     // the estimate of the surface height without generating a chunk agrees with the real chunk
     int agree = 0, total = 0;
     for (int i = 0; i < 24; ++i) {
         const int x = -70 + i * 13, z = 40 - i * 9;
         const auto c = gen.generate(x >> 4, z >> 4);
-        int top = apex::kMinY;
-        for (int y = apex::kMaxY - 1; y >= apex::kMinY; --y) {
-            const apex::Block b = c->at(x & 15, y, z & 15);
-            if (b != apex::Block::Air && !gen.blockFacts().isFluid(b)) {
+        int top = falcon::kMinY;
+        for (int y = falcon::kMaxY - 1; y >= falcon::kMinY; --y) {
+            const falcon::Block b = c->at(x & 15, y, z & 15);
+            if (b != falcon::Block::Air && !gen.blockFacts().isFluid(b)) {
                 top = y;
                 break;
             }
@@ -1006,7 +1006,7 @@ void testPresetsAndSpawn(const GameData& gd, const apex::BlockRegistry& registry
     CHECK(agree >= total * 3 / 4);
 }
 
-void testErrorsAndFacts(const GameData& gd, const apex::BlockRegistry& registry, const OverworldGenerator& gen) {
+void testErrorsAndFacts(const GameData& gd, const falcon::BlockRegistry& registry, const OverworldGenerator& gen) {
     std::string error;
     CHECK(OverworldGenerator::create(gd.root / "does-not-exist", registry, 1, error) == nullptr && !error.empty());
     error.clear();
@@ -1021,12 +1021,12 @@ void testErrorsAndFacts(const GameData& gd, const apex::BlockRegistry& registry,
     CHECK(BiomeRegistry::load(gd.root / "nowhere", error) == nullptr && !error.empty());
     // The minimal built-in registry has no deepslate: the generator refuses it with a message instead of crashing
     error.clear();
-    const auto minimal = apex::BlockRegistry::makeMinimal();
+    const auto minimal = falcon::BlockRegistry::makeMinimal();
     CHECK(OverworldGenerator::create(gd.root, *minimal, 1, error) == nullptr && !error.empty());
 
     // block facts the generator relies on
     const BlockFacts& f = gen.blockFacts();
-    const apex::Block air = *registry.find("air"), stone = *registry.find("stone"), water = *registry.find("water"), lava = *registry.find("lava"),
+    const falcon::Block air = *registry.find("air"), stone = *registry.find("stone"), water = *registry.find("water"), lava = *registry.find("lava"),
                       deepslate = *registry.find("deepslate"), caveAir = *registry.find("cave_air"), ice = *registry.find("packed_ice");
     CHECK(f.isAir(air) && f.isAir(caveAir) && !f.isAir(stone) && !f.isAir(water));
     CHECK(f.isFluid(water) && f.isFluid(lava) && !f.isFluid(stone) && !f.isFluid(air));
@@ -1034,14 +1034,14 @@ void testErrorsAndFacts(const GameData& gd, const apex::BlockRegistry& registry,
     CHECK(f.isMotionBlocking(stone) && f.isMotionBlocking(water) && f.isMotionBlocking(lava) && !f.isMotionBlocking(air));
 
     // the preset mapping
-    CHECK(std::string(worldPresetFor(apex::TerrainStyle::Hills)) == "minecraft:normal" && std::string(worldPresetFor(apex::TerrainStyle::Amplified)) == "minecraft:amplified" &&
-          worldPresetFor(apex::TerrainStyle::Flat) == nullptr);
-    CHECK(std::string(worldPresetFor(apex::NewWorldType::Default)) == "minecraft:normal" && std::string(worldPresetFor(apex::NewWorldType::LargeBiomes)) == "minecraft:large_biomes" &&
-          std::string(worldPresetFor(apex::NewWorldType::Amplified)) == "minecraft:amplified" && std::string(worldPresetFor(apex::NewWorldType::SingleBiome)) == "minecraft:single_biome_surface" &&
-          worldPresetFor(apex::NewWorldType::Superflat) == nullptr);
+    CHECK(std::string(worldPresetFor(falcon::TerrainStyle::Hills)) == "minecraft:normal" && std::string(worldPresetFor(falcon::TerrainStyle::Amplified)) == "minecraft:amplified" &&
+          worldPresetFor(falcon::TerrainStyle::Flat) == nullptr);
+    CHECK(std::string(worldPresetFor(falcon::NewWorldType::Default)) == "minecraft:normal" && std::string(worldPresetFor(falcon::NewWorldType::LargeBiomes)) == "minecraft:large_biomes" &&
+          std::string(worldPresetFor(falcon::NewWorldType::Amplified)) == "minecraft:amplified" && std::string(worldPresetFor(falcon::NewWorldType::SingleBiome)) == "minecraft:single_biome_surface" &&
+          worldPresetFor(falcon::NewWorldType::Superflat) == nullptr);
 }
 
-void testFluidTracking(const GameData& gd, const apex::BlockRegistry& registry, const OverworldGenerator& gen) {
+void testFluidTracking(const GameData& gd, const falcon::BlockRegistry& registry, const OverworldGenerator& gen) {
     GeneratorOptions opts;
     opts.trackFluidUpdates = true;
     std::string error;
@@ -1056,16 +1056,16 @@ void testFluidTracking(const GameData& gd, const apex::BlockRegistry& registry, 
         CHECK(plainExtras.fluidUpdates.empty());
         for (int z = 0; z < 16; ++z) {
             for (int x = 0; x < 16; ++x) {
-                for (int y = apex::kMinY; y < apex::kMaxY; ++y) {
+                for (int y = falcon::kMinY; y < falcon::kMaxY; ++y) {
                     if (a->at(x, y, z) != b->at(x, y, z)) ++differing;
                 }
             }
         }
         for (const std::uint32_t u : extras.fluidUpdates) {
             ++updates;
-            const int x = static_cast<int>(u & 15), z = static_cast<int>((u >> 4) & 15), y = static_cast<int>(u >> 8) + apex::kMinY;
+            const int x = static_cast<int>(u & 15), z = static_cast<int>((u >> 4) & 15), y = static_cast<int>(u >> 8) + falcon::kMinY;
             // the position was a fluid when the fill placed it (the surface stage may have replaced it later, e.g. by a frozen ocean)
-            const apex::Block fill = tracked->generate(cx, cz)->at(x, y, z);
+            const falcon::Block fill = tracked->generate(cx, cz)->at(x, y, z);
             if (!tracked->blockFacts().isFluid(fill) && !tracked->blockFacts().isAir(fill) && y > 40) ++notFluid;
         }
     }
@@ -1075,8 +1075,8 @@ void testFluidTracking(const GameData& gd, const apex::BlockRegistry& registry, 
     (void)notFluid;
 }
 
-void performanceReport(const GameData& gd, const apex::BlockRegistry& registry) {
-    const std::size_t before = apex::processWorkingSetBytes();
+void performanceReport(const GameData& gd, const falcon::BlockRegistry& registry) {
+    const std::size_t before = falcon::processWorkingSetBytes();
     std::string error;
     auto gen = OverworldGenerator::create(gd.root, registry, 777, error);
     if (!gen) {
@@ -1084,10 +1084,10 @@ void performanceReport(const GameData& gd, const apex::BlockRegistry& registry) 
         ++g_failures;
         return;
     }
-    const std::size_t afterCreate = apex::processWorkingSetBytes();
+    const std::size_t afterCreate = falcon::processWorkingSetBytes();
     // single thread, chunks that were not generated before
     const int n = 36;
-    std::vector<std::shared_ptr<apex::Chunk>> keep;
+    std::vector<std::shared_ptr<falcon::Chunk>> keep;
     (void)gen->generate(500, 500);  // warm-up: thread scratch, caches
     const auto t0 = std::chrono::steady_clock::now();
     for (int i = 0; i < n; ++i) keep.push_back(gen->generate(600 + i % 6, 700 + i / 6));
@@ -1107,7 +1107,7 @@ void performanceReport(const GameData& gd, const apex::BlockRegistry& registry) 
     }
     for (std::thread& th : threads) th.join();
     const double wall = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t1).count();
-    const std::size_t afterThreads = apex::processWorkingSetBytes();
+    const std::size_t afterThreads = falcon::processWorkingSetBytes();
     std::printf("  performance: %.1f ms per full chunk on one thread (36 adjacent chunks); 3 threads: %.1f ms wall per chunk (%.2fx speed-up), %zu KB per chunk in memory\n", single,
                 wall / (3.0 * perThread), single * 3.0 * perThread / wall, chunkBytes / n / 1024);
     std::printf("  memory: shared tables %.1f MB, per-thread scratch %.1f MB; working set grew %.1f MB when the generator was created and %.1f MB more with 3 threads running\n",
@@ -1122,7 +1122,7 @@ int main() {
     testSeedHash();
     testClimateBasics();
 
-    const apex::AssetSearchResult assets = apex::locateAssets(std::nullopt);
+    const falcon::AssetSearchResult assets = falcon::locateAssets(std::nullopt);
     if (!assets.location) {
         std::printf("  (tests that need the game's data skipped: game assets not found)\n");
     } else {
@@ -1136,8 +1136,8 @@ int main() {
 
             // Everything below needs the game's block registry (state ids) as well.
             std::string error;
-            const std::filesystem::path cache = std::filesystem::temp_directory_path() / "apex_worldgen_chunk_test";
-            const auto registry = apex::BlockRegistry::loadFromGameData(gd.root, cache, error);
+            const std::filesystem::path cache = std::filesystem::temp_directory_path() / "falcon_worldgen_chunk_test";
+            const auto registry = falcon::BlockRegistry::loadFromGameData(gd.root, cache, error);
             if (!registry) {
                 std::printf("  (chunk tests skipped: block registry unavailable: %s)\n", error.c_str());
             } else {

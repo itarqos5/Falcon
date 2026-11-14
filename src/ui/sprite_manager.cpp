@@ -1,10 +1,10 @@
-#include "apex/ui/sprite_manager.hpp"
+#include "falcon/ui/sprite_manager.hpp"
 
 #include <nlohmann/json.hpp>
 
 #include <stdexcept>
 
-namespace apex {
+namespace falcon {
 using nlohmann::json;
 
 namespace {
@@ -93,4 +93,4 @@ bool SpriteManager::replace(const std::string& id, Texture2D& fresh, const Sprit
     return true;
 }
 
-}  // namespace apex
+}  // namespace falcon

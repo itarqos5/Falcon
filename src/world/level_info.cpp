@@ -1,12 +1,12 @@
-#include "apex/world/level_info.hpp"
+#include "falcon/world/level_info.hpp"
 
-#include "apex/assets/nbt.hpp"
-#include "apex/util/text_util.hpp"
+#include "falcon/assets/nbt.hpp"
+#include "falcon/util/text_util.hpp"
 
 #include <fstream>
 #include <iterator>
 
-namespace apex {
+namespace falcon {
 
 std::optional<LevelInfo> readLevelInfo(const std::filesystem::path& worldDir) {
     std::ifstream in(worldDir / "level.dat", std::ios::binary);
@@ -28,9 +28,8 @@ std::optional<LevelInfo> readLevelInfo(const std::filesystem::path& worldDir) {
     if (const NbtTag* generation = data->get("WorldGenSettings")) info.seed = generation->getInt("seed", 0);
     if (info.seed == 0) info.seed = data->getInt("RandomSeed", 0);
 
-    // Falcon's own note (earlier builds called it "ApexClient"): the world type the player picked.
+    // Falcon's own note: the world type the player picked.
     const NbtTag* own = data->get("Falcon");
-    if (own == nullptr) own = data->get("ApexClient");
     if (own != nullptr) {
         info.madeByFalcon = true;
         const std::string type = own->getString("world_type");
@@ -43,4 +42,4 @@ std::optional<LevelInfo> readLevelInfo(const std::filesystem::path& worldDir) {
     return info;
 }
 
-}  // namespace apex
+}  // namespace falcon

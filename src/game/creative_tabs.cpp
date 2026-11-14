@@ -1,4 +1,4 @@
-#include "apex/game/creative_tabs.hpp"
+#include "falcon/game/creative_tabs.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -7,7 +7,7 @@
 #include <fstream>
 #include <mutex>
 
-namespace apex {
+namespace falcon {
 namespace fs = std::filesystem;
 using nlohmann::json;
 
@@ -294,4 +294,4 @@ void installCreativeTabs(std::shared_ptr<const CreativeTabs> tabs) {
     g_tabs = std::move(tabs);
 }
 
-}  // namespace apex
+}  // namespace falcon

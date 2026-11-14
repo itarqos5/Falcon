@@ -1,7 +1,7 @@
-#include "apex/net/server_pinger.hpp"
+#include "falcon/net/server_pinger.hpp"
 
-#include "apex/util/base64.hpp"
-#include "apex/util/server_address.hpp"
+#include "falcon/util/base64.hpp"
+#include "falcon/util/server_address.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -29,7 +29,7 @@
 #include <unistd.h>
 #endif
 
-namespace apex {
+namespace falcon {
 namespace {
 
 #ifdef _WIN32
@@ -476,4 +476,4 @@ std::shared_ptr<ServerPing> ServerPing::start(const std::string& address) {
     return ping;
 }
 
-}  // namespace apex
+}  // namespace falcon

@@ -1,6 +1,6 @@
-#include "apex/ui/screen.hpp"
+#include "falcon/ui/screen.hpp"
 
-namespace apex {
+namespace falcon {
 
 void Screen::resize(int width, int height) {
     width_ = width;
@@ -104,4 +104,4 @@ SliderWidget& Screen::addSlider(const Rect& rect, double initial, std::function<
     return slider;
 }
 
-}  // namespace apex
+}  // namespace falcon

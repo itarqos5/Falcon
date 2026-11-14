@@ -1,14 +1,14 @@
-#include "apex/game/container_screen.hpp"
+#include "falcon/game/container_screen.hpp"
 
-#include "apex/game/game_session.hpp"
-#include "apex/game/item_names.hpp"
-#include "apex/game/item_render.hpp"
+#include "falcon/game/game_session.hpp"
+#include "falcon/game/item_names.hpp"
+#include "falcon/game/item_render.hpp"
 
 #include <GLFW/glfw3.h>
 
 #include <algorithm>
 
-namespace apex {
+namespace falcon {
 namespace {
 
 constexpr double kDoubleClickMillis = 250.0;
@@ -316,4 +316,4 @@ void ContainerScreen::onClose() {
     Screen::onClose();
 }
 
-}  // namespace apex
+}  // namespace falcon

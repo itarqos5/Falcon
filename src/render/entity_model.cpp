@@ -1,11 +1,11 @@
-#include "apex/render/entity_model.hpp"
+#include "falcon/render/entity_model.hpp"
 
 #include <nlohmann/json.hpp>
 
 #include <fstream>
 #include <iterator>
 
-namespace apex {
+namespace falcon {
 
 namespace fs = std::filesystem;
 using json = nlohmann::json;
@@ -87,4 +87,4 @@ std::optional<EntityPart> loadEntityModel(const fs::path& dir, const std::string
     return parsePart("root", doc);
 }
 
-}  // namespace apex
+}  // namespace falcon

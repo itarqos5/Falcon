@@ -1,14 +1,14 @@
-#include "apex/world/new_world.hpp"
+#include "falcon/world/new_world.hpp"
 
-#include "apex/util/text_util.hpp"
-#include "apex/world/level_summary.hpp"
+#include "falcon/util/text_util.hpp"
+#include "falcon/world/level_summary.hpp"
 
 #include <algorithm>
 #include <cctype>
 #include <fstream>
 #include <limits>
 
-namespace apex {
+namespace falcon {
 namespace {
 
 namespace fs = std::filesystem;
@@ -165,8 +165,8 @@ NbtTag buildLevelDat(const NewWorldSettings& settings, std::int64_t seed, std::i
         .put("bonus_chest", NbtTag::ofBool(settings.effectiveBonusChest()));
 
     // This client's own note of the chosen world preset; nothing generates a world from it yet.
-    NbtTag apex = NbtTag::compound();
-    apex.put("world_type", NbtTag::ofString(typeName(settings.type)));
+    NbtTag falconNote = NbtTag::compound();
+    falconNote.put("world_type", NbtTag::ofString(typeName(settings.type)));
 
     NbtTag data = NbtTag::compound();
     data.put("version", NbtTag::ofInteger(Type::Int, 19133))
@@ -178,7 +178,7 @@ NbtTag buildLevelDat(const NewWorldSettings& settings, std::int64_t seed, std::i
         .put("difficulty_settings", std::move(difficulty))
         .put("Version", std::move(version))
         .put("WorldGenSettings", std::move(generation))
-        .put("Falcon", std::move(apex));
+        .put("Falcon", std::move(falconNote));
 
     NbtTag root = NbtTag::compound();
     root.put("Data", std::move(data));
@@ -212,4 +212,4 @@ bool createWorldFolder(const fs::path& savesDir, const std::string& folder, cons
     return true;
 }
 
-}  // namespace apex
+}  // namespace falcon

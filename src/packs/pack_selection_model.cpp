@@ -1,8 +1,8 @@
-#include "apex/packs/pack_selection_model.hpp"
+#include "falcon/packs/pack_selection_model.hpp"
 
 #include <algorithm>
 
-namespace apex {
+namespace falcon {
 namespace {
 
 std::ptrdiff_t indexOf(const std::vector<std::string>& v, const std::string& id) {
@@ -75,4 +75,4 @@ std::vector<std::string> PackSelectionModel::commitIds() const {
     return std::vector<std::string>(selected_.rbegin(), selected_.rend());
 }
 
-}  // namespace apex
+}  // namespace falcon

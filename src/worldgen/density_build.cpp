@@ -8,7 +8,7 @@
 // transparent; blend_alpha = 1.0, blend_offset = 0.0 and an absent beardifier = 0.0 (a world without old chunks or
 // structures). Structurally identical nodes are shared, so a function that several others use is computed once.
 
-#include "apex/worldgen/java_math.hpp"
+#include "falcon/worldgen/java_math.hpp"
 #include "density_internal.hpp"
 
 #include <array>
@@ -17,7 +17,7 @@
 #include <map>
 #include <set>
 
-namespace apex::worldgen {
+namespace falcon::worldgen {
 
 using namespace detail;
 
@@ -597,4 +597,4 @@ std::unique_ptr<DensityGraph> DensityGraphBuilder::build() {
     return graph;
 }
 
-}  // namespace apex::worldgen
+}  // namespace falcon::worldgen

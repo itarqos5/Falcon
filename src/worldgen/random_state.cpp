@@ -1,9 +1,9 @@
-#include "apex/worldgen/random_state.hpp"
+#include "falcon/worldgen/random_state.hpp"
 
 #include <algorithm>
 #include <system_error>
 
-namespace apex::worldgen {
+namespace falcon::worldgen {
 
 namespace {
 constexpr std::string_view kNamespacePrefix = "minecraft:";
@@ -60,4 +60,4 @@ bool RandomState::createAllNoises(std::string& error) const {
     return true;
 }
 
-}  // namespace apex::worldgen
+}  // namespace falcon::worldgen

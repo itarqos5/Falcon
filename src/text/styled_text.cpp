@@ -1,6 +1,6 @@
-#include "apex/text/styled_text.hpp"
+#include "falcon/text/styled_text.hpp"
 
-#include "apex/util/text_util.hpp"
+#include "falcon/util/text_util.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -8,7 +8,7 @@
 #include <cctype>
 #include <cstring>
 
-namespace apex {
+namespace falcon {
 namespace {
 
 constexpr int kMaxComponentDepth = 16;
@@ -224,4 +224,4 @@ std::vector<StyledText> wrapStyledText(const TextMeasure& measure, const StyledT
     return lines;
 }
 
-}  // namespace apex
+}  // namespace falcon

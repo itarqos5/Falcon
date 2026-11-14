@@ -1,10 +1,10 @@
-#include "apex/worldgen/noise_router.hpp"
+#include "falcon/worldgen/noise_router.hpp"
 
-#include "apex/worldgen/chunk_fill.hpp"
+#include "falcon/worldgen/chunk_fill.hpp"
 
 #include <cstring>
 
-namespace apex::worldgen {
+namespace falcon::worldgen {
 
 std::filesystem::path worldgenDirFromAssetsRoot(const std::filesystem::path& assetsRoot) {
     return assetsRoot.parent_path() / "data" / "minecraft" / "worldgen";
@@ -219,4 +219,4 @@ std::uint64_t densityChecksum(const float* values, std::size_t count) {
     return h;
 }
 
-}  // namespace apex::worldgen
+}  // namespace falcon::worldgen

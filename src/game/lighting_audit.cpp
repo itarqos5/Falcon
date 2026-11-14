@@ -1,17 +1,17 @@
-#include "apex/game/lighting_audit.hpp"
+#include "falcon/game/lighting_audit.hpp"
 
-#include "apex/render/block_models.hpp"
-#include "apex/world/block_registry.hpp"
-#include "apex/world/chunk.hpp"
-#include "apex/world/light.hpp"
-#include "apex/world/mesher.hpp"
+#include "falcon/render/block_models.hpp"
+#include "falcon/world/block_registry.hpp"
+#include "falcon/world/chunk.hpp"
+#include "falcon/world/light.hpp"
+#include "falcon/world/mesher.hpp"
 
 #include <algorithm>
 #include <cstdio>
 #include <string>
 #include <vector>
 
-namespace apex {
+namespace falcon {
 
 namespace {
 
@@ -142,4 +142,4 @@ int runLightingAudit(const ResourceManager& resources, const std::filesystem::pa
     return 0;
 }
 
-}  // namespace apex
+}  // namespace falcon

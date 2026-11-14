@@ -1,10 +1,10 @@
-#include "apex/assets/resource_manager.hpp"
+#include "falcon/assets/resource_manager.hpp"
 
 #include <fstream>
 #include <iterator>
 #include <system_error>
 
-namespace apex {
+namespace falcon {
 namespace fs = std::filesystem;
 
 ResourceManager::ResourceManager(fs::path assetsRoot, PackList packs)
@@ -81,4 +81,4 @@ std::vector<const void*> ResourceManager::providers(const ResourceLocation& loc)
     return who;
 }
 
-}  // namespace apex
+}  // namespace falcon

@@ -1,4 +1,4 @@
-#include "apex/assets/image.hpp"
+#include "falcon/assets/image.hpp"
 
 #include <algorithm>
 #include <cstring>
@@ -14,7 +14,7 @@
 
 #include <fstream>
 
-namespace apex {
+namespace falcon {
 
 void Image::flipVertical() {
     const std::size_t stride = static_cast<std::size_t>(width) * 4;
@@ -50,4 +50,4 @@ bool writePng(const std::filesystem::path& file, int width, int height,
     return stbi_write_png_to_func(sink, &out, width, height, 4, rgba, width * 4) != 0 && out.good();
 }
 
-}  // namespace apex
+}  // namespace falcon

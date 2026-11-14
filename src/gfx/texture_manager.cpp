@@ -1,8 +1,8 @@
-#include "apex/gfx/texture_manager.hpp"
+#include "falcon/gfx/texture_manager.hpp"
 
 #include <stdexcept>
 
-namespace apex {
+namespace falcon {
 
 ResourceLocation TextureManager::locationOf(const std::string& path) {
     return ResourceLocation("minecraft", "textures/" + path);
@@ -45,4 +45,4 @@ bool TextureManager::replace(const std::string& path, Texture2D& fresh) {
     return true;
 }
 
-}  // namespace apex
+}  // namespace falcon

@@ -1,12 +1,12 @@
-#include "apex/render/player_preview.hpp"
+#include "falcon/render/player_preview.hpp"
 
 
-#include "apex/assets/resource_manager.hpp"
+#include "falcon/assets/resource_manager.hpp"
 
 #include <algorithm>
 #include <cmath>
 
-namespace apex {
+namespace falcon {
 
 namespace {
 
@@ -235,4 +235,4 @@ Image PlayerPreview::render(const View& view) const {
     return image;
 }
 
-}  // namespace apex
+}  // namespace falcon

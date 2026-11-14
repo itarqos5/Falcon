@@ -1,4 +1,4 @@
-#include "apex/platform/dialog.hpp"
+#include "falcon/platform/dialog.hpp"
 
 #include <cstdio>
 
@@ -10,7 +10,7 @@
 #include <shellapi.h>
 #endif
 
-namespace apex {
+namespace falcon {
 
 #ifdef _WIN32
 namespace {
@@ -52,4 +52,4 @@ void openFolderInFileManager(const std::string&) {}
 void attachParentConsole() {}
 #endif
 
-}  // namespace apex
+}  // namespace falcon

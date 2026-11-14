@@ -1,10 +1,10 @@
-#include "apex/audio/music_manager.hpp"
+#include "falcon/audio/music_manager.hpp"
 
 #include <algorithm>
 #include <climits>
 #include <cstdio>
 
-namespace apex {
+namespace falcon {
 
 MusicManager::MusicManager(SoundSystem& sounds, const GameOptions& options, std::uint32_t seed)
     : sounds_(sounds), options_(options), rng_(seed) {}
@@ -74,4 +74,4 @@ void MusicManager::startPlaying() {
     nextSongDelay_ = INT_MAX;  // no new song while this one lives
 }
 
-}  // namespace apex
+}  // namespace falcon

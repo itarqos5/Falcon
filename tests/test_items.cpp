@@ -2,20 +2,20 @@
 // logic of the menus (written from the game's AbstractContainerMenu rules), recipes, creative tabs and item model
 // resolution. Tests that read the game's data run only when it is on this machine.
 
-#include "apex/assets/asset_locator.hpp"
-#include "apex/assets/resource_manager.hpp"
-#include "apex/game/creative_inventory.hpp"
-#include "apex/game/creative_tabs.hpp"
-#include "apex/game/hotbar_hud.hpp"
-#include "apex/game/item_names.hpp"
-#include "apex/render/item_icons.hpp"
-#include "apex/render/player_preview.hpp"
-#include "apex/world/block_registry.hpp"
-#include "apex/world/block_support.hpp"
-#include "apex/world/inventory.hpp"
-#include "apex/world/item_registry.hpp"
-#include "apex/world/menu.hpp"
-#include "apex/world/recipes.hpp"
+#include "falcon/assets/asset_locator.hpp"
+#include "falcon/assets/resource_manager.hpp"
+#include "falcon/game/creative_inventory.hpp"
+#include "falcon/game/creative_tabs.hpp"
+#include "falcon/game/hotbar_hud.hpp"
+#include "falcon/game/item_names.hpp"
+#include "falcon/render/item_icons.hpp"
+#include "falcon/render/player_preview.hpp"
+#include "falcon/world/block_registry.hpp"
+#include "falcon/world/block_support.hpp"
+#include "falcon/world/inventory.hpp"
+#include "falcon/world/item_registry.hpp"
+#include "falcon/world/menu.hpp"
+#include "falcon/world/recipes.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -46,7 +46,7 @@ int g_failures = 0;
         }                                                                                  \
     } while (false)
 
-using namespace apex;
+using namespace falcon;
 
 namespace {
 
@@ -891,12 +891,12 @@ void test_block_support_real(const std::filesystem::path& dataDir, const BlockRe
 void test_item_registry_and_recipes_real(const std::filesystem::path& dataDir) {
     std::string error;
     const auto start = std::chrono::steady_clock::now();
-    const auto blocks = BlockRegistry::loadFromGameData(dataDir, std::filesystem::temp_directory_path() / "apex_items_test_cache", error);
+    const auto blocks = BlockRegistry::loadFromGameData(dataDir, std::filesystem::temp_directory_path() / "falcon_items_test_cache", error);
     if (!blocks) {
         std::printf("  (item tests with the game data skipped: %s)\n", error.c_str());
         return;
     }
-    const std::filesystem::path itemCache = std::filesystem::temp_directory_path() / "apex_items_test_cache";
+    const std::filesystem::path itemCache = std::filesystem::temp_directory_path() / "falcon_items_test_cache";
     std::error_code ignored;
     std::filesystem::remove(itemCache / "items.cache", ignored);
     std::filesystem::remove(itemCache / "recipes.cache", ignored);
@@ -1599,7 +1599,7 @@ void run_all(const std::filesystem::path* dataDir) {
 }  // namespace
 
 int main() {
-    const auto assets = apex::locateAssets(std::nullopt);
+    const auto assets = falcon::locateAssets(std::nullopt);
     std::optional<std::filesystem::path> data;
     if (assets.location) data = assets.location->root.parent_path();
     run_all(data ? &*data : nullptr);

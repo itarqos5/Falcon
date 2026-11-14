@@ -1,14 +1,14 @@
-#include "apex/ui/gui_graphics.hpp"
+#include "falcon/ui/gui_graphics.hpp"
 
-#include "apex/text/text_layout.hpp"
-#include "apex/util/text_util.hpp"
+#include "falcon/text/text_layout.hpp"
+#include "falcon/util/text_util.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
 #include <vector>
 
-namespace apex {
+namespace falcon {
 namespace {
 
 std::uint32_t alphaByte(float alpha) {
@@ -330,4 +330,4 @@ void GuiGraphics::text(std::string_view text, float x, float y, std::uint32_t ar
     renderer_.setTextMode(false);
 }
 
-}  // namespace apex
+}  // namespace falcon

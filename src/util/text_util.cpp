@@ -1,6 +1,6 @@
-#include "apex/util/text_util.hpp"
+#include "falcon/util/text_util.hpp"
 
-namespace apex {
+namespace falcon {
 
 std::vector<char32_t> decodeUtf8(std::string_view s) {
     std::vector<char32_t> out;
@@ -120,4 +120,4 @@ std::string javaTrim(std::string_view s) {
     return std::string(s.substr(begin, end - begin));
 }
 
-}  // namespace apex
+}  // namespace falcon

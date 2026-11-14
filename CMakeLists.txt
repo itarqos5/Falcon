@@ -24,19 +24,19 @@ endif()
 set(CMAKE_CXX_FLAGS_RELEASE "-O2 -DNDEBUG" CACHE STRING "" FORCE)
 set(CMAKE_C_FLAGS_RELEASE   "-O2 -DNDEBUG" CACHE STRING "" FORCE)
 
-option(APEX_BUILD_TESTS "Build unit tests (only when asked: cmake --build --preset check)" ON)
-option(APEX_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)
-option(APEX_CONSOLE "Keep a console window next to the game window (Windows)" OFF)
-option(APEX_CCACHE "Use ccache when it is installed (instant rebuilds of unchanged files)" ON)
+option(FALCON_BUILD_TESTS "Build unit tests (only when asked: cmake --build --preset check)" ON)
+option(FALCON_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)
+option(FALCON_CONSOLE "Keep a console window next to the game window (Windows)" OFF)
+option(FALCON_CCACHE "Use ccache when it is installed (instant rebuilds of unchanged files)" ON)
 
 # ccache keeps compiled objects outside the project, so even a deleted build/ rebuilds in seconds.
-if(APEX_CCACHE AND NOT CMAKE_CXX_COMPILER_LAUNCHER)
-    find_program(APEX_CCACHE_EXE ccache)
-    if(APEX_CCACHE_EXE)
-        set(_apex_ccache "${CMAKE_COMMAND}" -E env CCACHE_MAXSIZE=1G "${APEX_CCACHE_EXE}")
-        set(CMAKE_CXX_COMPILER_LAUNCHER ${_apex_ccache})
-        set(CMAKE_C_COMPILER_LAUNCHER   ${_apex_ccache})
-        message(STATUS "ccache: ${APEX_CCACHE_EXE}")
+if(FALCON_CCACHE AND NOT CMAKE_CXX_COMPILER_LAUNCHER)
+    find_program(FALCON_CCACHE_EXE ccache)
+    if(FALCON_CCACHE_EXE)
+        set(_falcon_ccache "${CMAKE_COMMAND}" -E env CCACHE_MAXSIZE=1G "${FALCON_CCACHE_EXE}")
+        set(CMAKE_CXX_COMPILER_LAUNCHER ${_falcon_ccache})
+        set(CMAKE_C_COMPILER_LAUNCHER   ${_falcon_ccache})
+        message(STATUS "ccache: ${FALCON_CCACHE_EXE}")
     endif()
 endif()
 
@@ -71,21 +71,21 @@ FetchContent_Declare(nlohmann_json
 )
 
 # stb: PNG decode / encode (single headers, pinned to a commit)
-set(APEX_STB_COMMIT 9600522de53973336fa033a289858a4354cbb04c)
+set(FALCON_STB_COMMIT 9600522de53973336fa033a289858a4354cbb04c)
 FetchContent_Declare(stb_image
-    URL      https://raw.githubusercontent.com/nothings/stb/${APEX_STB_COMMIT}/stb_image.h
+    URL      https://raw.githubusercontent.com/nothings/stb/${FALCON_STB_COMMIT}/stb_image.h
     URL_HASH SHA256=deb4f18c9ca21b751a1323019031c94c0bf5ca1d2929ef5913cc56f00aab6e91
     DOWNLOAD_NO_EXTRACT TRUE
 )
 FetchContent_Declare(stb_image_write
-    URL      https://raw.githubusercontent.com/nothings/stb/${APEX_STB_COMMIT}/stb_image_write.h
+    URL      https://raw.githubusercontent.com/nothings/stb/${FALCON_STB_COMMIT}/stb_image_write.h
     URL_HASH SHA256=a8e7f77f0ccfdc9bac09a71268b131931ff81aafca82c393aeb6aaba10d9e7ca
     DOWNLOAD_NO_EXTRACT TRUE
 )
 
 # stb_vorbis: decodes the game's .ogg sounds and music
 FetchContent_Declare(stb_vorbis
-    URL      https://raw.githubusercontent.com/nothings/stb/${APEX_STB_COMMIT}/stb_vorbis.c
+    URL      https://raw.githubusercontent.com/nothings/stb/${FALCON_STB_COMMIT}/stb_vorbis.c
     URL_HASH SHA256=b52cf518355f7b2d181f18b97b812f361ffeb26299d935c8cf29e842401d60a6
     DOWNLOAD_NO_EXTRACT TRUE
 )
@@ -99,8 +99,8 @@ FetchContent_Declare(miniaudio
 
 FetchContent_MakeAvailable(glfw nlohmann_json stb_image stb_image_write stb_vorbis miniaudio)
 
-add_library(apex_stb INTERFACE)
-target_include_directories(apex_stb SYSTEM INTERFACE
+add_library(falcon_stb INTERFACE)
+target_include_directories(falcon_stb SYSTEM INTERFACE
     "${stb_image_SOURCE_DIR}"
     "${stb_image_write_SOURCE_DIR}"
     "${stb_vorbis_SOURCE_DIR}"
@@ -110,40 +110,40 @@ target_include_directories(apex_stb SYSTEM INTERFACE
 # ---------------------------------------------------------------------------
 # Warnings (applied to our own targets only)
 # ---------------------------------------------------------------------------
-add_library(apex_warnings INTERFACE)
+add_library(falcon_warnings INTERFACE)
 if(MSVC)
-    target_compile_options(apex_warnings INTERFACE /W4 /permissive-)
-    if(APEX_WARNINGS_AS_ERRORS)
-        target_compile_options(apex_warnings INTERFACE /WX)
+    target_compile_options(falcon_warnings INTERFACE /W4 /permissive-)
+    if(FALCON_WARNINGS_AS_ERRORS)
+        target_compile_options(falcon_warnings INTERFACE /WX)
     endif()
 else()
-    target_compile_options(apex_warnings INTERFACE -Wall -Wextra -Wpedantic -Wshadow)
-    if(APEX_WARNINGS_AS_ERRORS)
-        target_compile_options(apex_warnings INTERFACE -Werror)
+    target_compile_options(falcon_warnings INTERFACE -Wall -Wextra -Wpedantic -Wshadow)
+    if(FALCON_WARNINGS_AS_ERRORS)
+        target_compile_options(falcon_warnings INTERFACE -Werror)
     endif()
 endif()
 
 # Smaller exe and objects: every function/variable in its own section, unused ones dropped at link.
-add_library(apex_build_flags INTERFACE)
+add_library(falcon_build_flags INTERFACE)
 if(NOT MSVC)
-    target_compile_options(apex_build_flags INTERFACE -pipe -ffunction-sections -fdata-sections)
-    target_link_options(apex_build_flags INTERFACE -Wl,--gc-sections)
+    target_compile_options(falcon_build_flags INTERFACE -pipe -ffunction-sections -fdata-sections)
+    target_link_options(falcon_build_flags INTERFACE -Wl,--gc-sections)
 endif()
 
 # ---------------------------------------------------------------------------
 # Generated version header
 # ---------------------------------------------------------------------------
-set(APEX_GENERATED_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
+set(FALCON_GENERATED_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
 configure_file(
-    "${CMAKE_CURRENT_SOURCE_DIR}/include/apex/version.hpp.in"
-    "${APEX_GENERATED_DIR}/apex/version.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/falcon/version.hpp.in"
+    "${FALCON_GENERATED_DIR}/falcon/version.hpp"
     @ONLY
 )
 
 # ---------------------------------------------------------------------------
 # Base library: reading assets, text and fonts, OpenGL and the window. No UI, no game.
 # ---------------------------------------------------------------------------
-add_library(apex_base
+add_library(falcon_base
     src/util/math.cpp
     src/util/text_util.cpp
     src/util/options_file.cpp
@@ -178,24 +178,24 @@ add_library(apex_base
     src/platform/mapped_file.cpp
     src/platform/file_lock.cpp
 )
-add_library(apex::base ALIAS apex_base)
-target_include_directories(apex_base PUBLIC
+add_library(falcon::base ALIAS falcon_base)
+target_include_directories(falcon_base PUBLIC
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
-    "$<BUILD_INTERFACE:${APEX_GENERATED_DIR}>"
+    "$<BUILD_INTERFACE:${FALCON_GENERATED_DIR}>"
 )
-target_link_libraries(apex_base
-    PUBLIC  glfw nlohmann_json::nlohmann_json apex_build_flags
-    PRIVATE apex_stb apex_warnings
+target_link_libraries(falcon_base
+    PUBLIC  glfw nlohmann_json::nlohmann_json falcon_build_flags
+    PRIVATE falcon_stb falcon_warnings
 )
 if(WIN32)
-    target_link_libraries(apex_base PRIVATE user32 psapi dwmapi winmm)  # message boxes, console attach; memory use; dark title bar
+    target_link_libraries(falcon_base PRIVATE user32 psapi dwmapi winmm)  # message boxes, console attach; memory use; dark title bar
 endif()
 
 # ---------------------------------------------------------------------------
-# UI library: Minecraft-style widgets, screens and layout helpers. Depends only on apex_base,
+# UI library: Minecraft-style widgets, screens and layout helpers. Depends only on falcon_base,
 # never on game code (the compiler enforces it); see docs/UI.md.
 # ---------------------------------------------------------------------------
-add_library(apex_ui
+add_library(falcon_ui
     src/ui/sprite_manager.cpp
     src/ui/gui_graphics.cpp
     src/ui/widgets.cpp
@@ -204,16 +204,16 @@ add_library(apex_ui
     src/ui/list_screen.cpp
     src/ui/confirm_screen.cpp
 )
-add_library(apex::ui ALIAS apex_ui)
-target_link_libraries(apex_ui
-    PUBLIC  apex_base
-    PRIVATE apex_warnings
+add_library(falcon::ui ALIAS falcon_ui)
+target_link_libraries(falcon_ui
+    PUBLIC  falcon_base
+    PRIVATE falcon_warnings
 )
 
 # ---------------------------------------------------------------------------
 # Game: sound, resource packs, worlds, every concrete screen, and the client loop.
 # ---------------------------------------------------------------------------
-add_library(apex_core
+add_library(falcon_core
     src/client.cpp
     src/resource_reloader.cpp
     src/packs/pack_repository.cpp
@@ -304,23 +304,23 @@ add_library(apex_core
     src/game/sound_options_screen.cpp
     src/game/pack_selection_screen.cpp
 )
-add_library(apex::core ALIAS apex_core)
+add_library(falcon::core ALIAS falcon_core)
 if(WIN32)
-    target_link_libraries(apex_core PUBLIC ws2_32 dnsapi)  # server status pings: sockets and the SRV lookup
+    target_link_libraries(falcon_core PUBLIC ws2_32 dnsapi)  # server status pings: sockets and the SRV lookup
 endif()
-target_link_libraries(apex_core
-    PUBLIC  apex_ui
-    PRIVATE apex_stb apex_warnings
+target_link_libraries(falcon_core
+    PUBLIC  falcon_ui
+    PRIVATE falcon_stb falcon_warnings
 )
 # miniaudio: only the playback device API (we decode with stb_vorbis and mix ourselves). These
 # change struct layouts, so they live here and every file that includes miniaudio.h sees the same
 # list. On Windows only WASAPI (with WinMM as a fallback) is compiled, which also makes the
 # single-file implementation compile much faster.
-target_compile_definitions(apex_core PRIVATE
+target_compile_definitions(falcon_core PRIVATE
     MA_NO_DECODING MA_NO_ENCODING MA_NO_GENERATION MA_NO_ENGINE MA_NO_RESOURCE_MANAGER
     MA_NO_NODE_GRAPH)
 if(WIN32)
-    target_compile_definitions(apex_core PRIVATE
+    target_compile_definitions(falcon_core PRIVATE
         MA_ENABLE_ONLY_SPECIFIC_BACKENDS MA_ENABLE_WASAPI MA_ENABLE_WINMM)
 endif()
 # Third-party single-file implementations: not ours to fix warnings in.
@@ -348,36 +348,36 @@ endif()
 # ---------------------------------------------------------------------------
 # Executable
 # ---------------------------------------------------------------------------
-add_executable(apex_client src/main.cpp)
-target_link_libraries(apex_client PRIVATE apex::core apex_warnings)
-set_target_properties(apex_client PROPERTIES OUTPUT_NAME "Falcon")
+add_executable(falcon_client src/main.cpp)
+target_link_libraries(falcon_client PRIVATE falcon::core falcon_warnings)
+set_target_properties(falcon_client PROPERTIES OUTPUT_NAME "Falcon")
 
 if(MINGW)
     # Ship a self-contained exe: no dependency on the MinGW runtime DLLs being on PATH.
-    target_link_options(apex_client PRIVATE -static)
+    target_link_options(falcon_client PRIVATE -static)
 endif()
 if(NOT MSVC)
     # Release: strip symbols from the shipped exe (a large part of its size).
-    target_link_options(apex_client PRIVATE $<$<CONFIG:Release>:-s>)
+    target_link_options(falcon_client PRIVATE $<$<CONFIG:Release>:-s>)
 endif()
 
 # Every build ends by replacing dist/ with the fresh game, wherever the intermediates live.
-set(APEX_DIST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/dist" CACHE PATH "Where the finished game is placed")
-add_custom_command(TARGET apex_client POST_BUILD
+set(FALCON_DIST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/dist" CACHE PATH "Where the finished game is placed")
+add_custom_command(TARGET falcon_client POST_BUILD
     COMMAND "${CMAKE_COMMAND}"
-            "-DDIST_DIR=${APEX_DIST_DIR}"
-            "-DEXE=$<TARGET_FILE:apex_client>"
+            "-DDIST_DIR=${FALCON_DIST_DIR}"
+            "-DEXE=$<TARGET_FILE:falcon_client>"
             -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/UpdateDist.cmake"
     COMMENT "Replacing dist/ with the new build"
     VERBATIM
 )
 
 # No terminal window behind the game. (main() keeps working: the linker's entry point calls it.)
-if(WIN32 AND NOT APEX_CONSOLE)
+if(WIN32 AND NOT FALCON_CONSOLE)
     if(MSVC)
-        target_link_options(apex_client PRIVATE /SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup)
+        target_link_options(falcon_client PRIVATE /SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup)
     else()
-        target_link_options(apex_client PRIVATE -mwindows)
+        target_link_options(falcon_client PRIVATE -mwindows)
     endif()
 endif()
 
@@ -387,13 +387,13 @@ endif()
 # (the name Task Manager and the file's Properties dialog show).
 if(WIN32)
     set(FALCON_ICON_PNG "${CMAKE_CURRENT_SOURCE_DIR}/resources/falcon_icon.png")
-    add_executable(apex_make_ico tools/make_ico.cpp)
-    target_link_libraries(apex_make_ico PRIVATE apex_stb)
+    add_executable(falcon_make_ico tools/make_ico.cpp)
+    target_link_libraries(falcon_make_ico PRIVATE falcon_stb)
     set(FALCON_ICO "${CMAKE_CURRENT_BINARY_DIR}/falcon_icon.ico")
     add_custom_command(
         OUTPUT "${FALCON_ICO}"
-        COMMAND apex_make_ico "${FALCON_ICO}" "${FALCON_ICON_PNG}"
-        DEPENDS apex_make_ico "${FALCON_ICON_PNG}"
+        COMMAND falcon_make_ico "${FALCON_ICO}" "${FALCON_ICON_PNG}"
+        DEPENDS falcon_make_ico "${FALCON_ICON_PNG}"
         COMMENT "Building the Falcon app icon"
         VERBATIM
     )
@@ -429,13 +429,13 @@ PRODUCTVERSION ${PROJECT_VERSION_MAJOR},${PROJECT_VERSION_MINOR},${PROJECT_VERSI
     # Compiled in its own target so windres gets no -I flags: it splits quoted include paths
     # at spaces, which breaks when the checkout lives in a folder with a space in its name.
     add_library(falcon_rc OBJECT "${FALCON_RC}")
-    target_sources(apex_client PRIVATE $<TARGET_OBJECTS:falcon_rc>)
+    target_sources(falcon_client PRIVATE $<TARGET_OBJECTS:falcon_rc>)
 endif()
 
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
-if(APEX_BUILD_TESTS)
+if(FALCON_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
 endif()

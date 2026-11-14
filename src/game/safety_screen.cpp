@@ -1,11 +1,11 @@
-#include "apex/game/safety_screen.hpp"
+#include "falcon/game/safety_screen.hpp"
 
-#include "apex/game/join_multiplayer_screen.hpp"
-#include "apex/text/text_layout.hpp"
+#include "falcon/game/join_multiplayer_screen.hpp"
+#include "falcon/text/text_layout.hpp"
 
 #include <algorithm>
 
-namespace apex {
+namespace falcon {
 namespace {
 
 constexpr int kSpacing = 8;         // between the stacked elements
@@ -58,4 +58,4 @@ void SafetyScreen::render(GuiGraphics& graphics, int mouseX, int mouseY, const F
     Screen::render(graphics, mouseX, mouseY, time);
 }
 
-}  // namespace apex
+}  // namespace falcon

@@ -1,9 +1,9 @@
-#include "apex/gfx/gui_renderer.hpp"
+#include "falcon/gfx/gui_renderer.hpp"
 
 #include <algorithm>
 #include <cstddef>
 
-namespace apex {
+namespace falcon {
 namespace {
 
 const char* const kVertexSource = R"(#version 330 core
@@ -177,4 +177,4 @@ void GuiRenderer::fill(float x0, float y0, float x1, float y1, std::uint32_t arg
     quad(white_, x0, y0, x1, y1, 0.0f, 0.0f, 1.0f, 1.0f, argb);
 }
 
-}  // namespace apex
+}  // namespace falcon

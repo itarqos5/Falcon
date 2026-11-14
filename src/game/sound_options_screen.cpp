@@ -1,8 +1,8 @@
-#include "apex/game/sound_options_screen.hpp"
+#include "falcon/game/sound_options_screen.hpp"
 
-#include "apex/util/text_util.hpp"
+#include "falcon/util/text_util.hpp"
 
-namespace apex {
+namespace falcon {
 
 SoundOptionsScreen::SoundOptionsScreen(ScreenNavigator& navigator, ScreenServices& services)
     : GameOptionsScreen(navigator, services, "options.sounds.title") {}
@@ -124,4 +124,4 @@ void SoundOptionsScreen::render(GuiGraphics& graphics, int mouseX, int mouseY, c
     GameOptionsScreen::render(graphics, mouseX, mouseY, time);
 }
 
-}  // namespace apex
+}  // namespace falcon

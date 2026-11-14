@@ -1,8 +1,8 @@
-#include "apex/text/text_layout.hpp"
+#include "falcon/text/text_layout.hpp"
 
-#include "apex/util/text_util.hpp"
+#include "falcon/util/text_util.hpp"
 
-namespace apex {
+namespace falcon {
 
 std::vector<std::string> wrapText(const Font& font, const std::string& text, int maxWidth) {
     std::vector<std::string> lines;
@@ -54,4 +54,4 @@ std::string ellipsize(const Font& font, const std::string& text, int maxWidth) {
     return encodeUtf8(chars) + "...";
 }
 
-}  // namespace apex
+}  // namespace falcon

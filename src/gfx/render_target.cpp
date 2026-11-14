@@ -1,8 +1,8 @@
-#include "apex/gfx/render_target.hpp"
+#include "falcon/gfx/render_target.hpp"
 
 #include <stdexcept>
 
-namespace apex {
+namespace falcon {
 
 RenderTarget::~RenderTarget() { destroy(); }
 
@@ -49,4 +49,4 @@ void RenderTarget::bindTexture(unsigned unit) const {
     gl::BindTexture(gl::TEXTURE_2D, texture_);
 }
 
-}  // namespace apex
+}  // namespace falcon

@@ -1,4 +1,4 @@
-#include "apex/platform/memory.hpp"
+#include "falcon/platform/memory.hpp"
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -6,7 +6,7 @@
 #include <psapi.h>
 #endif
 
-namespace apex {
+namespace falcon {
 
 std::size_t processWorkingSetBytes() {
 #ifdef _WIN32
@@ -38,4 +38,4 @@ double millisSinceProcessStart() {
 #endif
 }
 
-}  // namespace apex
+}  // namespace falcon

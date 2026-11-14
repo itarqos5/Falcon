@@ -1,12 +1,12 @@
-#include "apex/world/mesher.hpp"
+#include "falcon/world/mesher.hpp"
 
-#include "apex/world/block_position.hpp"
+#include "falcon/world/block_position.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <cstring>
 
-namespace apex {
+namespace falcon {
 namespace {
 
 constexpr int kPad = 18;  // the section plus a one block border on every side
@@ -695,4 +695,4 @@ SectionNeighborhood snapshotNeighborhood(const Level& level, int chunkX, int sec
     return around;
 }
 
-}  // namespace apex
+}  // namespace falcon

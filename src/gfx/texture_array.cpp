@@ -1,10 +1,10 @@
-#include "apex/gfx/texture_array.hpp"
+#include "falcon/gfx/texture_array.hpp"
 
 #include <algorithm>
 #include <stdexcept>
 #include <utility>
 
-namespace apex {
+namespace falcon {
 namespace {
 
 // Mip levels for a picture of this size, down to 1x1, but no more than 5 (16 px blocks).
@@ -92,4 +92,4 @@ std::size_t TextureArray2D::gpuBytes() const {
     return total;
 }
 
-}  // namespace apex
+}  // namespace falcon

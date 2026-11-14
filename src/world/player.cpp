@@ -1,6 +1,6 @@
-#include "apex/world/player.hpp"
+#include "falcon/world/player.hpp"
 
-#include "apex/world/fluids.hpp"
+#include "falcon/world/fluids.hpp"
 
 #include <algorithm>
 #include <array>
@@ -14,7 +14,7 @@
 // friction, drag, rotation and the attribute casts are floats. Section numbers in comments refer to the research
 // notes this was written from.
 
-namespace apex {
+namespace falcon {
 namespace {
 
 constexpr float kDegToRad = 0.017453292f;
@@ -1143,4 +1143,4 @@ ViewBob Player::viewBob(double partial) const {
     return b;
 }
 
-}  // namespace apex
+}  // namespace falcon

@@ -1,7 +1,7 @@
-#include "apex/platform/window.hpp"
+#include "falcon/platform/window.hpp"
 
-#include "apex/gfx/gl.hpp"
-#include "apex/platform/dialog.hpp"
+#include "falcon/gfx/gl.hpp"
+#include "falcon/platform/dialog.hpp"
 
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
@@ -22,7 +22,7 @@
 #include <cstdio>
 #include <stdexcept>
 
-namespace apex {
+namespace falcon {
 namespace {
 
 void onGlfwError(int code, const char* description) {
@@ -250,4 +250,4 @@ void Window::setCursor(CursorType type) {
     glfwSetCursor(handle_, cursors_[static_cast<std::size_t>(type)]);
 }
 
-}  // namespace apex
+}  // namespace falcon

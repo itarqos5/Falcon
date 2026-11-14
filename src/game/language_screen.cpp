@@ -1,13 +1,13 @@
-#include "apex/game/language_screen.hpp"
+#include "falcon/game/language_screen.hpp"
 
-#include "apex/game/menu_background.hpp"
-#include "apex/util/text_util.hpp"
+#include "falcon/game/menu_background.hpp"
+#include "falcon/util/text_util.hpp"
 
 #include <algorithm>
 #include <cctype>
 #include <chrono>
 
-namespace apex {
+namespace falcon {
 namespace {
 
 constexpr int kRowHeight = 18;
@@ -160,4 +160,4 @@ void FontSettingsScreen::addOptions() {
                          "options.japaneseGlyphVariants.tooltip"));
 }
 
-}  // namespace apex
+}  // namespace falcon

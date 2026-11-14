@@ -1,9 +1,9 @@
-#include "apex/world/decoration.hpp"
+#include "falcon/world/decoration.hpp"
 
 #include <algorithm>
 #include <cmath>
 
-namespace apex {
+namespace falcon {
 namespace {
 
 constexpr int kSeaLevel = 63;
@@ -530,4 +530,4 @@ void Decorator::decorate(Chunk& chunk, int chunkX, int chunkZ, const worldgen::C
     }
 }
 
-}  // namespace apex
+}  // namespace falcon

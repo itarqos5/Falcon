@@ -1,12 +1,12 @@
-#include "apex/game/in_game_screen.hpp"
+#include "falcon/game/in_game_screen.hpp"
 
-#include "apex/game/game_session.hpp"
-#include "apex/game/gamemode_switcher_screen.hpp"
-#include "apex/game/chat_screen.hpp"
-#include "apex/game/inventory_screen.hpp"
-#include "apex/game/options_screen.hpp"
+#include "falcon/game/game_session.hpp"
+#include "falcon/game/gamemode_switcher_screen.hpp"
+#include "falcon/game/chat_screen.hpp"
+#include "falcon/game/inventory_screen.hpp"
+#include "falcon/game/options_screen.hpp"
 
-namespace apex {
+namespace falcon {
 
 void InGameScreen::render(GuiGraphics& graphics, int, int, const FrameTime& time) {
     if (services_.session == nullptr) return;
@@ -94,4 +94,4 @@ void PauseScreen::render(GuiGraphics& graphics, int mouseX, int mouseY, const Fr
     Screen::render(graphics, mouseX, mouseY, time);
 }
 
-}  // namespace apex
+}  // namespace falcon

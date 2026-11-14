@@ -1,12 +1,12 @@
-#include "apex/game/chat.hpp"
+#include "falcon/game/chat.hpp"
 
-#include "apex/text/font.hpp"
-#include "apex/ui/gui_graphics.hpp"
+#include "falcon/text/font.hpp"
+#include "falcon/ui/gui_graphics.hpp"
 
 #include <algorithm>
 #include <cmath>
 
-namespace apex {
+namespace falcon {
 namespace {
 
 // ChatComponent's fade: a message is at full brightness for its first ticks and then fades out, gone by 200 ticks.
@@ -82,4 +82,4 @@ void ChatComponent::render(GuiGraphics& g, int guiWidth, int guiHeight, const Ga
     }
 }
 
-}  // namespace apex
+}  // namespace falcon

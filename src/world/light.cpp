@@ -1,10 +1,10 @@
-#include "apex/world/light.hpp"
+#include "falcon/world/light.hpp"
 
 #include <algorithm>
 #include <cstring>
 #include <vector>
 
-namespace apex {
+namespace falcon {
 namespace {
 
 // The working volume: the middle chunk and the 8 around it, 48 x 48 columns of 512 cells (384 used), column-major so a
@@ -249,4 +249,4 @@ void computeCarriedLight(const Level& level, int x, int y, int z, int lightLevel
     }
 }
 
-}  // namespace apex
+}  // namespace falcon

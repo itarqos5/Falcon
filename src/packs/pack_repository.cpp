@@ -1,7 +1,7 @@
-#include "apex/packs/pack_repository.hpp"
+#include "falcon/packs/pack_repository.hpp"
 
-#include "apex/assets/zip_archive.hpp"
-#include "apex/util/text_util.hpp"
+#include "falcon/assets/zip_archive.hpp"
+#include "falcon/util/text_util.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -9,7 +9,7 @@
 #include <iterator>
 #include <system_error>
 
-namespace apex {
+namespace falcon {
 namespace fs = std::filesystem;
 using nlohmann::json;
 
@@ -164,4 +164,4 @@ const PackInfo* PackRepository::find(const std::string& id) const {
     return it != packs_.end() ? &it->second : nullptr;
 }
 
-}  // namespace apex
+}  // namespace falcon

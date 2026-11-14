@@ -1,8 +1,8 @@
-#include "apex/worldgen/random.hpp"
+#include "falcon/worldgen/random.hpp"
 
 #include <cstring>
 
-namespace apex::worldgen {
+namespace falcon::worldgen {
 
 Seed128 upgradeSeedTo128bitUnmixed(std::int64_t seed) {
     const std::uint64_t lo = static_cast<std::uint64_t>(seed) ^ 0x6A09E667F3BCC909ull;  // SILVER_RATIO_64
@@ -154,4 +154,4 @@ std::unique_ptr<PositionalRandomFactory> LegacyRandomSource::forkPositional() {
     return std::make_unique<LegacyPositionalRandomFactory>(nextLong());
 }
 
-}  // namespace apex::worldgen
+}  // namespace falcon::worldgen

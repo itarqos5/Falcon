@@ -1,8 +1,8 @@
-#include "apex/world/item_stack.hpp"
+#include "falcon/world/item_stack.hpp"
 
 #include <cmath>
 
-namespace apex {
+namespace falcon {
 namespace {
 
 // Mth.hsvToRgb.
@@ -43,4 +43,4 @@ std::uint32_t ItemStack::barColor() const {
     return hsvToRgb(f / 3.0f, 1.0f, 1.0f);
 }
 
-}  // namespace apex
+}  // namespace falcon

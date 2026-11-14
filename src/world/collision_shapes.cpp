@@ -1,6 +1,6 @@
-#include "apex/world/collision_shapes.hpp"
+#include "falcon/world/collision_shapes.hpp"
 
-#include "apex/assets/nbt.hpp"
+#include "falcon/assets/nbt.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -9,7 +9,7 @@
 #include <iterator>
 #include <type_traits>
 
-namespace apex {
+namespace falcon {
 namespace fs = std::filesystem;
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -596,4 +596,4 @@ const CollisionShapes& collisionShapes() {
     return *g_shapes;
 }
 
-}  // namespace apex
+}  // namespace falcon

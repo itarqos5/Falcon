@@ -1,10 +1,10 @@
-#include "apex/assets/resource_source.hpp"
+#include "falcon/assets/resource_source.hpp"
 
 #include <fstream>
 #include <iterator>
 #include <system_error>
 
-namespace apex {
+namespace falcon {
 namespace fs = std::filesystem;
 namespace {
 
@@ -60,4 +60,4 @@ std::shared_ptr<const ResourceSource> makeZipPack(ZipArchive zip) {
     return std::make_shared<ZipPack>(std::move(zip));
 }
 
-}  // namespace apex
+}  // namespace falcon
