@@ -191,6 +191,22 @@ GameSession::GameSession(ScreenServices& services, const ResourceManager& resour
     {
         std::string supportError;
         support_ = BlockSupport::loadFromGameData(resources.dataRoot(), *registry_, supportError);
+        blockTags_ = std::make_unique<BlockTags>(resources.dataRoot() / "data" / "minecraft" / "tags" / "block", *registry_);
+        mining_ = std::make_unique<MiningRules>(*registry_, *blockTags_);
+        loot_ = std::make_unique<BlockLoot>(resources.dataRoot(), *registry_);
+        {  // the ten crack pictures drawn on a block being dug
+            std::vector<Image> stages;
+            for (int i = 0; i < 10; ++i) {
+                const auto bytes = resources.readBytes(ResourceLocation("minecraft", format("textures/block/destroy_stage_%d.png", i)));
+                const auto image = bytes ? decodePng(*bytes) : std::nullopt;
+                if (!image) {
+                    stages.clear();
+                    break;
+                }
+                stages.push_back(*image);
+            }
+            renderer_.setBreakImages(stages);
+        }
         if (!support_) std::printf("[falcon] plant rules: %s (plants will not pop off)\n", supportError.c_str());
         std::string previewError;
         playerPreview_ = PlayerPreview::create(resources, resources.dataRoot(), previewError);
@@ -454,14 +470,104 @@ void GameSession::tickHud(double seconds) {
 }
 
 // A block broken in survival drops its item into the world (Block.popResource): a little above the middle of the block, thrown up a little.
-// (Loot tables and tool rules are not here yet, so a block gives its own item.)
-void GameSession::collectDrop(Block broken, int x, int y, int z) {
-    const ItemRegistry& items = itemRegistry();
-    const Item item = items.itemOfBlock(registry_->state(broken).block);
-    if (item == Item::Air) return;
+// What drops is the block's loot table (data/minecraft/loot_table/blocks), and only when the tool in the hand is the right one for the block
+// (a block of stone dug by hand gives nothing; with a pickaxe it gives cobblestone).
+void GameSession::collectDrop(Block broken, int x, int y, int z, const ItemStack& tool, bool correctTool) {
+    if (!correctTool) return;
+    std::vector<ItemStack> drops;
+    if (loot_) {
+        drops = loot_->drops(broken, tool, rng_);
+    } else if (const Item own = itemRegistry().itemOfBlock(registry_->state(broken).block); own != Item::Air) {
+        drops.emplace_back(own, 1);
+    }
     const auto jitter = [this] { return static_cast<double>(randomFloat()) * 0.5 - 0.25; };
-    itemEntities_.spawn(ItemStack(item, 1), x + 0.5 + jitter(), y + 0.5 + jitter() - 0.125, z + 0.5 + jitter(), static_cast<double>(randomFloat()) * 0.2 - 0.1, 0.2,
-                        static_cast<double>(randomFloat()) * 0.2 - 0.1, 10, randomFloat() * 6.2831855f);
+    for (const ItemStack& drop : drops) {
+        itemEntities_.spawn(drop, x + 0.5 + jitter(), y + 0.5 + jitter() - 0.125, z + 0.5 + jitter(), static_cast<double>(randomFloat()) * 0.2 - 0.1, 0.2,
+                            static_cast<double>(randomFloat()) * 0.2 - 0.1, 10, randomFloat() * 6.2831855f);
+    }
+}
+
+void GameSession::damageHeldTool(int amount) {
+    ItemStack& tool = inventory_.selectedItem();
+    if (tool.isEmpty() || !tool.isDamageable() || amount <= 0) return;
+    tool.damage += amount;
+    if (tool.damage >= tool.maxDamage()) {  // worn out: it breaks, with its sound
+        tool = ItemStack();
+        playWorldSound("entity.item.break", SoundSource::Players, 0.8f, 0.8f + 0.4f * randomFloat());
+    }
+}
+
+void GameSession::breakBlockAt(int x, int y, int z, bool survival) {
+    const Block broken = renderer_.level().block(x, y, z);
+    setBlock(x, y, z, Block::Air);
+    hand_.swing();
+    if (registry_->isAir(broken)) return;
+    {  // the break sound of the block, heard where it was
+        const std::array<double, 3> where = {x + 0.5, y + 0.5, z + 0.5};
+        const BlockType& type = registry_->type(broken);
+        playBlockSound(broken, "break", breakOrPlaceMix(type.soundVolume, type.soundPitch), SoundSource::Blocks, &where);
+    }
+    if (!survival) return;
+    const ItemStack tool = inventory_.selectedItem();
+    collectDrop(broken, x, y, z, tool, !mining_ || mining_->correctForDrops(tool, broken));
+    // Item.mineBlock: a tool wears by one use (more for some) from a block that was not instant to dig.
+    if (!tool.isEmpty() && tool.type().isTool && registry_->state(broken).hardness != 0.0f) damageHeldTool(tool.type().toolDamagePerBlock);
+}
+
+void GameSession::stopDigging() {
+    digPos_.reset();
+    digProgress_ = 0.0f;
+    digTicks_ = 0;
+}
+
+// Survival digging, as MultiPlayerGameMode does it. The click starts it (a block that is instant to dig goes at once); each game tick after that takes
+// another share off the block until it is gone, then comes a pause of 5 ticks. Aiming at another block, or another item in the hand, starts over.
+void GameSession::digSurvival(double dt, bool fresh) {
+    ItemStack& tool = inventory_.selectedItem();
+    if (!target_ || (digPos_ && (*digPos_ != std::array<int, 3>{target_->x, target_->y, target_->z} || digItem_ != tool.item))) stopDigging();
+    if (!target_) return;
+    const std::array<int, 3> pos = {target_->x, target_->y, target_->z};
+    const auto perTick = [&](Block b) { return mining_ ? mining_->progressPerTick(tool, b, player_.onGround, player_.isUnderWater()) : 1.0f; };
+    if (fresh) digClock_ = 0.0;
+    digClock_ += dt;
+    int ticks = static_cast<int>(digClock_ / kTickSeconds);
+    digClock_ -= ticks * kTickSeconds;
+    for (; ticks > 0 && digDelay_ > 0; --ticks) --digDelay_;  // (the pause only runs while the button is held)
+    if (!digPos_) {
+        const Block block = renderer_.level().block(pos[0], pos[1], pos[2]);
+        if (registry_->isAir(block) || pos[1] <= kMinY) return;
+        if (digDelay_ > 0 && !fresh) return;
+        if (perTick(block) >= 1.0f) {
+            breakBlockAt(pos[0], pos[1], pos[2], true);
+            return;
+        }
+        digPos_ = pos;
+        digProgress_ = 0.0f;
+        digTicks_ = 0;
+        digItem_ = tool.item;
+        hand_.swing();
+        return;
+    }
+    for (; ticks > 0 && digPos_; --ticks) {
+        const Block block = renderer_.level().block(pos[0], pos[1], pos[2]);
+        if (registry_->isAir(block)) {
+            stopDigging();
+            break;
+        }
+        digProgress_ += perTick(block);
+        if (digTicks_ % 4 == 0) {  // the hit sound, every fourth tick: quieter and lower than the break
+            const std::array<double, 3> where = {pos[0] + 0.5, pos[1] + 0.5, pos[2] + 0.5};
+            const BlockType& type = registry_->type(block);
+            playBlockSound(block, "hit", {(type.soundVolume + 1.0f) / 8.0f, type.soundPitch * 0.5f}, SoundSource::Blocks, &where);
+        }
+        ++digTicks_;
+        hand_.swing();
+        if (digProgress_ >= 1.0f) {
+            breakBlockAt(pos[0], pos[1], pos[2], true);
+            stopDigging();
+            digDelay_ = 5;
+        }
+    }
 }
 
 // Player.drop. Thrown from the hand: out of the face, in the direction of the look, with a little spread. Scattered (what is lost at death): up and
@@ -713,30 +819,29 @@ void GameSession::interact(double dt, bool active) {
 
     const bool attack = isDown("key.attack");
     const bool use = isDown("key.use");
-    if (!attack) breakCooldown_ = 0.0;
+    if (!attack) {
+        breakCooldown_ = 0.0;
+        stopDigging();
+    }
+    const bool freshPress = attack && !digHeld_;
+    digHeld_ = attack;
     if (!use) placeCooldown_ = 0.0;
     if (attack && !target_ && breakCooldown_ <= 0.0) {  // a swing at the air: the attack cooldown starts over
         breakCooldown_ = kRepeatDelay;
         hand_.swing();
         hand_.resetAttackStrength();
     }
+    if (attack && !creative()) digSurvival(dt, freshPress);
     if (!target_) return;
 
-    if (attack && breakCooldown_ <= 0.0) {
+    if (attack && creative() && breakCooldown_ <= 0.0) {  // creative: every block goes at once, five ticks apart
         breakCooldown_ = kRepeatDelay;
         if (target_->y > kMinY) {  // the floor of the world stays
-            const Block broken = renderer_.level().block(target_->x, target_->y, target_->z);
-            setBlock(target_->x, target_->y, target_->z, Block::Air);
-            hand_.swing();
-            if (!registry_->isAir(broken)) {  // the break sound of the block, heard where it was
-                const std::array<double, 3> where = {target_->x + 0.5, target_->y + 0.5, target_->z + 0.5};
-                const BlockType& type = registry_->type(broken);
-                playBlockSound(broken, "break", breakOrPlaceMix(type.soundVolume, type.soundPitch), SoundSource::Blocks, &where);
-            }
-            if (!creative() && !registry_->isAir(broken)) collectDrop(broken, target_->x, target_->y, target_->z);
+            breakBlockAt(target_->x, target_->y, target_->z, false);
             target_ = raycastBlocks(renderer_.level(), eye, look, kReach);
         }
     }
+    if (attack && !creative()) target_ = raycastBlocks(renderer_.level(), eye, look, kReach);  // (a block that was dug is gone: aim past it)
     if (use && placeCooldown_ <= 0.0 && target_) {
         placeCooldown_ = kRepeatDelay;
         // BlockPlaceContext: aiming at a block that can be replaced (grass, ferns, dead bushes, snow, water ...) puts the new block in ITS place; any other
@@ -757,6 +862,8 @@ void GameSession::interact(double dt, bool active) {
             Block placed = blockStateForPlacement({*registry_, heldBlock, *target_, player_.yaw, player_.pitch, player_.sneaking});
             // BlockItem.canPlace: a plant needs its soil, and a tall one (DoubleHighBlockItem) the cell above free as well.
             const BlockSupport::Reader at = [this](int bx, int by, int bz) { return renderer_.level().block(bx, by, bz); };
+            // A wall torch with nothing sturdy to hang on (a click on the side of a flower, say) falls back to the standing torch, as StandingAndWallBlockItem does.
+            if (support_ && !support_->canSurvive(placed, place[0], place[1], place[2], at) && registry_->defaultState(heldBlock) != placed) placed = registry_->defaultState(heldBlock);
             const bool tall = support_ && support_->isLowerHalf(placed);
             const bool roomAbove = !tall || (place[1] + 1 < kMaxY && registry_->state(at(place[0], place[1] + 1, place[2])).has(kStateReplaceable));
             const bool stands = !support_ || support_->canSurvive(placed, place[0], place[1], place[2], at);
@@ -862,8 +969,6 @@ void GameSession::update(double dt, bool active, int framebufferWidth, int frame
         save();
     }
     interact(dt, active);
-            // A wall torch with nothing sturdy to hang on (a click on the side of a flower, say) falls back to the standing torch, as StandingAndWallBlockItem does.
-            if (support_ && !support_->canSurvive(placed, place[0], place[1], place[2], at) && registry_->defaultState(heldBlock) != placed) placed = registry_->defaultState(heldBlock);
 }
 
 bool GameSession::keyIs(const char* action, int key) const {
@@ -1031,6 +1136,7 @@ void GameSession::renderWorld(int framebufferWidth, int framebufferHeight) {
     }
     renderer_.render(cam, framebufferWidth, framebufferHeight, renderDistance());
     if (ready_ && target_) renderer_.drawSelection(cam, framebufferWidth, framebufferHeight, target_->x, target_->y, target_->z);
+    if (ready_ && digPos_ && destroyStage(digProgress_) >= 0) renderer_.drawBreakOverlay(cam, framebufferWidth, framebufferHeight, (*digPos_)[0], (*digPos_)[1], (*digPos_)[2], destroyStage(digProgress_));
     if (ready_) {
         const std::array<double, 3> camPos = {cam.x, cam.y, cam.z};
         hand_.renderGroundItems(renderer_, renderer_.viewProjection(), camPos, itemEntities_.items(), partialTick_);

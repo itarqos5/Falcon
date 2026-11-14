@@ -1,6 +1,7 @@
 #pragma once
 
 #include "falcon/gfx/shader.hpp"
+#include "falcon/gfx/texture.hpp"
 #include "falcon/render/block_models.hpp"
 #include "falcon/render/camera.hpp"
 #include "falcon/util/priority_pool.hpp"
@@ -132,9 +133,9 @@ public:
     [[nodiscard]] const Matrix4f& viewProjection() const { return lastViewProj_; }
     // The sky and block light (0..15) of a block (full sky where no light is known yet).
     void lightAt(int x, int y, int z, int& sky, int& block) const;
-
     // The same with the light the player carries (a held torch) counted in: what lights things drawn near the player that are not part of a mesh (dropped items).
     void lightAtWithCarried(int x, int y, int z, int& sky, int& block) const;
+
     // Loads and unloads chunks around the player (block coordinates) for a render distance in chunks, and uploads
     // finished meshes for at most `uploadBudgetMs`.
     void update(double playerX, double playerZ, int renderDistance, double uploadBudgetMs);
@@ -150,6 +151,10 @@ public:
     void render(const Camera& camera, int framebufferWidth, int framebufferHeight, int renderDistance);
     // Black outline of one block (the one the player looks at).
     void drawSelection(const Camera& camera, int framebufferWidth, int framebufferHeight, int x, int y, int z);
+    // The ten pictures of a block being dug (destroy_stage_0..9); without them no cracks are drawn.
+    void setBreakImages(const std::vector<Image>& stages);
+    // The cracks on the block being dug, `stage` 0..9 (LevelRenderer: the picture is multiplied into the block's colours, so grey is no change).
+    void drawBreakOverlay(const Camera& camera, int framebufferWidth, int framebufferHeight, int x, int y, int z, int stage);
     // Turns off what render() turned on, so the GUI can draw.
     void endFrame();
 
@@ -249,6 +254,10 @@ private:
     ShaderProgram world_;
     ShaderProgram sky_;
     ShaderProgram lines_;
+    ShaderProgram cracks_;
+    std::vector<Texture2D> breakTextures_;
+    gl::GLint crackViewProj_ = -1, crackTex_ = -1;
+    gl::GLuint crackVao_ = 0, crackVbo_ = 0;
     gl::GLint uViewProj_ = -1, uOffset_ = -1, uFogColor_ = -1, uFogRange_ = -1, uAlphaCut_ = -1, uTex_ = -1, uGamma_ = -1;
     gl::GLint uHeldLight_ = -1, uHeldOrigin_ = -1, uHeldOn_ = -1, uEnvFog_ = -1;
     bool underwater_ = false;

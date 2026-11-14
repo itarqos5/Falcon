@@ -240,6 +240,8 @@ add_library(falcon_core
     src/world/collision_shapes.cpp
     src/world/block_outlines.cpp
     src/world/block_support.cpp
+    src/world/block_tags.cpp
+    src/world/loot.cpp
     src/world/chunk_cache.cpp
     src/world/raycast.cpp
     src/world/water_fog.cpp
@@ -298,6 +300,7 @@ add_library(falcon_core
     src/game/chat_screen.cpp
     src/game/gamemode_switcher_screen.cpp
     src/game/block_placement.cpp
+    src/game/mining.cpp
     src/game/creative_tabs.cpp
     src/game/creative_inventory.cpp
     src/game/item_names.cpp

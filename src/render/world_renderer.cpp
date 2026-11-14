@@ -182,6 +182,26 @@ out vec4 frag;
 void main() { frag = vec4(0.0, 0.0, 0.0, 0.6); }
 )";
 
+// The cracks of a block being dug: the picture alone, multiplied into what is already there by the blend (see drawBreakOverlay).
+constexpr char kCrackVertex[] = R"(#version 330 core
+layout(location = 0) in vec3 aPos;
+layout(location = 1) in vec2 aUv;
+uniform mat4 uViewProj;
+out vec2 vUv;
+void main() { vUv = aUv; gl_Position = uViewProj * vec4(aPos, 1.0); }
+)";
+
+constexpr char kCrackFragment[] = R"(#version 330 core
+in vec2 vUv;
+uniform sampler2D uTex;
+out vec4 frag;
+void main() {
+    vec4 c = texture(uTex, vUv);
+    if (c.a < 0.01) discard;
+    frag = c;
+}
+)";
+
 // The plains sky: pale haze at the horizon, blue overhead (the game's daytime colours).
 constexpr float kHorizon[3] = {0.753f, 0.847f, 1.0f};
 constexpr float kZenith[3] = {0.471f, 0.655f, 1.0f};
@@ -267,6 +287,7 @@ WorldRenderer::WorldRenderer(BlockModels& models, std::int64_t seed, TerrainStyl
       world_("world", worldShaderSource(kWorldVertexBody).c_str(), worldShaderSource(kWorldFragmentBody).c_str()),
       sky_("sky", kSkyVertex, kSkyFragment),
       lines_("lines", kLineVertex, kLineFragment),
+      cracks_("cracks", kCrackVertex, kCrackFragment),
       pool_(workerThreads) {
     uViewProj_ = world_.uniform("uViewProj");
     uOffset_ = world_.uniform("uOffset");
@@ -288,6 +309,8 @@ WorldRenderer::WorldRenderer(BlockModels& models, std::int64_t seed, TerrainStyl
     skyHorizon_ = sky_.uniform("uHorizon");
     skyZenith_ = sky_.uniform("uZenith");
     lineViewProj_ = lines_.uniform("uViewProj");
+    crackViewProj_ = cracks_.uniform("uViewProj");
+    crackTex_ = cracks_.uniform("uTex");
 
     // The one index list every section shares: quad n is vertices 4n..4n+3, drawn as two triangles.
     std::vector<std::uint32_t> indices;
@@ -320,6 +343,16 @@ WorldRenderer::WorldRenderer(BlockModels& models, std::int64_t seed, TerrainStyl
     gl::BindBuffer(gl::ARRAY_BUFFER, lineVbo_);
     gl::EnableVertexAttribArray(0);
     gl::VertexAttribPointer(0, 3, gl::FLOAT, 0, 3 * sizeof(float), nullptr);
+    gl::BindVertexArray(0);
+
+    gl::GenVertexArrays(1, &crackVao_);
+    gl::GenBuffers(1, &crackVbo_);
+    gl::BindVertexArray(crackVao_);
+    gl::BindBuffer(gl::ARRAY_BUFFER, crackVbo_);
+    gl::EnableVertexAttribArray(0);
+    gl::VertexAttribPointer(0, 3, gl::FLOAT, 0, 5 * sizeof(float), nullptr);
+    gl::EnableVertexAttribArray(1);
+    gl::VertexAttribPointer(1, 2, gl::FLOAT, 0, 5 * sizeof(float), reinterpret_cast<const void*>(3 * sizeof(float)));
     gl::BindVertexArray(0);
 
     // The light the player carries: a 32 x 32 x 32 volume of light levels, one byte (level * 17) per block.
@@ -384,6 +417,8 @@ WorldRenderer::~WorldRenderer() {
     gl::DeleteVertexArrays(1, &emptyVao_);
     gl::DeleteVertexArrays(1, &lineVao_);
     gl::DeleteBuffers(1, &lineVbo_);
+    gl::DeleteBuffers(1, &crackVbo_);
+    gl::DeleteVertexArrays(1, &crackVao_);
     if (heldVao_ != 0) gl::DeleteVertexArrays(1, &heldVao_);
     if (heldVbo_ != 0) gl::DeleteBuffers(1, &heldVbo_);
     gl::DeleteQueries(3, queries_);
@@ -1409,6 +1444,65 @@ void WorldRenderer::drawSelection(const Camera& camera, int framebufferWidth, in
     gl::Disable(gl::BLEND);
 }
 
+void WorldRenderer::setBreakImages(const std::vector<Image>& stages) {
+    breakTextures_.clear();
+    for (const Image& image : stages) breakTextures_.emplace_back(image, FilterMode::Nearest);
+}
+
+// LevelRenderer's crumbling layer: the block's own shape drawn again with destroy_stage_N, blended as (DST_COLOR, SRC_COLOR) so a grey picture leaves the
+// block as it is and the dark cracks darken it. It lies a hair off the faces. (The game uses the block's model quads; this uses the outline boxes, which
+// are the same for a full block and close for the rest.)
+void WorldRenderer::drawBreakOverlay(const Camera& camera, int framebufferWidth, int framebufferHeight, int x, int y, int z, int stage) {
+    if (stage < 0 || static_cast<std::size_t>(stage) >= breakTextures_.size()) return;
+    const Block block = level_.block(x, y, z);
+    const OutlineShape& outline = blockOutlines().shape(block);
+    if (outline.boxes.empty()) return;
+    const float aspect = static_cast<float>(framebufferWidth) / static_cast<float>(std::max(1, framebufferHeight));
+    const float farPlane = std::max(256.0f, static_cast<float>(lastRadius_ + 4) * 16.0f * 1.5f);
+    const Matrix4f viewProj = perspective(camera.fov, aspect, 0.05f, farPlane) * cameraView(camera);
+    double offsetX = 0.0, offsetZ = 0.0;
+    if (blockRegistry().state(block).has(kStateHasOffset)) {
+        const std::array<double, 2> offset = blockOffset(x, z);
+        offsetX = offset[0];
+        offsetZ = offset[1];
+    }
+    const double ox = x - camera.x + offsetX, oy = y - camera.y, oz = z - camera.z + offsetZ;
+    constexpr double e = 0.002;
+    std::vector<float> v;
+    v.reserve(outline.boxes.size() * 6 * 6 * 5);
+    const auto vertex = [&](double px, double py, double pz, double u, double w) {
+        for (const double value : {ox + px, oy + py, oz + pz, u, w}) v.push_back(static_cast<float>(value));
+    };
+    const auto quad = [&](const std::array<std::array<double, 5>, 4>& q) {
+        for (const int i : {0, 1, 2, 0, 2, 3}) vertex(q[static_cast<std::size_t>(i)][0], q[static_cast<std::size_t>(i)][1], q[static_cast<std::size_t>(i)][2], q[static_cast<std::size_t>(i)][3], q[static_cast<std::size_t>(i)][4]);
+    };
+    for (const Aabb& b : outline.boxes) {
+        const double x0 = b.minX - e, x1 = b.maxX + e, y0 = b.minY - e, y1 = b.maxY + e, z0 = b.minZ - e, z1 = b.maxZ + e;
+        // (u, v) follow the block's own cell, so a half block shows half of the picture.
+        quad({{{x1, y0, z0, z0, 1 - y0}, {x1, y1, z0, z0, 1 - y1}, {x1, y1, z1, z1, 1 - y1}, {x1, y0, z1, z1, 1 - y0}}});  // east
+        quad({{{x0, y0, z1, z1, 1 - y0}, {x0, y1, z1, z1, 1 - y1}, {x0, y1, z0, z0, 1 - y1}, {x0, y0, z0, z0, 1 - y0}}});  // west
+        quad({{{x0, y1, z0, x0, z0}, {x0, y1, z1, x0, z1}, {x1, y1, z1, x1, z1}, {x1, y1, z0, x1, z0}}});                  // up
+        quad({{{x0, y0, z1, x0, z1}, {x0, y0, z0, x0, z0}, {x1, y0, z0, x1, z0}, {x1, y0, z1, x1, z1}}});                  // down
+        quad({{{x1, y0, z1, x1, 1 - y0}, {x1, y1, z1, x1, 1 - y1}, {x0, y1, z1, x0, 1 - y1}, {x0, y0, z1, x0, 1 - y0}}});  // south
+        quad({{{x0, y0, z0, x0, 1 - y0}, {x0, y1, z0, x0, 1 - y1}, {x1, y1, z0, x1, 1 - y1}, {x1, y0, z0, x1, 1 - y0}}});  // north
+    }
+    gl::Enable(gl::DEPTH_TEST);
+    gl::DepthMask(gl::FALSE_);
+    gl::Enable(gl::BLEND);
+    gl::BlendFuncSeparate(gl::DST_COLOR, gl::SRC_COLOR, gl::ONE, gl::ZERO);
+    cracks_.use();
+    gl::UniformMatrix4fv(crackViewProj_, 1, 0, viewProj.m.data());
+    breakTextures_[static_cast<std::size_t>(stage)].bind(0);
+    gl::Uniform1i(crackTex_, 0);
+    gl::BindVertexArray(crackVao_);
+    gl::BindBuffer(gl::ARRAY_BUFFER, crackVbo_);
+    gl::BufferData(gl::ARRAY_BUFFER, static_cast<gl::GLsizeiptr>(v.size() * sizeof(float)), v.data(), gl::STREAM_DRAW);
+    gl::DrawArrays(gl::TRIANGLES, 0, static_cast<gl::GLsizei>(v.size() / 5));
+    gl::BindVertexArray(0);
+    gl::Disable(gl::BLEND);
+    gl::DepthMask(gl::TRUE_);
+}
+
 void WorldRenderer::endFrame() {
     gl::Disable(gl::DEPTH_TEST);
     gl::Disable(gl::CULL_FACE);
@@ -1488,6 +1582,16 @@ void WorldRenderer::lightAt(int x, int y, int z, int& sky, int& block) const {
     block = chunk->light->blockAt(x & 15, y, z & 15);
 }
 
+void WorldRenderer::lightAtWithCarried(int x, int y, int z, int& sky, int& block) const {
+    lightAt(x, y, z, sky, block);
+    if (heldLightLevel_ <= 0) return;
+    const int half = kHeldLightSize / 2;  // the volume's corner is `half` blocks off the block it shines from (see setCarriedLight)
+    const int cx = x - (heldLightX_ - half), cy = y - (heldLightY_ - half), cz = z - (heldLightZ_ - half);
+    if (cx < 0 || cy < 0 || cz < 0 || cx >= kHeldLightSize || cy >= kHeldLightSize || cz >= kHeldLightSize) return;
+    const std::size_t index = static_cast<std::size_t>(cx + kHeldLightSize * (cy + kHeldLightSize * cz));
+    if (index < heldLightVolume_.size()) block = std::max(block, static_cast<int>(heldLightVolume_[index]) / 17);
+}
+
 void WorldRenderer::drawHeld(const Matrix4f& mvp, const std::vector<MeshVertex>& vertices) {
     const std::size_t quads = std::min(vertices.size() / 4, kMaxQuadsPerSection);
     if (quads == 0) return;
@@ -1527,13 +1631,3 @@ void WorldRenderer::drawHeld(const Matrix4f& mvp, const std::vector<MeshVertex>&
 }
 
 }  // namespace falcon
-void WorldRenderer::lightAtWithCarried(int x, int y, int z, int& sky, int& block) const {
-    lightAt(x, y, z, sky, block);
-    if (heldLightLevel_ <= 0) return;
-    const int half = kHeldLightSize / 2;  // the volume's corner is `half` blocks off the block it shines from (see setCarriedLight)
-    const int cx = x - (heldLightX_ - half), cy = y - (heldLightY_ - half), cz = z - (heldLightZ_ - half);
-    if (cx < 0 || cy < 0 || cz < 0 || cx >= kHeldLightSize || cy >= kHeldLightSize || cz >= kHeldLightSize) return;
-    const std::size_t index = static_cast<std::size_t>(cx + kHeldLightSize * (cy + kHeldLightSize * cz));
-    if (index < heldLightVolume_.size()) block = std::max(block, static_cast<int>(heldLightVolume_[index]) / 17);
-}
-

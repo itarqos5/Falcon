@@ -8,10 +8,13 @@
 #include "falcon/game/creative_tabs.hpp"
 #include "falcon/game/hotbar_hud.hpp"
 #include "falcon/game/item_names.hpp"
+#include "falcon/game/mining.hpp"
 #include "falcon/render/item_icons.hpp"
 #include "falcon/render/player_preview.hpp"
 #include "falcon/world/block_registry.hpp"
 #include "falcon/world/block_support.hpp"
+#include "falcon/world/block_tags.hpp"
+#include "falcon/world/loot.hpp"
 #include "falcon/world/inventory.hpp"
 #include "falcon/world/item_registry.hpp"
 #include "falcon/world/menu.hpp"
@@ -888,6 +891,58 @@ void test_block_support_real(const std::filesystem::path& dataDir, const BlockRe
     CHECK(support->afterNeighborChange(doorLower, 0, 1, 0, at) == doorLower && support->afterNeighborChange(doorUpper, 0, 2, 0, at) == doorUpper);
 }
 
+// How long blocks take to dig and what they drop, from the game's tags and loot tables.
+void test_mining_real(const std::filesystem::path& dataDir, const BlockRegistry& blocks, const ItemRegistry& items) {
+    const BlockTags tags(dataDir / "data" / "minecraft" / "tags" / "block", blocks);
+    const MiningRules mining(blocks, tags);
+    const BlockLoot loot(dataDir, blocks);
+    const auto b = [&](const char* text) {
+        const auto s = blocks.parse(text);
+        CHECK(s.has_value());
+        return s.value_or(Block::Air);
+    };
+    const auto stack = [&](const char* name) {
+        const auto item = items.find(name);
+        CHECK(item.has_value());
+        return item ? ItemStack(*item, 1) : ItemStack();
+    };
+    const ItemStack hand, wooden = stack("wooden_pickaxe"), iron = stack("iron_pickaxe"), diamond = stack("diamond_pickaxe"), shears = stack("shears");
+    const auto near = [](float a, float c) { return std::fabs(a - c) < 1.0e-5f * std::max(1.0f, std::fabs(c)); };
+    // Tags follow other tags: #minecraft:logs holds oak logs through #minecraft:oak_logs.
+    CHECK(tags.contains("#minecraft:logs", static_cast<std::size_t>(*blocks.findBlock("oak_log"))));
+    CHECK(tags.contains("minecraft:mineable/pickaxe", static_cast<std::size_t>(*blocks.findBlock("stone"))));
+    CHECK(!tags.contains("#minecraft:mineable/pickaxe", static_cast<std::size_t>(*blocks.findBlock("dirt"))));
+    // Dirt (hardness 0.5) by hand: no tool is needed, and a shovel is faster. Stone (1.5): the pickaxe is the right tool, by hand it is 100 not 30.
+    const Block dirt = b("dirt"), stone = b("stone");
+    CHECK(mining.correctForDrops(hand, dirt) && near(mining.progressPerTick(hand, dirt, true, false), 1.0f / 0.5f / 30.0f));
+    CHECK(!mining.correctForDrops(hand, stone) && near(mining.progressPerTick(hand, stone, true, false), 1.0f / 1.5f / 100.0f));
+    CHECK(mining.correctForDrops(wooden, stone) && near(mining.progressPerTick(wooden, stone, true, false), 2.0f / 1.5f / 30.0f));
+    CHECK(near(mining.progressPerTick(iron, stone, true, false), 6.0f / 1.5f / 30.0f));
+    CHECK(near(mining.progressPerTick(wooden, stone, false, false), 2.0f / 1.5f / 30.0f / 5.0f));  // in the air: a fifth
+    // Iron ore needs a stone pickaxe; a wooden one digs it at its speed but gets no drops. Obsidian wants diamond. Bedrock never breaks; a flower is instant.
+    CHECK(!mining.correctForDrops(wooden, b("iron_ore")) && mining.correctForDrops(stack("stone_pickaxe"), b("iron_ore")));
+    CHECK(!mining.correctForDrops(iron, b("obsidian")) && mining.correctForDrops(diamond, b("obsidian")));
+    CHECK(mining.progressPerTick(diamond, b("bedrock"), true, false) == 0.0f);
+    CHECK(mining.progressPerTick(hand, b("poppy"), true, false) >= 1.0f);
+    CHECK(destroyStage(0.0f) == -1 && destroyStage(0.05f) == 0 && destroyStage(0.55f) == 5 && destroyStage(0.99f) == 9);
+    // Loot: stone gives cobblestone, grass block gives dirt, a log gives itself, leaves give nothing by hand and themselves with shears.
+    std::mt19937 random(7);
+    const auto only = [&](const std::vector<ItemStack>& drops, const char* name, int count) {
+        return drops.size() == 1 && drops[0].item == *items.find(name) && drops[0].count == count;
+    };
+    CHECK(only(loot.drops(stone, wooden, random), "cobblestone", 1));
+    CHECK(only(loot.drops(b("grass_block[snowy=false]"), hand, random), "dirt", 1));
+    CHECK(only(loot.drops(b("oak_log[axis=y]"), hand, random), "oak_log", 1));
+    CHECK(only(loot.drops(b("oak_leaves[distance=1,persistent=true,waterlogged=false]"), shears, random), "oak_leaves", 1));
+    int leafDrops = 0;
+    for (int i = 0; i < 400; ++i) leafDrops += loot.drops(b("oak_leaves[distance=1,persistent=true,waterlogged=false]"), hand, random).empty() ? 0 : 1;
+    CHECK(leafDrops > 0 && leafDrops < 100);  // a sapling, sticks or an apple now and then (a few in a hundred)
+    CHECK(loot.drops(b("bedrock"), diamond, random).empty());
+    // A slab: two slabs when it is double.
+    CHECK(only(loot.drops(b("oak_slab[type=double,waterlogged=false]"), hand, random), "oak_slab", 2));
+    CHECK(only(loot.drops(b("oak_slab[type=bottom,waterlogged=false]"), hand, random), "oak_slab", 1));
+}
+
 void test_item_registry_and_recipes_real(const std::filesystem::path& dataDir) {
     std::string error;
     const auto start = std::chrono::steady_clock::now();
@@ -1097,6 +1152,7 @@ void test_item_registry_and_recipes_real(const std::filesystem::path& dataDir) {
     // The creative tabs, the names and the pictures from the game's files.
     test_creative_tabs_real(dataDir, *items);
     test_block_support_real(dataDir, *blocks);
+    test_mining_real(dataDir, *blocks, *items);
     test_player_preview_real(dataDir / "assets");
     test_item_names_real(dataDir / "assets");
     test_item_icons_real(dataDir / "assets", blocks);

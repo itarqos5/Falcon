@@ -4,6 +4,7 @@
 #include "falcon/game/chat.hpp"
 #include "falcon/game/screen_services.hpp"
 #include "falcon/game/hotbar_hud.hpp"
+#include "falcon/game/mining.hpp"
 #include "falcon/game/survival_hud.hpp"
 #include "falcon/game/world_sounds.hpp"
 #include "falcon/platform/system_info.hpp"
@@ -25,6 +26,8 @@
 #include "falcon/world/raycast.hpp"
 #include "falcon/world/water_fog.hpp"
 #include "falcon/world/block_support.hpp"
+#include "falcon/world/block_tags.hpp"
+#include "falcon/world/loot.hpp"
 
 #include <array>
 #include <filesystem>
@@ -211,7 +214,12 @@ private:
     void drawDebugScreen(GuiGraphics& graphics, int guiWidth);
     [[nodiscard]] std::vector<std::string> debugLinesRight() const;
     void refreshSystemLines();
-    void collectDrop(Block broken, int x, int y, int z);
+    void collectDrop(Block broken, int x, int y, int z, const ItemStack& tool, bool correctTool);
+    // A block taken out of the world by the player: the block goes, it sounds, and in survival it drops what its loot table says (and wears the tool).
+    void breakBlockAt(int x, int y, int z, bool survival);
+    void digSurvival(double dt, bool fresh);   // MultiPlayerGameMode.startDestroyBlock / continueDestroyBlock; `fresh`: the button went down this frame
+    void stopDigging();
+    void damageHeldTool(int amount);
     void interact(double dt, bool active);
     [[nodiscard]] Camera camera() const;
     [[nodiscard]] std::vector<std::string> debugLines() const;
@@ -304,6 +312,17 @@ private:
     double partialTick_ = 0.0;      // how far the frame is into the next tick (0..1), for the interpolated camera
     std::array<double, 3> spawn_{};
     double breakCooldown_ = 0.0;
+    // Digging in survival (the game's MultiPlayerGameMode): the block being dug, how much of it is gone, the game ticks spent on it, the pause after one broke.
+    std::optional<std::array<int, 3>> digPos_;
+    float digProgress_ = 0.0f;
+    int digTicks_ = 0;
+    int digDelay_ = 0;
+    bool digHeld_ = false;  // the attack button was down last frame
+    Item digItem_ = Item::Air;
+    double digClock_ = 0.0;
+    std::unique_ptr<BlockTags> blockTags_;
+    std::unique_ptr<MiningRules> mining_;
+    std::unique_ptr<BlockLoot> loot_;
     double placeCooldown_ = 0.0;
     double fps_ = 0.0;
     double frameMillis_ = 0.0;
