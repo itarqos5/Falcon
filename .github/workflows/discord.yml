@@ -1,0 +1,43 @@
+# Tells a Discord channel about the commits that land on main.
+#
+#   on every push to main   the new commits, in one message
+#   run by hand (Actions -> Discord -> Run workflow)   the commits already on main, oldest first (give `until` to stop at a commit)
+#
+# Needs the repository secret DISCORD_WEBHOOK_URL (a Discord channel's webhook URL); without it the job does nothing and passes.
+name: Discord
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      until:
+        description: 'Post the history up to and including this commit (empty: the tip of main)'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: discord
+  cancel-in-progress: false
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Post to Discord
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          MODE: ${{ github.event_name == 'push' && 'push' || 'history' }}
+          FROM: ${{ github.event.before }}
+          TO: ${{ github.event_name == 'push' && github.sha || (github.event.inputs.until != '' && github.event.inputs.until || github.sha) }}
+          REPO: ${{ github.repository }}
+          SERVER_URL: ${{ github.server_url }}
+          ACTOR: ${{ github.actor }}
+          REF_NAME: ${{ github.ref_name }}
+        run: node .github/discord/post.mjs
