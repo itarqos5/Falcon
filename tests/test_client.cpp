@@ -27,6 +27,11 @@
 #include "falcon/client.hpp"
 #include "falcon/game/edition_badge.hpp"
 #include "falcon/game/game_options.hpp"
+#include "falcon/game/survival_hud.hpp"
+#include "falcon/game/world_sounds.hpp"
+#include "falcon/world/item_entity.hpp"
+#include "falcon/world/item_registry.hpp"
+#include "falcon/platform/system_info.hpp"
 #include "falcon/world/chunk_cache.hpp"
 #include "falcon/game/gamemode_switcher_screen.hpp"
 #include "falcon/ui/gui_scale.hpp"
@@ -92,6 +97,8 @@
 #include <thread>
 #include <type_traits>
 #include <vector>
+
+falcon::Level makeFlatLevel();  // (defined further down, outside the unnamed namespace)
 
 namespace {
 
@@ -490,6 +497,126 @@ void test_title_layout() {
     CHECK((l.quit == Rect{215, 204, 98, 20}));
     CHECK(l.copyrightX == 427 - 188 - 2);
     CHECK(l.copyrightY == 230);
+}
+
+// The survival bars: positions as Hud.extractPlayerHealth and ContextualBar place them (checked against the 26.3 bytecode), and which icon is full.
+void test_survival_hud() {
+    // 854x480 at GUI scale 2: 427x240 units.
+    const auto l = falcon::computeSurvivalLayout(427, 240);
+    CHECK(l.left == 122 && l.right == 304);  // 427 / 2 = 213: 213 - 91 and 213 + 91, the edges of the 182-wide hotbar
+    CHECK(l.rowY == 201);                    // 39 above the bottom
+    CHECK(l.heartX(0) == 122 && l.heartX(9) == 194 && l.heartX(10) == 122);  // 8 apart, ten to a row
+    CHECK(l.heartY(0) == 201 && l.heartY(10) == 190);                        // a second row is rowHeight (11 with one row's worth of health) higher
+    CHECK(l.foodX(0) == 295 && l.foodX(9) == 223);                           // from the right edge, 9 wide icons 8 apart
+    CHECK(l.xpLeft == 122 && l.xpTop == 211);                                // (427 - 182) / 2, and 24 + 5 above the bottom
+    CHECK(l.levelBaselineY == 205);                                          // 24 + 9 + 2 above the bottom
+    CHECK(falcon::computeSurvivalLayout(427, 240, 60.0f).rowHeight == 9);    // three rows of hearts squeeze together: max(10 - (3 - 2), 3)
+    CHECK(falcon::computeSurvivalLayout(427, 240, 20.0f).rowHeight == 11);
+
+    // Full health is ten full hearts; 13 points is six full, one half; 0 is none.
+    for (int i = 0; i < 10; ++i) CHECK(falcon::heartFill(i, 20.0f) == falcon::BarFill::Full);
+    CHECK(falcon::heartFill(5, 13.0f) == falcon::BarFill::Full);
+    CHECK(falcon::heartFill(6, 13.0f) == falcon::BarFill::Half);
+    CHECK(falcon::heartFill(7, 13.0f) == falcon::BarFill::Empty);
+    CHECK(falcon::heartFill(0, 0.5f) == falcon::BarFill::Half);  // the health is rounded up: half a point still shows a half heart
+    CHECK(falcon::heartFill(0, 0.0f) == falcon::BarFill::Empty);
+    CHECK(falcon::foodFill(9, 20) == falcon::BarFill::Full && falcon::foodFill(3, 7) == falcon::BarFill::Half && falcon::foodFill(4, 7) == falcon::BarFill::Empty);
+    CHECK(falcon::experienceFillWidth(0.0f) == 0 && falcon::experienceFillWidth(0.5f) == 91 && falcon::experienceFillWidth(0.999f) == 182 && falcon::experienceFillWidth(1.0f) == 182);
+
+    // The shakes only happen at 2 hearts or less, and with no saturation left, and the jitter stays inside what it is asked for.
+    CHECK(falcon::heartsShake(4.0f) && !falcon::heartsShake(5.0f));
+    CHECK(falcon::foodShakes(0.0f, 7, 22) && !falcon::foodShakes(0.0f, 7, 23) && !falcon::foodShakes(5.0f, 7, 22));
+    bool sawZero = false, sawOne = false;
+    for (long long tick = 0; tick < 200; ++tick) {
+        const int j = falcon::tickJitter(tick, 3, 2);
+        CHECK(j == 0 || j == 1);
+        (j == 0 ? sawZero : sawOne) = true;
+    }
+    CHECK(sawZero && sawOne);
+}
+
+void test_system_info() {
+    // The CPU name without the marketing.
+    CHECK(falcon::cleanCpuName("AMD Ryzen 5 5600G with Radeon Graphics") == "AMD Ryzen 5 5600G");
+    CHECK(falcon::cleanCpuName("Intel(R) Core(TM) i7-9700K CPU @ 3.60GHz") == "Intel Core i7-9700K");
+    CHECK(falcon::cleanCpuName("AMD Ryzen 5 3600 6-Core Processor        ") == "AMD Ryzen 5 3600");
+    CHECK(falcon::cleanCpuName("") == "");
+    CHECK(falcon::formatByteSize(34'359'738'368ull) == "32.0 GB");
+    CHECK(falcon::formatByteSize(512ull * 1024 * 1024) == "512 MB");
+    // The PC this runs on has a processor, an operating system and some memory; and what is free cannot be more than what there is.
+    const falcon::SystemInfo& pc = falcon::systemInfo();
+    CHECK(pc.logicalProcessors >= 1);
+    CHECK(!pc.os.empty());
+    CHECK(pc.totalMemory > 256ull * 1024 * 1024);
+    const falcon::SystemMemory m = falcon::systemMemory();
+    CHECK(m.total > 0 && m.available > 0 && m.available <= m.total);
+    CHECK(!falcon::findGpuAdapter("").has_value());
+}
+
+// What makes a step sound, and how the world's sounds are mixed (checked against Entity.applyMovementEmissionAndPlaySound, SoundType and
+// LivingEntity.getFallDamageSound in the 26.3 bytecode).
+void test_world_sounds() {
+    falcon::StepClock clock;
+    CHECK(!clock.due() && clock.nextStep() == 1.0f);
+    for (int i = 0; i < 16; ++i) clock.add(0.1);  // 1.6 blocks: 0.96 of the clock
+    CHECK(!clock.due());
+    clock.add(0.1);  // 1.7 blocks: 1.02, past the first mark
+    CHECK(clock.due());
+    clock.played();
+    CHECK(clock.nextStep() == 2.0f && !clock.due());
+    // A jump: the distance flown while there was nothing to land on is added without a sound, and the landing makes the sound at once.
+    for (int i = 0; i < 12; ++i) clock.add(0.4);  // 4.8 blocks: 2.88 + 1.02 = 3.9
+    CHECK(clock.due());
+    clock.played();
+    CHECK(clock.nextStep() == 4.0f);
+
+    CHECK(falcon::blockSoundEvent("stone", "break") == "block.stone.break");
+    CHECK(falcon::breakOrPlaceMix(1.0f, 1.0f).volume == 1.0f && std::abs(falcon::breakOrPlaceMix(1.0f, 1.0f).pitch - 0.8f) < 1e-6f);
+    CHECK(std::abs(falcon::breakOrPlaceMix(0.3f, 1.0f).volume - 0.65f) < 1e-6f);  // an anvil's own volume is 0.3
+    CHECK(std::abs(falcon::stepMix(1.0f, 1.2f).volume - 0.15f) < 1e-6f && falcon::stepMix(1.0f, 1.2f).pitch == 1.2f);
+    CHECK(std::abs(falcon::mutedStepMix(1.0f, 1.0f).volume - 0.05f) < 1e-6f && std::abs(falcon::mutedStepMix(1.0f, 1.0f).pitch - 0.8f) < 1e-6f);
+    CHECK(std::abs(falcon::fallMix(1.0f, 1.0f).volume - 0.5f) < 1e-6f && std::abs(falcon::fallMix(1.0f, 1.0f).pitch - 0.75f) < 1e-6f);
+    CHECK(std::string(falcon::fallDamageEvent(4)) == "entity.player.small_fall" && std::string(falcon::fallDamageEvent(5)) == "entity.player.big_fall");
+}
+
+// Items lying in the world: they fall with the game's gravity and drag, settle on the ground, count their pickup delay down, join a neighbour of the
+// same kind, and are gone after five minutes.
+void test_item_entities() {
+    falcon::Level level = makeFlatLevel();  // the ground's surface is at y = -60
+    const falcon::Item stone = falcon::itemRegistry().find("stone").value();
+    falcon::ItemEntities items;
+    falcon::ItemEntity& a = items.spawn(falcon::ItemStack(stone, 1), 0.5, -57.0, 0.5, 0.0, 0.0, 0.0, 10, 0.0f);
+    CHECK(!a.onGround);
+    items.tick(level);
+    CHECK(std::abs(items.items()[0].vy - (-0.04 * 0.98)) < 1e-9 || std::abs(items.items()[0].vy - (-0.04)) < 1e-9);  // gravity 0.04, then the drag of 0.98
+    CHECK(items.items()[0].pickupDelay == 9);
+    for (int i = 0; i < 40; ++i) items.tick(level);
+    CHECK(items.items().size() == 1);
+    const falcon::ItemEntity& landed = items.items()[0];
+    CHECK(landed.onGround && std::abs(landed.y - (-60.0)) < 1e-6);   // on top of the grass
+    CHECK(std::abs(landed.vy) < 0.2 && landed.pickupDelay == 0);  // (resting, it only moves every fourth tick, so gravity builds up a little in between)
+    CHECK(landed.age == 41);
+
+    // Two stacks of the same kind side by side become one (the bigger stays), and a different kind stays apart.
+    falcon::ItemEntities pile;
+    pile.spawn(falcon::ItemStack(stone, 5), 3.5, -60.0, 3.5, 0.0, 0.0, 0.0, 0, 0.0f);
+    pile.spawn(falcon::ItemStack(stone, 3), 3.7, -60.0, 3.6, 0.0, 0.0, 0.0, 0, 0.0f);
+    pile.spawn(falcon::ItemStack(falcon::itemRegistry().find("dirt").value(), 2), 3.6, -60.0, 3.5, 0.0, 0.0, 0.0, 0, 0.0f);
+    for (int i = 0; i < 80; ++i) pile.tick(level);
+    int stoneCount = 0, stacks = 0;
+    for (const falcon::ItemEntity& e : pile.items()) {
+        ++stacks;
+        if (e.stack.item == stone) stoneCount += e.stack.count;
+    }
+    CHECK(stacks == 2 && stoneCount == 8);
+
+    // Five minutes (6000 ticks) and it is gone; what has not been picked up by then vanishes.
+    falcon::ItemEntities old;
+    old.spawn(falcon::ItemStack(stone, 1), 5.5, -60.0, 5.5, 0.0, 0.0, 0.0, 0, 0.0f).age = falcon::ItemEntity::kLifetimeTicks - 1;
+    old.tick(level);
+    CHECK(old.items().empty());
+    CHECK(falcon::ItemEntities::renderedAmount(1) == 1 && falcon::ItemEntities::renderedAmount(16) == 2 && falcon::ItemEntities::renderedAmount(17) == 3 &&
+          falcon::ItemEntities::renderedAmount(33) == 4 && falcon::ItemEntities::renderedAmount(49) == 5);
 }
 
 void test_options_layout() {
@@ -2608,6 +2735,49 @@ void test_mesher() {
     const auto mesh = [&](const falcon::SectionNeighborhood& n) { return falcon::meshSection(n, models, 0, 0, 0); };
     // Nothing to draw in air, and a lone block has six quads (24 vertices), none merged.
     CHECK(mesh(around(nullptr)).empty());
+
+    // How the faces of a section connect (what the renderer's occlusion culling walks through). Faces: west 0, east 1, down 2, up 3, north 4, south 5;
+    // bit (a * 6 + b) says that face a can see face b through the section.
+    {
+        const auto bit = [](int a, int b) { return 1ull << (a * 6 + b); };
+        const auto connected = [&](const falcon::SectionMesh& m, int a, int b) { return (m.visibility & bit(a, b)) != 0; };
+        enum { West, East, Down, Up, North, South };
+        CHECK(mesh(around(nullptr)).visibility == falcon::kVisibilityOpen);  // air: everything is connected
+        falcon::SectionBuilder rock;
+        rock.fill(cb.stone);
+        CHECK(mesh(around(rock.build())).visibility == 0);  // solid: nothing is
+        falcon::SectionBuilder lone;
+        lone.set(5, 6, 7, cb.stone);
+        CHECK(mesh(around(lone.build())).visibility == falcon::kVisibilityOpen);  // one block in the way does not close anything
+        // A floor across the whole section: the faces above it and the faces below it are not connected, the sides above are connected to each other.
+        falcon::SectionBuilder slab;
+        slab.fillLayers(8, 9, cb.stone);
+        const auto split = mesh(around(slab.build()));
+        CHECK(!connected(split, Up, Down) && !connected(split, Down, Up));
+        CHECK(connected(split, West, East) && connected(split, Up, North) && connected(split, Down, South));
+        // A wall across it from top to bottom: west and east are cut off from each other, up and down are not.
+        falcon::SectionBuilder wallAcross;
+        for (int y = 0; y < 16; ++y) {
+            for (int z = 0; z < 16; ++z) wallAcross.set(8, y, z, cb.stone);
+        }
+        const auto cut = mesh(around(wallAcross.build()));
+        CHECK(!connected(cut, West, East) && !connected(cut, East, West));
+        CHECK(connected(cut, Up, Down) && connected(cut, West, Up) && connected(cut, East, Down));
+        // A tunnel through rock, west to east: only those two faces see each other (it never touches the others).
+        falcon::SectionBuilder tunnel;
+        tunnel.fill(cb.stone);
+        for (int x = 0; x < 16; ++x) tunnel.set(x, 5, 5, Block::Air);
+        const auto bore = mesh(around(tunnel.build()));
+        CHECK(connected(bore, West, East) && connected(bore, East, West));
+        CHECK(!connected(bore, West, Up) && !connected(bore, West, Down) && !connected(bore, West, North) && !connected(bore, East, South));
+        // A cave with one opening to the north and one to the up side: those two see each other.
+        falcon::SectionBuilder cave;
+        cave.fill(cb.stone);
+        for (int z = 0; z <= 8; ++z) cave.set(8, 8, z, Block::Air);  // from the north face to the middle
+        for (int y = 8; y < 16; ++y) cave.set(8, y, 8, Block::Air);  // from the middle to the up face
+        const auto bend = mesh(around(cave.build()));
+        CHECK(connected(bend, North, Up) && connected(bend, Up, North) && !connected(bend, North, East) && !connected(bend, Up, Down));
+    }
     falcon::SectionBuilder one;
     one.set(5, 6, 7, cb.stone);
     const auto single = mesh(around(one.build()));
@@ -4122,6 +4292,10 @@ int main() {
     test_world_storage();
     test_terrain();
     test_mesher();
+    test_survival_hud();
+    test_system_info();
+    test_world_sounds();
+    test_item_entities();
     test_player_physics();
     test_block_registry();
     test_light();
