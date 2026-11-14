@@ -433,9 +433,20 @@ PRODUCTVERSION ${PROJECT_VERSION_MAJOR},${PROJECT_VERSION_MINOR},${PROJECT_VERSI
 endif()
 
 # ---------------------------------------------------------------------------
+    # (the launcher's resource file uses the same icon file)
+    add_custom_target(falcon_icon DEPENDS "${FALCON_ICO}")
 # Tests
 # ---------------------------------------------------------------------------
 if(FALCON_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
+endif()
+
+# ---------------------------------------------------------------------------
+# The launcher (Windows): a native window with a React UI in the system's WebView2. Not part of the ordinary build (it needs Node, and builds
+# the game first): cmake --build --preset launcher. See launcher/README.md.
+# ---------------------------------------------------------------------------
+option(FALCON_BUILD_LAUNCHER "Make the launcher target available (cmake --build --preset launcher)" ON)
+if(WIN32 AND FALCON_BUILD_LAUNCHER)
+    add_subdirectory(launcher)
 endif()

@@ -61,3 +61,8 @@ tests/data/chunks_seed12345.bin
 /scratch/
 /scratchpad/
 .claude/
+
+# The launcher: its finished exe, and the UI's packages (the UI itself is built into build/launcher/ui)
+/dist-launcher/
+node_modules/
+launcher/ui/dist/

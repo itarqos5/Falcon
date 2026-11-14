@@ -24,7 +24,8 @@
   "buildPresets": [
     { "name": "release", "configurePreset": "release" },
     { "name": "debug", "configurePreset": "debug" },
-    { "name": "check", "configurePreset": "release", "targets": ["check"] }
+    { "name": "check", "configurePreset": "release", "targets": ["check"] },
+    { "name": "launcher", "configurePreset": "release", "targets": ["falcon_launcher"] }
   ],
   "testPresets": [
     {
