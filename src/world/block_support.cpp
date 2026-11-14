@@ -62,6 +62,7 @@ std::shared_ptr<const BlockSupport> BlockSupport::loadFromGameData(const fs::pat
     const std::size_t n = registry.blocks().size();
     out->soil_.assign(n, Soil::None);
     out->halfProperty_.assign(n, 0);
+    out->torchKind_.assign(n, 0);
 
     // The class chain of each block: {"name":"minecraft:tall_grass","class":["DoublePlantBlock","VegetationBlock","Block"], ...
     // (a plain scan: the file is 2 MB and this runs when a world opens).
@@ -90,6 +91,8 @@ std::shared_ptr<const BlockSupport> BlockSupport::loadFromGameData(const fs::pat
         out->soil_[static_cast<std::size_t>(*block)] = soil;
     }
     for (std::size_t i = 0; i < n; ++i) {
+        const std::string& blockName = registry.blocks()[i].name;
+        if (blockName.size() >= 5 && blockName.compare(blockName.size() - 5, 5, "torch") == 0) out->torchKind_[i] = blockName.find("wall_torch") != std::string::npos ? 2 : 1;
         for (const BlockProperty& p : registry.blocks()[i].properties) {
             if (p.name == "half" && std::find(p.values.begin(), p.values.end(), "lower") != p.values.end()) out->halfProperty_[i] = 1;
         }
@@ -122,6 +125,17 @@ bool BlockSupport::canSurvive(Block block, int x, int y, int z, const Reader& at
         const Block below = at(x, y - 1, z);
         return registry_->state(below).block == registry_->state(block).block && registry_->get(below, "half") == "lower";
     }
+    if (torchKind_[index] != 0) {  // TorchBlock.canSurvive: a sturdy block below; WallTorchBlock: one behind (opposite to where it faces)
+        int dx = 0, dy = 0, dz = 0;
+        if (torchKind_[index] == 1) {
+            dy = -1;
+        } else {
+            const std::string_view facing = registry_->get(block, "facing");
+            dx = facing == "east" ? -1 : facing == "west" ? 1 : 0;
+            dz = facing == "south" ? -1 : facing == "north" ? 1 : 0;
+        }
+        return registry_->state(at(x + dx, y + dy, z + dz)).has(kStateFullCollision);
+    }
     if (soil == Soil::None) return true;
     const std::size_t under = static_cast<std::size_t>(registry_->state(at(x, y - 1, z)).block);
     switch (soil) {
@@ -146,8 +160,10 @@ Block BlockSupport::afterNeighborChange(Block block, int x, int y, int z, const 
         if (lower && soil_[index] != Soil::None && !canSurvive(block, x, y, z, at)) return commonBlocks().air;  // the soil under the lower half
         return block;
     }
-    if (soil_[index] != Soil::None && !canSurvive(block, x, y, z, at)) return commonBlocks().air;
+    if ((soil_[index] != Soil::None || torchKind_[index] != 0) && !canSurvive(block, x, y, z, at)) return commonBlocks().air;
     return block;
 }
+
+bool BlockSupport::isTorch(Block block) const { return torchKind_[static_cast<std::size_t>(registry_->state(block).block)] != 0; }
 
 }  // namespace falcon

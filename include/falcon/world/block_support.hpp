@@ -37,12 +37,15 @@ public:
     [[nodiscard]] bool isDoubleHalf(Block block) const;  // lower or upper
     // A plant that needs soil under it (flowers, grass, saplings, crops ...).
     [[nodiscard]] bool needsSoil(Block block) const;
+    // A torch (standing or on a wall), which needs a full block to rest against.
+    [[nodiscard]] bool isTorch(Block block) const;
 
 private:
     enum class Soil : std::uint8_t { None, Vegetation, Crops, Dry };
     const BlockRegistry* registry_ = nullptr;
     std::vector<Soil> soil_;                  // per block index
     std::vector<std::uint8_t> halfProperty_;  // per block index: 1 if it has a half = lower/upper
+    std::vector<std::uint8_t> torchKind_;     // per block index: 1 a torch standing on the block below, 2 a wall torch hanging on the block behind it
     std::vector<std::uint8_t> vegetationTag_, cropsTag_, dryTag_;  // per block index: 1 if the tag holds it
 };
 

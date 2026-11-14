@@ -1527,3 +1527,13 @@ void WorldRenderer::drawHeld(const Matrix4f& mvp, const std::vector<MeshVertex>&
 }
 
 }  // namespace falcon
+void WorldRenderer::lightAtWithCarried(int x, int y, int z, int& sky, int& block) const {
+    lightAt(x, y, z, sky, block);
+    if (heldLightLevel_ <= 0) return;
+    const int half = kHeldLightSize / 2;  // the volume's corner is `half` blocks off the block it shines from (see setCarriedLight)
+    const int cx = x - (heldLightX_ - half), cy = y - (heldLightY_ - half), cz = z - (heldLightZ_ - half);
+    if (cx < 0 || cy < 0 || cz < 0 || cx >= kHeldLightSize || cy >= kHeldLightSize || cz >= kHeldLightSize) return;
+    const std::size_t index = static_cast<std::size_t>(cx + kHeldLightSize * (cy + kHeldLightSize * cz));
+    if (index < heldLightVolume_.size()) block = std::max(block, static_cast<int>(heldLightVolume_[index]) / 17);
+}
+

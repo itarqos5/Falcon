@@ -754,7 +754,7 @@ void GameSession::interact(double dt, bool active) {
         ItemStack& heldStack = inventory_.selectedItem();
         const int heldBlock = heldStack.isEmpty() ? -1 : heldStack.type().blockIndex;
         if (heldBlock >= 0 && inWorld && registry_->state(there).has(kStateReplaceable) && !insidePlayer) {
-            const Block placed = blockStateForPlacement({*registry_, heldBlock, *target_, player_.yaw, player_.pitch, player_.sneaking});
+            Block placed = blockStateForPlacement({*registry_, heldBlock, *target_, player_.yaw, player_.pitch, player_.sneaking});
             // BlockItem.canPlace: a plant needs its soil, and a tall one (DoubleHighBlockItem) the cell above free as well.
             const BlockSupport::Reader at = [this](int bx, int by, int bz) { return renderer_.level().block(bx, by, bz); };
             const bool tall = support_ && support_->isLowerHalf(placed);
@@ -862,6 +862,8 @@ void GameSession::update(double dt, bool active, int framebufferWidth, int frame
         save();
     }
     interact(dt, active);
+            // A wall torch with nothing sturdy to hang on (a click on the side of a flower, say) falls back to the standing torch, as StandingAndWallBlockItem does.
+            if (support_ && !support_->canSurvive(placed, place[0], place[1], place[2], at) && registry_->defaultState(heldBlock) != placed) placed = registry_->defaultState(heldBlock);
 }
 
 bool GameSession::keyIs(const char* action, int key) const {
@@ -1013,7 +1015,8 @@ void GameSession::onScroll(double dy) {
 void GameSession::renderWorld(int framebufferWidth, int framebufferHeight) {
     const Camera cam = camera();
     // A torch (or any light-giving block) in the hand lights the blocks round the player while it is held.
-    const int carried = ready_ && info_.gameType != 3 ? carriedLightLevel(inventory_.selectedItem()) : 0;
+    // (the main hand or the offhand: either one lights the way)
+    const int carried = ready_ && info_.gameType != 3 ? std::max(carriedLightLevel(inventory_.selectedItem()), carriedLightLevel(inventory_.offhand())) : 0;
     renderer_.setCarriedLight(static_cast<int>(std::floor(cam.x)), static_cast<int>(std::floor(cam.y)), static_cast<int>(std::floor(cam.z)), carried);
     // Under water the sky is gone and the world fades into the biome's water fog (see water_fog.hpp).
     const bool eyesInWater = ready_ && player_.isUnderWater();
@@ -1051,7 +1054,7 @@ void GameSession::renderWorld(int framebufferWidth, int framebufferHeight) {
             pose.ageTicks = playerAgeTicks_ + partialTick_;
             pose.parts = services_.options.modelParts;
             int sky = 15, block = 0;
-            renderer_.lightAt(static_cast<int>(std::floor(pose.position[0])), static_cast<int>(std::floor(pose.position[1] + 1.0)), static_cast<int>(std::floor(pose.position[2])), sky, block);
+            renderer_.lightAtWithCarried(static_cast<int>(std::floor(pose.position[0])), static_cast<int>(std::floor(pose.position[1] + 1.0)), static_cast<int>(std::floor(pose.position[2])), sky, block);
             pose.light = entityLightColor(sky, block, static_cast<float>(services_.options.gamma));
             body_->render(renderer_.viewProjection(), camPos, pose);
         }

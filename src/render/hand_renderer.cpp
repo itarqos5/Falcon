@@ -520,7 +520,7 @@ void HandRenderer::renderGroundItems(WorldRenderer& world, const Matrix4f& viewP
         const double spinDegrees = (age / 20.0 + static_cast<double>(e.bobOffset)) / kDeg;
         const M4 base = translate(px, py + bob + 0.25 * static_cast<double>(ground.scale[1]), pz) * rotY(spinDegrees);
         int sky = 15, block = 0;
-        world.lightAt(static_cast<int>(std::floor(e.x)), static_cast<int>(std::floor(e.y + 0.1)), static_cast<int>(std::floor(e.z)), sky, block);
+        world.lightAtWithCarried(static_cast<int>(std::floor(e.x)), static_cast<int>(std::floor(e.y + 0.1)), static_cast<int>(std::floor(e.z)), sky, block);
         std::vector<MeshVertex> vertices = model.vertices;
         for (MeshVertex& v : vertices) {
             v.sky = static_cast<std::uint8_t>(sky * 17);

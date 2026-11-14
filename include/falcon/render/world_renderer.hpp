@@ -133,6 +133,8 @@ public:
     // The sky and block light (0..15) of a block (full sky where no light is known yet).
     void lightAt(int x, int y, int z, int& sky, int& block) const;
 
+    // The same with the light the player carries (a held torch) counted in: what lights things drawn near the player that are not part of a mesh (dropped items).
+    void lightAtWithCarried(int x, int y, int z, int& sky, int& block) const;
     // Loads and unloads chunks around the player (block coordinates) for a render distance in chunks, and uploads
     // finished meshes for at most `uploadBudgetMs`.
     void update(double playerX, double playerZ, int renderDistance, double uploadBudgetMs);
