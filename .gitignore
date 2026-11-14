@@ -1,0 +1,63 @@
+# Build output (dist/ holds the finished game and is rewritten on every build)
+/build/
+/dist/
+/out/
+CMakeUserPresets.json
+compile_commands.json
+
+# IDE / editor
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+
+# Compiled artifacts
+*.o
+*.obj
+*.exe
+*.dll
+*.lib
+*.a
+*.pdb
+*.ilk
+
+# ---- Nothing of Minecraft goes in this repository ----------------------------------------------------------------------------
+# Falcon reads the game's assets and data from the player's own installation at run time; none of it is copied here. These keep it
+# that way if someone unpacks, exports or generates any of it inside the project folder.
+/assets/
+/data/
+/minecraft/
+/versions/
+/libraries/
+/saves/
+/resourcepacks/
+/worlds/
+/vanilla/
+/vserver/
+*.jar
+*.class
+*.mca
+*.mcr
+*.nbt
+level.dat
+registries.json
+gameplay-facts.json
+cached-collision.nbt
+entity-models.json
+block-behaviours.json
+model-states.json
+# Game logs, and caches Falcon builds from the game's data (falcon_cache/) or writes next to itself
+/logs/
+*.log
+*.log.gz
+falcon_cache/
+falcon_options.txt
+/screenshots/
+# Block data the game's own generator produced (a ground-truth sample for one test, which skips without it)
+tests/data/chunks_seed12345.bin
+
+# Local notes and scratch
+/scratch/
+/scratchpad/
+.claude/
