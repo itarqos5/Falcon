@@ -58,6 +58,10 @@ struct RenderStats {
     int jobsWaiting = 0;
     int jobsInFlight = 0;       // chunks being made or meshed (running or waiting)
     int uploadsThisFrame = 0;
+    int drawCalls = 0;          // OpenGL draw calls the world took this frame
+    int drawCommands = 0;       // runs of quads drawn (with multi-draw, many commands share one call)
+    bool occlusionCulling = false;
+    bool multiDraw = false;
 };
 
 // How far around the player (in chunks) chunks are generated and kept, for a render distance: the drawn disk of radius R plus a
@@ -120,6 +124,8 @@ public:
     void setCutoutLeaves(bool on);
     // A small model drawn on top of the world with the world's shader (the held item): `mvp` takes its 0..1 space to the screen.
     void drawHeld(const Matrix4f& mvp, const std::vector<MeshVertex>& vertices);
+    // The view and projection of the last frame drawn (the world is drawn relative to the camera): for drawing other things in it.
+    [[nodiscard]] const Matrix4f& viewProjection() const { return lastViewProj_; }
     // The sky and block light (0..15) of a block (full sky where no light is known yet).
     void lightAt(int x, int y, int z, int& sky, int& block) const;
 
@@ -190,6 +196,7 @@ private:
         bool lodFar = false;
         bool leafInterior = false;
         std::array<int, kFacingGroups> opaqueGroups{}, cutoutGroups{};
+        std::uint64_t visibility = kVisibilityOpen;  // how the faces of the section connect (occlusion culling)
     };
     struct ChunkResult {
         ChunkPos pos;
@@ -306,6 +313,60 @@ private:
     ChunkCache chunkCache_{128u * 1024u * 1024u};
     std::vector<VisibleSection> visible_;  // reused every frame
     double gpuMillis_ = 0.0;
+
+    // ---- Occlusion culling ------------------------------------------------------------------------------------------------------
+    // Every section of the area around the player has a cell in a dense grid (x and z wrap, 128 chunks across, which is more than the
+    // largest render distance needs) holding what the mesher said about how its six faces connect, and a pointer to its mesh when it
+    // has one. Each frame the sections are walked from the camera's own outwards, through the faces that connect (a section that is
+    // solid rock lets nothing pass), so a cave below the ground or a valley behind a hill is never drawn. A section that has not been
+    // meshed yet counts as open, so nothing is ever hidden by something that is not known.
+    static constexpr int kGridSize = 128;
+    [[nodiscard]] static std::size_t gridIndex(int chunkX, int sectionY, int chunkZ) {
+        return (static_cast<std::size_t>(chunkZ & (kGridSize - 1)) * kGridSize + static_cast<std::size_t>(chunkX & (kGridSize - 1))) * kSectionCount +
+               static_cast<std::size_t>(sectionY);
+    }
+    std::vector<const GpuSection*> gridSection_;
+    std::vector<std::uint64_t> gridVisibility_;
+    std::vector<std::uint32_t> gridStamp_;  // the traversal that last reached each cell
+    std::vector<std::uint8_t> gridIncoming_;   // faces a traversal entered the cell through (a set)
+    std::vector<std::uint8_t> gridTravelled_;  // directions it has moved in to get there (a set): it never turns back on them
+    std::uint32_t traversalStamp_ = 0;
+    struct TraversalNode {
+        std::uint32_t cell;  // index into the grid
+        std::int32_t x, z;   // chunk
+        std::int8_t y;       // section
+    };
+    std::vector<TraversalNode> traversal_;
+    std::vector<const VisibleSection*> translucentOrder_;  // sections with see-through blocks, farthest first
+    bool useOcclusion_ = true;
+    void setGrid(const SectionKey& key, const GpuSection* section, std::uint64_t visibility);
+    void collectVisibleByTraversal(const Camera& camera, const Frustum& frustum, float reach);
+    void collectVisibleByScan(const Camera& camera, const Frustum& frustum, float reach);
+
+    // ---- Drawing the lists with a few calls (OpenGL 4.3) --------------------------------------------------------------------------
+    // One command per run of quads of a section (the same runs the one-by-one way draws), and one section offset per command, which the
+    // vertex shader gets as an instanced attribute (the command's base instance picks it). All three passes go into the two buffers
+    // before the first of them is drawn.
+    struct IndirectCommand {
+        std::uint32_t count, instanceCount, firstIndex;
+        std::int32_t baseVertex;
+        std::uint32_t baseInstance;
+    };
+    bool useMultiDraw_ = false;
+    gl::GLuint arenaVaoInstanced_ = 0;
+    gl::GLuint commandBuffer_ = 0;
+    gl::GLuint offsetBuffer_ = 0;
+    std::size_t commandBufferCapacity_ = 0, offsetBufferCapacity_ = 0;  // bytes
+    std::vector<IndirectCommand> commands_;
+    std::vector<float> commandOffsets_;
+    gl::GLint uInstanced_ = -1;
+
+    // ---- The light map as a 16 x 16 picture (sky light x block light), made again when the Brightness option changes ----------------
+    gl::GLuint lightmapTex_ = 0;
+    gl::GLint uLightmap_ = -1;
+    float lightmapBrightness_ = -1.0f;
+    Matrix4f lastViewProj_ = Matrix4f::identity();
+    void updateLightmap();
 
     // Last so the workers stop (and are joined) before anything above them is destroyed.
     PriorityPool pool_;

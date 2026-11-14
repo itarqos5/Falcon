@@ -84,6 +84,8 @@ inline constexpr GLenum ARRAY_BUFFER = 0x8892;
 inline constexpr GLenum ELEMENT_ARRAY_BUFFER = 0x8893;
 inline constexpr GLenum COPY_READ_BUFFER = 0x8F36;
 inline constexpr GLenum COPY_WRITE_BUFFER = 0x8F37;
+inline constexpr GLenum DRAW_INDIRECT_BUFFER = 0x8F3F;  // (GL 4.3)
+inline constexpr GLenum RGBA16F = 0x881A;
 inline constexpr GLenum STATIC_DRAW = 0x88E4;
 inline constexpr GLenum STREAM_DRAW = 0x88E0;
 inline constexpr GLenum TRIANGLES = 0x0004;
@@ -172,13 +174,29 @@ inline constexpr GLenum VERSION = 0x1F02;
     X(void, EndQuery, (GLenum))                                                               \
     X(void, GetQueryObjectui64v, (GLuint, GLenum, GLuint64*))                                 \
     X(void, GetQueryObjectiv, (GLuint, GLenum, GLint*))                                       \
-    X(void, DrawElementsBaseVertex, (GLenum, GLsizei, GLenum, const void*, GLint))
+    X(void, DrawElementsBaseVertex, (GLenum, GLsizei, GLenum, const void*, GLint))            \
+    X(void, VertexAttribDivisor, (GLuint, GLuint))
 
 #define FALCON_GL_DECLARE(ret, name, args)       \
     using PFN_##name = ret(APIENTRY*) args;    \
     extern PFN_##name name;
 FALCON_GL_FUNCTIONS(FALCON_GL_DECLARE)
 #undef FALCON_GL_DECLARE
+
+// Entry points of newer OpenGL versions, loaded when the context has them and used only after checking multiDrawIndirectAvailable().
+#define FALCON_GL_OPTIONAL_FUNCTIONS(X) \
+    X(void, MultiDrawElementsIndirect, (GLenum, GLenum, const void*, GLsizei, GLsizei))
+#define FALCON_GL_DECLARE_OPTIONAL(ret, name, args) \
+    using PFN_##name = ret(APIENTRY*) args;         \
+    extern PFN_##name name;
+FALCON_GL_OPTIONAL_FUNCTIONS(FALCON_GL_DECLARE_OPTIONAL)
+#undef FALCON_GL_DECLARE_OPTIONAL
+
+// The version of the current context (set by load()).
+extern int contextMajor;
+extern int contextMinor;
+// glMultiDrawElementsIndirect with a base instance per command (OpenGL 4.3): one call draws a whole list of sections.
+[[nodiscard]] bool multiDrawIndirectAvailable();
 
 // Resolves every entry point. Throws std::runtime_error listing any that are missing.
 void load();

@@ -21,10 +21,23 @@ struct MeshVertex {
     std::int16_t x, y, z, layer;
     std::int16_t u, v;
     std::uint8_t r, g, b, shade;
-    std::uint8_t sky, block, unused0, unused1;
+    std::uint8_t sky, block, face, unused1;  // face: 1 + the Face the quad lies square to (0: not known)
 };
 static_assert(sizeof(MeshVertex) == 20);
 inline constexpr int kMeshScale = 1024;
+
+// Which faces of a section can see each other through it, for occlusion culling. The six faces are numbered west (-x), east (+x), down (-y),
+// up (+y), north (-z), south (+z), so that the opposite of face f is f ^ 1. Bit (a * 6 + b) is set when a path of cells that do not block sight
+// leads from face a to face b. A section that is not known yet counts as open (everything is connected: nothing is hidden behind it).
+inline constexpr std::uint64_t kVisibilityOpen = [] {
+    std::uint64_t mask = 0;
+    for (int a = 0; a < 6; ++a) {
+        for (int b = 0; b < 6; ++b) {
+            if (a != b) mask |= 1ull << (a * 6 + b);
+        }
+    }
+    return mask;
+}();
 
 // The triangles of one section, one list per way of drawing; four vertices per quad (the index list is the same for
 // every quad and is shared).
@@ -35,6 +48,8 @@ struct SectionMesh {
     // True if the section has leaf faces between two leaf blocks (hidden by nothing, kept by Fancy leaves): the faces the leaf level of
     // detail drops far away. Only sections with some are worth building again when the player comes near or goes far.
     bool leafInterior = false;
+    // How the faces of this section connect (see kVisibilityOpen). Solid rock is 0, air is kVisibilityOpen.
+    std::uint64_t visibility = kVisibilityOpen;
     // For each quad of the three lists, the way it faces: a Face (0..5) when it lies square to an axis, kAnyFacing (6) otherwise. The
     // renderer puts the quads of one direction together so that a section can skip the directions that turn away from the camera.
     std::vector<std::uint8_t> opaqueFace, cutoutFace, translucentFace;

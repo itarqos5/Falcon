@@ -20,6 +20,8 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <cstdlib>
+#include <utility>
 #include <stdexcept>
 
 namespace falcon {
@@ -31,6 +33,36 @@ void onGlfwError(int code, const char* description) {
 
 // Gives the window a dark title bar and dark caption buttons (Windows 10 version 1809 and later, and 11), to
 // match the dark menus, whatever the system's own colour theme is. Older Windows ignores the request.
+#ifdef _WIN32
+// Borderless windows (--borderless): the window has no frame, so there is nothing to grab. The top edge answers Windows' "what is under the
+// mouse" with "the title bar", which lets the person move the window by it. Not while the window is fullscreen.
+WNDPROC g_originalProc = nullptr;
+bool g_dragStrip = false;
+
+LRESULT CALLBACK borderlessProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) {
+    if (message == WM_NCHITTEST && g_dragStrip) {
+        const LRESULT hit = CallWindowProcW(g_originalProc, hwnd, message, wParam, lParam);
+        if (hit == HTCLIENT) {
+            RECT rect{};
+            GetWindowRect(hwnd, &rect);
+            const int y = static_cast<short>((static_cast<unsigned long long>(lParam) >> 16) & 0xFFFF);
+            if (y >= rect.top && y < rect.top + MulDiv(GetSystemMetrics(SM_CYCAPTION), 5, 4)) return HTCAPTION;  // (about 29 px at 100%, more on a scaled display)
+        }
+        return hit;
+    }
+    return CallWindowProcW(g_originalProc, hwnd, message, wParam, lParam);
+}
+
+void makeBorderless(HWND hwnd) {
+    g_originalProc = reinterpret_cast<WNDPROC>(SetWindowLongPtrW(hwnd, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(&borderlessProc)));
+    g_dragStrip = true;
+    const MARGINS margins{1, 1, 1, 1};  // (keeps the window's shadow, which a frameless window would otherwise lose)
+    DwmExtendFrameIntoClientArea(hwnd, &margins);
+    const DWORD rounded = 2;  // DWMWCP_ROUND: Windows 11 rounds the corners
+    DwmSetWindowAttribute(hwnd, 33 /* DWMWA_WINDOW_CORNER_PREFERENCE */, &rounded, sizeof(rounded));
+}
+#endif
+
 void useDarkTitleBar([[maybe_unused]] GLFWwindow* window) {
 #ifdef _WIN32
     HWND hwnd = glfwGetWin32Window(window);
@@ -47,8 +79,8 @@ void useDarkTitleBar([[maybe_unused]] GLFWwindow* window) {
 
 }  // namespace
 
-Window::Window(int width, int height, const std::string& title, bool background, bool startHidden)
-    : background_(background) {
+Window::Window(int width, int height, const std::string& title, bool background, bool startHidden, bool borderless)
+    : background_(background), borderless_(borderless && !background) {
     glfwSetErrorCallback(onGlfwError);
     if (glfwInit() == GLFW_FALSE) throw std::runtime_error("failed to initialise GLFW");
 #ifdef _WIN32
@@ -57,23 +89,36 @@ Window::Window(int width, int height, const std::string& title, bool background,
     timeBeginPeriod(1);
 #endif
 
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
     glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GLFW_TRUE);
     if (startHidden && !background) glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
+    if (borderless_) glfwWindowHint(GLFW_DECORATED, GLFW_FALSE);
     if (background) {  // never appears, never takes focus from the person's game
         glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
         glfwWindowHint(GLFW_FOCUSED, GLFW_FALSE);
         glfwWindowHint(GLFW_FOCUS_ON_SHOW, GLFW_FALSE);
     }
 
-    handle_ = glfwCreateWindow(width, height, title.c_str(), nullptr, nullptr);
+    // OpenGL 4.5 first: its multi-draw-indirect lets the world be drawn in a few calls instead of thousands. Everything the game uses is
+    // part of 3.3 core, so a graphics driver that cannot do 4.5 gets a 3.3 context and the game draws sections one by one (FALCON_GL33
+    // asks for that on purpose, to compare the two).
+    static const bool only33 = std::getenv("FALCON_GL33") != nullptr;
+    handle_ = nullptr;
+    for (const auto& [major, minor] : {std::pair<int, int>{4, 5}, std::pair<int, int>{3, 3}}) {
+        if (only33 && major != 3) continue;
+        glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, major);
+        glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, minor);
+        handle_ = glfwCreateWindow(width, height, title.c_str(), nullptr, nullptr);
+        if (handle_ != nullptr) break;
+    }
     if (handle_ == nullptr) {
         glfwTerminate();
         throw std::runtime_error("failed to create a window with an OpenGL 3.3 core context");
     }
     useDarkTitleBar(handle_);  // before the window is first shown, so the title bar never flashes light
+#ifdef _WIN32
+    if (borderless_) makeBorderless(glfwGetWin32Window(handle_));
+#endif
     glfwMakeContextCurrent(handle_);
     glfwSwapInterval(background ? 0 : 1);
     gl::load();
@@ -128,6 +173,9 @@ void Window::setFullscreen(bool fullscreen) {
                              std::max(windowedHeight_, 1), 0);
     }
     fullscreen_ = fullscreen;
+#ifdef _WIN32
+    if (borderless_) g_dragStrip = !fullscreen;  // (no title bar to grab while the window is fullscreen)
+#endif
     glfwSwapInterval(vsync_ ? 1 : 0);  // a new surface forgets the swap interval
 }
 
@@ -182,9 +230,13 @@ bool Window::shiftDown() const {
            glfwGetKey(handle_, GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS;
 }
 
-bool Window::keyDown(int glfwKey) const { return glfwGetKey(handle_, glfwKey) == GLFW_PRESS; }
+bool Window::keyDown(int glfwKey) const {
+    return glfwGetKey(handle_, glfwKey) == GLFW_PRESS || (glfwKey >= 0 && glfwKey < static_cast<int>(simKeys_.size()) && simKeys_[static_cast<std::size_t>(glfwKey)]);
+}
 
-bool Window::mouseDown(int glfwButton) const { return glfwGetMouseButton(handle_, glfwButton) == GLFW_PRESS; }
+bool Window::mouseDown(int glfwButton) const {
+    return glfwGetMouseButton(handle_, glfwButton) == GLFW_PRESS || (glfwButton >= 0 && glfwButton < static_cast<int>(simButtons_.size()) && simButtons_[static_cast<std::size_t>(glfwButton)]);
+}
 
 void Window::setCursorCaptured(bool captured) {
     if (background_) captured = false;  // a hidden window must never take the cursor away from whatever you are doing

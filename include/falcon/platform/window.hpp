@@ -22,7 +22,8 @@ class Window {
 public:
     // `startHidden` creates the window invisible, so nothing blank is shown while the game loads;
     // call show() once the first frame has been drawn.
-    Window(int width, int height, const std::string& title, bool background = false, bool startHidden = false);
+    // `borderless`: no title bar and no frame at all; the top edge of the window moves it (Windows). Not for background windows.
+    Window(int width, int height, const std::string& title, bool background = false, bool startHidden = false, bool borderless = false);
     void show();
     ~Window();
     Window(const Window&) = delete;
@@ -67,6 +68,13 @@ public:
     // ---- polled input, for playing ----
     [[nodiscard]] bool keyDown(int glfwKey) const;
     [[nodiscard]] bool mouseDown(int glfwButton) const;
+    // For scripted tests (--press, --key ...@s+): pretend a key or a mouse button is held, so keyDown() and mouseDown() report it as well.
+    void setSimulatedKey(int glfwKey, bool down) {
+        if (glfwKey >= 0 && glfwKey < static_cast<int>(simKeys_.size())) simKeys_[static_cast<std::size_t>(glfwKey)] = down;
+    }
+    void setSimulatedButton(int glfwButton, bool down) {
+        if (glfwButton >= 0 && glfwButton < static_cast<int>(simButtons_.size())) simButtons_[static_cast<std::size_t>(glfwButton)] = down;
+    }
     // Hides the cursor and lets it move without limit, so the view can turn for ever (a background window never
     // grabs the cursor). takeCursorDelta() then returns how far it moved since the last call, in pixels.
     void setCursorCaptured(bool captured);
@@ -80,6 +88,9 @@ public:
 private:
     GLFWwindow* handle_ = nullptr;
     bool background_ = false;
+    bool borderless_ = false;
+    std::array<bool, 349> simKeys_{};
+    std::array<bool, 8> simButtons_{};
     bool fullscreen_ = false;
     bool vsync_ = true;
     bool captured_ = false;

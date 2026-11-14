@@ -8,25 +8,33 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <string>
 
 namespace falcon {
 namespace {
 
-constexpr char kWorldVertex[] = R"(#version 330 core
+// The world's shaders. The #version line and a few #define lines in front of them are added when they are built (worldShaderSource), so
+// the same text serves the variants that are compared with each other: LIGHT_LUT (the light map as a 16 x 16 picture instead of
+// arithmetic on every pixel) and FLAT_NORMAL (a face's direction from the vertex instead of from screen derivatives).
+constexpr char kWorldVertexBody[] = R"(
 layout(location = 0) in vec4 aPos;    // x, y, z inside the section (1/1024 block), and the texture layer
 layout(location = 1) in vec2 aUv;     // 1/1024 of a texture repeat
 layout(location = 2) in vec4 aColor;  // tint colour, and the shade of the face's direction
-layout(location = 3) in vec4 aLight;  // sky light, block light (0..1: the level / 15)
+layout(location = 3) in vec4 aLight;  // sky light, block light (0..1: the level / 15), the face's direction (1 + the Face number; 0: not known)
+layout(location = 4) in vec3 aSectionOffset;  // when drawing many sections in one call: where the section's corner is (one per command)
 uniform mat4 uViewProj;
-uniform vec3 uOffset;                 // where the section's corner is, relative to the camera
+uniform vec3 uOffset;                 // where the section's corner is, relative to the camera (one section per call)
+uniform float uInstanced;             // 1: the corner comes from aSectionOffset
 out vec2 vUv;
 flat out float vLayer;
+flat out float vFace;
 out vec3 vTint;    // the tint colour times the shade of the face's direction (and of its ambient occlusion)
 out vec2 vLight;   // sky light, block light: interpolated as levels, turned into a colour per pixel (as the game's light map is)
 out vec3 vPos;     // where this is, relative to the camera
 out float vDist;
 void main() {
-    vec3 p = aPos.xyz * (1.0 / 1024.0) + uOffset;
+    vFace = floor(aLight.z * 255.0 + 0.5);
+    vec3 p = aPos.xyz * (1.0 / 1024.0) + (uInstanced > 0.5 ? aSectionOffset : uOffset);
     gl_Position = uViewProj * vec4(p, 1.0);
     vUv = aUv * (1.0 / 1024.0);
     vLayer = aPos.w;
@@ -37,9 +45,10 @@ void main() {
 }
 )";
 
-constexpr char kWorldFragment[] = R"(#version 330 core
+constexpr char kWorldFragmentBody[] = R"(
 in vec2 vUv;
 flat in float vLayer;
+flat in float vFace;
 in vec3 vTint;
 in vec2 vLight;
 in vec3 vPos;
@@ -55,9 +64,16 @@ uniform float uGamma;                 // the Brightness option, 0..1
 uniform sampler3D uHeldLight;
 uniform vec3 uHeldOrigin;
 uniform float uHeldOn;
+uniform sampler2D uLightmap;          // LIGHT_LUT: the light map, sky light across and block light down, one texel per level
 // The game's own light map (assets/shaders/core/lightmap.fsh), with the values the overworld has by day:
 // ambient black, sky light white at factor 1, block light tinted #FFD88C at factor 1.4 (its flicker averages 0), and
 // "notGamma" (which lifts the dark end without changing the hue) mixed in by the Brightness option.
+#ifdef LIGHT_LUT
+vec3 lightColor(float sky, float blk) {
+    // (The texture holds exactly that, per level, and the filter blends the levels between: as the game's own 16 x 16 light map does.)
+    return texture(uLightmap, vec2(sky, blk) * (15.0 / 16.0) + vec2(0.5 / 16.0)).rgb;
+}
+#else
 vec3 lightColor(float sky, float blk) {
     float block_brightness = (blk / (4.0 - 3.0 * blk)) * 1.4;
     float sky_brightness = sky / (4.0 - 3.0 * sky);
@@ -72,15 +88,27 @@ vec3 lightColor(float sky, float blk) {
     }
     return color;
 }
+#endif
+#ifdef FLAT_NORMAL
+// East, west, up, down, south, north (the mesher's Face order): the even ones point the positive way.
+vec3 faceNormal(int f) {
+    float s = (f & 1) == 0 ? 1.0 : -1.0;
+    return f < 2 ? vec3(s, 0.0, 0.0) : (f < 4 ? vec3(0.0, s, 0.0) : vec3(0.0, 0.0, s));
+}
+#endif
 out vec4 frag;
 void main() {
     vec4 c = texture(uTex, vec3(vUv, vLayer));
     if (c.a < uAlphaCut) discard;
     float blockLight = vLight.y;
     if (uHeldOn > 0.5) {
-        // The light a face receives is the light of the cell in FRONT of it: step half a block out along the face's normal (from the
-        // screen derivatives, turned towards the viewer) and read the volume there.
+        // The light a face receives is the light of the cell in FRONT of it: step half a block out along the face's normal (known from the
+        // mesher, or else from the screen derivatives; turned towards the viewer) and read the volume there.
+#ifdef FLAT_NORMAL
+        vec3 n = vFace > 0.5 ? faceNormal(int(vFace + 0.5) - 1) : normalize(cross(dFdx(vPos), dFdy(vPos)));
+#else
         vec3 n = normalize(cross(dFdx(vPos), dFdy(vPos)));
+#endif
         if (dot(n, vPos) > 0.0) n = -n;
         blockLight = max(blockLight, texture(uHeldLight, (vPos + n * 0.5 - uHeldOrigin) * (1.0 / 32.0)).r);
     }
@@ -89,6 +117,31 @@ void main() {
     frag = vec4(mix(c.rgb * (vTint * lightColor(vLight.x, blockLight)), uFogColor, fog), c.a);
 }
 )";
+
+// Which of the new ways of doing things are on. Each can be turned off with an environment variable, to compare the picture and the speed.
+bool optionOff(const char* name) { return std::getenv(name) != nullptr; }
+
+// The attribute layout of a MeshVertex for the vertex array and array buffer that are bound.
+void bindVertexLayout() {
+    // x, y, z, layer (4 shorts), u, v (2 shorts), tint + shade (4 normalised bytes), sky + block light + face (4 bytes)
+    gl::EnableVertexAttribArray(0);
+    gl::VertexAttribPointer(0, 4, gl::SHORT, 0, sizeof(MeshVertex), nullptr);
+    gl::EnableVertexAttribArray(1);
+    gl::VertexAttribPointer(1, 2, gl::SHORT, 0, sizeof(MeshVertex), reinterpret_cast<const void*>(8));
+    gl::EnableVertexAttribArray(2);
+    gl::VertexAttribPointer(2, 4, gl::UNSIGNED_BYTE, 1, sizeof(MeshVertex), reinterpret_cast<const void*>(12));
+    gl::EnableVertexAttribArray(3);
+    gl::VertexAttribPointer(3, 4, gl::UNSIGNED_BYTE, 1, sizeof(MeshVertex), reinterpret_cast<const void*>(16));
+}
+
+std::string worldShaderSource(const char* body) {
+    std::string source = "#version 330 core\n";
+    if (!optionOff("FALCON_NO_LIGHTLUT")) source += "#define LIGHT_LUT\n";
+    if (!optionOff("FALCON_NO_FLATNORMAL")) source += "#define FLAT_NORMAL\n";
+    source += body;
+    return source;
+}
+
 
 // The most quads one section's mesh may hold (the shared index list covers this many).
 constexpr std::size_t kMaxQuadsPerSection = 4096 * 12;
@@ -181,7 +234,11 @@ void packMesh(Result& result, SectionMesh&& mesh) {
         for (std::size_t q = 0; q < quads; ++q) {
             const std::size_t g = tagged ? std::min<std::size_t>(faces[q], kFacingGroups - 1) : kFacingGroups - 1;
             const std::size_t to = next[g]++ * 4;
-            for (std::size_t i = 0; i < 4; ++i) sorted[to + i] = list[q * 4 + i];
+            const auto face = static_cast<std::uint8_t>(g < static_cast<std::size_t>(kFaceCount) ? g + 1 : 0);  // (the shader's carried-light lookup)
+            for (std::size_t i = 0; i < 4; ++i) {
+                sorted[to + i] = list[q * 4 + i];
+                sorted[to + i].face = face;
+            }
         }
         const int taken = take(sorted);
         // (If the list was cut short at the end, the last directions lose their share.)
@@ -207,7 +264,7 @@ WorldRenderer::WorldRenderer(BlockModels& models, std::int64_t seed, TerrainStyl
       generator_(seed, style),
       overworld_(std::move(overworld)),
       decorator_(overworld_ ? std::make_shared<Decorator>(*overworld_, models.registry(), seed) : nullptr),
-      world_("world", kWorldVertex, kWorldFragment),
+      world_("world", worldShaderSource(kWorldVertexBody).c_str(), worldShaderSource(kWorldFragmentBody).c_str()),
       sky_("sky", kSkyVertex, kSkyFragment),
       lines_("lines", kLineVertex, kLineFragment),
       pool_(workerThreads) {
@@ -222,6 +279,8 @@ WorldRenderer::WorldRenderer(BlockModels& models, std::int64_t seed, TerrainStyl
     uHeldLight_ = world_.uniform("uHeldLight");
     uHeldOrigin_ = world_.uniform("uHeldOrigin");
     uHeldOn_ = world_.uniform("uHeldOn");
+    uInstanced_ = world_.uniform("uInstanced");
+    uLightmap_ = world_.uniform("uLightmap");
     skyForward_ = sky_.uniform("uForward");
     skyRight_ = sky_.uniform("uRight");
     skyUp_ = sky_.uniform("uUp");
@@ -278,9 +337,41 @@ WorldRenderer::WorldRenderer(BlockModels& models, std::int64_t seed, TerrainStyl
     gl::ActiveTexture(gl::TEXTURE0);
 
     gl::GenQueries(3, queries_);
+
+    // The light map as a picture (texture unit 2): sky light across, block light down.
+    gl::GenTextures(1, &lightmapTex_);
+    gl::ActiveTexture(gl::TEXTURE0 + 2);
+    gl::BindTexture(gl::TEXTURE_2D, lightmapTex_);
+    gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, static_cast<gl::GLint>(gl::LINEAR));
+    gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, static_cast<gl::GLint>(gl::LINEAR));
+    gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_S, static_cast<gl::GLint>(gl::CLAMP_TO_EDGE));
+    gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_T, static_cast<gl::GLint>(gl::CLAMP_TO_EDGE));
+    gl::ActiveTexture(gl::TEXTURE0);
+    updateLightmap();
+
+    // The grid of sections for occlusion culling (everything unknown, so open), and the buffers for drawing many sections in one call.
+    const std::size_t cells = static_cast<std::size_t>(kGridSize) * kGridSize * kSectionCount;
+    gridSection_.assign(cells, nullptr);
+    gridVisibility_.assign(cells, kVisibilityOpen);
+    gridStamp_.assign(cells, 0);
+    useOcclusion_ = !optionOff("FALCON_NO_OCCLUSION");
+    useMultiDraw_ = gl::multiDrawIndirectAvailable();
+    if (useMultiDraw_) {
+        gl::GenBuffers(1, &commandBuffer_);
+        gl::GenBuffers(1, &offsetBuffer_);
+        gl::GenVertexArrays(1, &arenaVaoInstanced_);
+        setupArenaVao();  // (both vertex arrays)
+    }
+    std::printf("[falcon] world drawing: %s, %s, light map %s, face directions %s\n", useMultiDraw_ ? "multi-draw (one call per pass)" : "one draw per section",
+                useOcclusion_ ? "occlusion culling" : "frustum culling only", optionOff("FALCON_NO_LIGHTLUT") ? "per pixel" : "from a 16x16 picture",
+                optionOff("FALCON_NO_FLATNORMAL") ? "from screen derivatives" : "from the mesh");
 }
 
 WorldRenderer::~WorldRenderer() {
+    if (lightmapTex_ != 0) gl::DeleteTextures(1, &lightmapTex_);
+    if (commandBuffer_ != 0) gl::DeleteBuffers(1, &commandBuffer_);
+    if (offsetBuffer_ != 0) gl::DeleteBuffers(1, &offsetBuffer_);
+    if (arenaVaoInstanced_ != 0) gl::DeleteVertexArrays(1, &arenaVaoInstanced_);
     if (heldLightTex_ != 0) gl::DeleteTextures(1, &heldLightTex_);
     // The workers must be gone before anything they use is destroyed: pool_ is the last member, so it is destroyed
     // first, but be explicit that queued work is dropped.
@@ -299,19 +390,22 @@ WorldRenderer::~WorldRenderer() {
 
 // The attribute layout of a MeshVertex, pointing at whatever arena buffer is bound. Re-run after the arena grows.
 void WorldRenderer::setupArenaVao() {
-    gl::BindVertexArray(arenaVao_);
-    gl::BindBuffer(gl::ARRAY_BUFFER, arenaBuffer_);
-    gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, indexBuffer_);
-    // x, y, z, layer (4 shorts), u, v (2 shorts), tint + shade (4 normalised bytes), sky + block light (4 bytes)
-    gl::EnableVertexAttribArray(0);
-    gl::VertexAttribPointer(0, 4, gl::SHORT, 0, sizeof(MeshVertex), nullptr);
-    gl::EnableVertexAttribArray(1);
-    gl::VertexAttribPointer(1, 2, gl::SHORT, 0, sizeof(MeshVertex), reinterpret_cast<const void*>(8));
-    gl::EnableVertexAttribArray(2);
-    gl::VertexAttribPointer(2, 4, gl::UNSIGNED_BYTE, 1, sizeof(MeshVertex), reinterpret_cast<const void*>(12));
-    gl::EnableVertexAttribArray(3);
-    gl::VertexAttribPointer(3, 4, gl::UNSIGNED_BYTE, 1, sizeof(MeshVertex), reinterpret_cast<const void*>(16));
-    gl::BindVertexArray(0);
+    const auto layout = [&](gl::GLuint vao, bool instanced) {
+        gl::BindVertexArray(vao);
+        gl::BindBuffer(gl::ARRAY_BUFFER, arenaBuffer_);
+        gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, indexBuffer_);
+        bindVertexLayout();
+        if (instanced) {
+            // The section's place, one per command (its base instance picks it): a three-float attribute that advances per instance.
+            gl::BindBuffer(gl::ARRAY_BUFFER, offsetBuffer_);
+            gl::EnableVertexAttribArray(4);
+            gl::VertexAttribPointer(4, 3, gl::FLOAT, 0, 3 * sizeof(float), nullptr);
+            gl::VertexAttribDivisor(4, 1);
+        }
+        gl::BindVertexArray(0);
+    };
+    layout(arenaVao_, false);
+    if (arenaVaoInstanced_ != 0) layout(arenaVaoInstanced_, true);
 }
 
 // Packs the live sections to the front of the arena (into a fresh buffer of the same size), reclaiming the dead space left by
@@ -558,6 +652,7 @@ void WorldRenderer::requestSectionMesh(const SectionKey& key, float priority) {
             const bool lod = leafLodFor(key);
             SectionMesh mesh = meshSection(around, models_, key.x * 16, kMinY + key.y * 16, key.z * 16, smoothLighting_, cutoutLeaves_, lod);
             result.leafInterior = mesh.leafInterior;
+            result.visibility = mesh.visibility;
             result.lodFar = lod;
             packMesh(result, std::move(mesh));
         }
@@ -639,6 +734,7 @@ void WorldRenderer::dropSections(ChunkPos pos) {
         meshRequested_.erase(key);
         meshPending_.erase(key);
         meshGen_.erase(key);
+        setGrid(key, nullptr, kVisibilityOpen);  // (unknown again: whatever comes to this place next starts open)
         if (const auto it = sections_.find(key); it != sections_.end()) {
             destroySection(it->second);
             sections_.erase(it);
@@ -661,9 +757,11 @@ void WorldRenderer::uploadMesh(MeshResult&& result) {
             destroySection(existing->second);
             sections_.erase(existing);
         }
+        setGrid(result.key, nullptr, result.visibility);  // (but how its faces connect still matters: air lets the view through, rock stops it)
         return;
     }
     GpuSection& s = existing != sections_.end() ? existing->second : sections_[result.key];
+    setGrid(result.key, &s, result.visibility);
     meshBytes_ -= static_cast<std::size_t>(s.opaqueVertices + s.cutoutVertices + s.translucentVertices) * sizeof(MeshVertex);
     quadsTotal_ -= static_cast<std::size_t>(s.opaqueVertices + s.cutoutVertices + s.translucentVertices) / 4;
     const auto verts = static_cast<std::uint32_t>(result.vertices.size());
@@ -857,6 +955,7 @@ void WorldRenderer::render(const Camera& camera, int framebufferWidth, int frame
     const float farPlane = std::max(256.0f, static_cast<float>(renderDistance + 4) * 16.0f * 1.5f);
     const Matrix4f view = cameraView(camera);
     const Matrix4f viewProj = perspective(camera.fov, aspect, 0.05f, farPlane) * view;
+    lastViewProj_ = viewProj;
 
     // The sky: a gradient from the horizon haze to the blue overhead, drawn behind everything.
     gl::Disable(gl::DEPTH_TEST);
@@ -907,41 +1006,52 @@ void WorldRenderer::render(const Camera& camera, int framebufferWidth, int frame
     gl::Uniform3f(uHeldOrigin_, static_cast<float>(heldLightX_ - kHeldLightSize / 2 - camera.x), static_cast<float>(heldLightY_ - kHeldLightSize / 2 - camera.y),
                   static_cast<float>(heldLightZ_ - kHeldLightSize / 2 - camera.z));
 
+    // The light map picture (texture unit 2); made again only when the Brightness option changed.
+    if (lightmapBrightness_ != brightness_) updateLightmap();
+    gl::ActiveTexture(gl::TEXTURE0 + 2);
+    gl::BindTexture(gl::TEXTURE_2D, lightmapTex_);
+    gl::ActiveTexture(gl::TEXTURE0);
+    gl::Uniform1i(uLightmap_, 2);
+    gl::Uniform1f(uInstanced_, 0.0f);
+
     const Frustum frustum = extractFrustum(viewProj);
     const float reach = (static_cast<float>(renderDistance) + 1.0f) * 16.0f + 16.0f;
     visible_.clear();
-    for (const auto& [key, section] : sections_) {
-        const float ox = static_cast<float>(key.x * 16 - camera.x);
-        const float oy = static_cast<float>(kMinY + key.y * 16 - camera.y);
-        const float oz = static_cast<float>(key.z * 16 - camera.z);
-        const float cx = ox + 8.0f;
-        const float cz = oz + 8.0f;
-        const float horizontal2 = cx * cx + cz * cz;
-        if (horizontal2 > reach * reach) continue;  // beyond the render distance
-        if (!frustum.mayContain({ox, oy, oz}, {ox + 16.0f, oy + 16.0f, oz + 16.0f})) continue;
-        const float cy = oy + 8.0f;
-        visible_.push_back({&section, ox, oy, oz, horizontal2 + cy * cy});
+    // Inside solid rock there is no air to walk out of, and the game then draws everything in view (as the game itself does: it turns its
+    // own cave culling off when the camera is inside a solid block).
+    bool occlusionNow = useOcclusion_;
+    if (occlusionNow) {
+        const Block eyeBlock = level_.block(static_cast<int>(std::floor(camera.x)), static_cast<int>(std::floor(camera.y)), static_cast<int>(std::floor(camera.z)));
+        if (blockRegistry().state(eyeBlock).has(kStateOpaqueCube)) occlusionNow = false;
     }
-    std::sort(visible_.begin(), visible_.end(), [](const VisibleSection& a, const VisibleSection& b) { return a.distance2 < b.distance2; });
+    if (occlusionNow) collectVisibleByTraversal(camera, frustum, reach);
+    else collectVisibleByScan(camera, frustum, reach);
+    // Water and the like are drawn farthest first (they blend over what is behind them).
+    translucentOrder_.clear();
+    for (const VisibleSection& v : visible_) {
+        if (v.section->translucentVertices > 0) translucentOrder_.push_back(&v);
+    }
+    if (occlusionNow) {  // (the scan leaves visible_ sorted by distance already, the traversal only roughly)
+        std::sort(translucentOrder_.begin(), translucentOrder_.end(), [](const VisibleSection* a, const VisibleSection* b) { return a->distance2 > b->distance2; });
+    } else {
+        std::reverse(translucentOrder_.begin(), translucentOrder_.end());
+    }
 
     std::size_t quads = 0;
-    // Every section's mesh lives in the one arena buffer, so the vertex array is bound once for the whole world.
-    gl::BindVertexArray(arenaVao_);
-    // Opaque, nearest first: hidden pixels are rejected early.
-    gl::Uniform1f(uGamma_, brightness_);
-    gl::Uniform1f(uAlphaCut_, 0.0f);
+    int drawCalls = 0;
+    int drawCommands = 0;
     // A section's quads are kept in order of the way they face, and the directions that turn away from the camera are not drawn: the
     // camera sees the east side of a quad only from the east of its plane, and so on (with a block of margin for plants that are
     // shifted and quads that sit inside their block). Back faces were thrown away after the vertex work before; now they cost nothing.
-    const auto drawFacing = [&](const VisibleSection& v, const std::array<int, kFacingGroups>& groups, std::uint32_t base) {
-        static const bool everything = std::getenv("FALCON_NO_FACING_CULL") != nullptr;  // (for checking that the picture is the same without it)
+    // `emit(first, length)` gets each run of vertices (in the section's part) that is to be drawn.
+    static const bool everything = std::getenv("FALCON_NO_FACING_CULL") != nullptr;  // (for checking that the picture is the same without it)
+    const auto forEachRun = [&](const VisibleSection& v, const std::array<int, kFacingGroups>& groups, const auto& emit) {
         const bool seen[kFacingGroups] = {everything || v.ox < 1.0f, everything || v.ox > -17.0f, everything || v.oy < 1.0f, everything || v.oy > -17.0f,
                                           everything || v.oz < 1.0f, everything || v.oz > -17.0f, true};
         std::uint32_t offset = 0, runStart = 0, runLength = 0;
         const auto flush = [&] {
             if (runLength == 0) return;
-            gl::DrawElementsBaseVertex(gl::TRIANGLES, static_cast<gl::GLsizei>(runLength / 4 * 6), gl::UNSIGNED_INT, nullptr, static_cast<gl::GLint>(base + runStart));
-            quads += runLength / 4;
+            emit(runStart, runLength);
             runLength = 0;
         };
         for (int g = 0; g < kFacingGroups; ++g) {
@@ -957,40 +1067,278 @@ void WorldRenderer::render(const Camera& camera, int framebufferWidth, int frame
         }
         flush();
     };
-    for (const VisibleSection& v : visible_) {
-        if (v.section->opaqueVertices == 0) continue;
-        gl::Uniform3f(uOffset_, v.ox, v.oy, v.oz);
-        drawFacing(v, v.section->opaqueGroups, v.section->arenaBase);
-    }
-    // Cutout (leaves, plants, glass): texels with less than half alpha are discarded - the game's own threshold for its cutout
-    // terrain (RenderPipelines ALPHA_CUTOUT_THRESHOLD_CUTOUT_TERRAIN), which the mip levels' alpha is made to agree with.
-    gl::Uniform1f(uAlphaCut_, 0.5f);
-    for (const VisibleSection& v : visible_) {
-        if (v.section->cutoutVertices == 0) continue;
-        gl::Uniform3f(uOffset_, v.ox, v.oy, v.oz);
-        drawFacing(v, v.section->cutoutGroups, v.section->arenaBase + static_cast<std::uint32_t>(v.section->opaqueVertices));
-    }
 
-    // Water and other see-through blocks last, back to front, blended and without writing depth. Their faces are seen
-    // from both sides (the underside of the sea surface): the mesher makes that surface a second, reversed quad, so back faces stay culled.
-    gl::Enable(gl::BLEND);
-    gl::BlendFuncSeparate(gl::SRC_ALPHA, gl::ONE_MINUS_SRC_ALPHA, gl::ONE, gl::ONE_MINUS_SRC_ALPHA);
-    gl::DepthMask(gl::FALSE_);
-    gl::Uniform1f(uAlphaCut_, 0.01f);
-    for (auto it = visible_.rbegin(); it != visible_.rend(); ++it) {
-        if (it->section->translucentVertices == 0) continue;
-        gl::Uniform3f(uOffset_, it->ox, it->oy, it->oz);
-        gl::DrawElementsBaseVertex(gl::TRIANGLES, it->section->translucentVertices / 4 * 6, gl::UNSIGNED_INT, nullptr,
-                                   static_cast<gl::GLint>(it->section->arenaBase) + it->section->opaqueVertices + it->section->cutoutVertices);
-        quads += static_cast<std::size_t>(it->section->translucentVertices / 4);
+    // Drawing the opaque part, the cutout part (leaves, plants, glass: texels with less than half alpha are discarded - the game's own
+    // threshold for its cutout terrain, RenderPipelines ALPHA_CUTOUT_THRESHOLD_CUTOUT_TERRAIN, which the mip levels' alpha is made to agree
+    // with) and then water and other see-through blocks, back to front, blended and without writing depth. Their faces are seen from both
+    // sides (the underside of the sea surface): the mesher makes that surface a second, reversed quad, so back faces stay culled.
+    gl::Uniform1f(uGamma_, brightness_);
+    if (useMultiDraw_) {
+        // Every pass's commands are made first and sent to the GPU in one go; then each pass is one call.
+        commands_.clear();
+        commandOffsets_.clear();
+        const auto add = [&](const VisibleSection& v, std::uint32_t indexCount, std::int32_t baseVertex) {
+            commands_.push_back({indexCount, 1u, 0u, baseVertex, static_cast<std::uint32_t>(commands_.size())});
+            commandOffsets_.push_back(v.ox);
+            commandOffsets_.push_back(v.oy);
+            commandOffsets_.push_back(v.oz);
+        };
+        for (const VisibleSection& v : visible_) {
+            if (v.section->opaqueVertices == 0) continue;
+            forEachRun(v, v.section->opaqueGroups, [&](std::uint32_t first, std::uint32_t length) {
+                add(v, length / 4 * 6, static_cast<std::int32_t>(v.section->arenaBase + first));
+                quads += length / 4;
+            });
+        }
+        const std::size_t cutoutBegin = commands_.size();
+        for (const VisibleSection& v : visible_) {
+            if (v.section->cutoutVertices == 0) continue;
+            forEachRun(v, v.section->cutoutGroups, [&](std::uint32_t first, std::uint32_t length) {
+                add(v, length / 4 * 6, static_cast<std::int32_t>(v.section->arenaBase + static_cast<std::uint32_t>(v.section->opaqueVertices) + first));
+                quads += length / 4;
+            });
+        }
+        const std::size_t translucentBegin = commands_.size();
+        for (const VisibleSection* v : translucentOrder_) {
+            add(*v, static_cast<std::uint32_t>(v->section->translucentVertices / 4 * 6),
+                static_cast<std::int32_t>(v->section->arenaBase) + v->section->opaqueVertices + v->section->cutoutVertices);
+            quads += static_cast<std::size_t>(v->section->translucentVertices / 4);
+        }
+        drawCommands = static_cast<int>(commands_.size());
+        // Into the buffers: made anew each frame (the old contents are let go of, so the GPU is never waited for).
+        const auto upload = [](gl::GLenum target, gl::GLuint buffer, std::size_t& capacity, const void* data, std::size_t bytes) {
+            gl::BindBuffer(target, buffer);
+            if (bytes > capacity) capacity = std::max<std::size_t>(bytes + bytes / 2, 64u * 1024u);
+            gl::BufferData(target, static_cast<gl::GLsizeiptr>(capacity), nullptr, gl::STREAM_DRAW);
+            if (bytes > 0) gl::BufferSubData(target, 0, static_cast<gl::GLsizeiptr>(bytes), data);
+        };
+        upload(gl::DRAW_INDIRECT_BUFFER, commandBuffer_, commandBufferCapacity_, commands_.data(), commands_.size() * sizeof(IndirectCommand));
+        upload(gl::ARRAY_BUFFER, offsetBuffer_, offsetBufferCapacity_, commandOffsets_.data(), commandOffsets_.size() * sizeof(float));
+        const auto drawRange = [&](std::size_t begin, std::size_t end) {
+            if (end <= begin) return;
+            gl::MultiDrawElementsIndirect(gl::TRIANGLES, gl::UNSIGNED_INT, reinterpret_cast<const void*>(begin * sizeof(IndirectCommand)), static_cast<gl::GLsizei>(end - begin),
+                                          static_cast<gl::GLsizei>(sizeof(IndirectCommand)));
+            ++drawCalls;
+        };
+        gl::BindVertexArray(arenaVaoInstanced_);
+        gl::Uniform1f(uInstanced_, 1.0f);
+        gl::Uniform1f(uAlphaCut_, 0.0f);
+        drawRange(0, cutoutBegin);
+        gl::Uniform1f(uAlphaCut_, 0.5f);
+        drawRange(cutoutBegin, translucentBegin);
+        gl::Enable(gl::BLEND);
+        gl::BlendFuncSeparate(gl::SRC_ALPHA, gl::ONE_MINUS_SRC_ALPHA, gl::ONE, gl::ONE_MINUS_SRC_ALPHA);
+        gl::DepthMask(gl::FALSE_);
+        gl::Uniform1f(uAlphaCut_, 0.01f);
+        drawRange(translucentBegin, commands_.size());
+        gl::Uniform1f(uInstanced_, 0.0f);
+    } else {
+        // One section at a time: its place as a uniform, then a draw for each run.
+        gl::BindVertexArray(arenaVao_);  // (every section's mesh lives in the one arena buffer: the vertex array is bound once)
+        gl::Uniform1f(uAlphaCut_, 0.0f);
+        for (const VisibleSection& v : visible_) {  // opaque, nearest first: hidden pixels are rejected early
+            if (v.section->opaqueVertices == 0) continue;
+            gl::Uniform3f(uOffset_, v.ox, v.oy, v.oz);
+            forEachRun(v, v.section->opaqueGroups, [&](std::uint32_t first, std::uint32_t length) {
+                gl::DrawElementsBaseVertex(gl::TRIANGLES, static_cast<gl::GLsizei>(length / 4 * 6), gl::UNSIGNED_INT, nullptr, static_cast<gl::GLint>(v.section->arenaBase + first));
+                quads += length / 4;
+                ++drawCalls;
+                ++drawCommands;
+            });
+        }
+        gl::Uniform1f(uAlphaCut_, 0.5f);
+        for (const VisibleSection& v : visible_) {
+            if (v.section->cutoutVertices == 0) continue;
+            gl::Uniform3f(uOffset_, v.ox, v.oy, v.oz);
+            forEachRun(v, v.section->cutoutGroups, [&](std::uint32_t first, std::uint32_t length) {
+                gl::DrawElementsBaseVertex(gl::TRIANGLES, static_cast<gl::GLsizei>(length / 4 * 6), gl::UNSIGNED_INT, nullptr,
+                                           static_cast<gl::GLint>(v.section->arenaBase + static_cast<std::uint32_t>(v.section->opaqueVertices) + first));
+                quads += length / 4;
+                ++drawCalls;
+                ++drawCommands;
+            });
+        }
+        gl::Enable(gl::BLEND);
+        gl::BlendFuncSeparate(gl::SRC_ALPHA, gl::ONE_MINUS_SRC_ALPHA, gl::ONE, gl::ONE_MINUS_SRC_ALPHA);
+        gl::DepthMask(gl::FALSE_);
+        gl::Uniform1f(uAlphaCut_, 0.01f);
+        for (const VisibleSection* v : translucentOrder_) {
+            gl::Uniform3f(uOffset_, v->ox, v->oy, v->oz);
+            gl::DrawElementsBaseVertex(gl::TRIANGLES, v->section->translucentVertices / 4 * 6, gl::UNSIGNED_INT, nullptr,
+                                       static_cast<gl::GLint>(v->section->arenaBase) + v->section->opaqueVertices + v->section->cutoutVertices);
+            quads += static_cast<std::size_t>(v->section->translucentVertices / 4);
+            ++drawCalls;
+            ++drawCommands;
+        }
     }
     gl::DepthMask(gl::TRUE_);
     gl::Disable(gl::BLEND);
     gl::BindVertexArray(0);
 
+    static const bool checkErrors = std::getenv("FALCON_GL_CHECK") != nullptr;  // (a debugging aid: reports the first OpenGL error the world drawing causes)
+    if (checkErrors) {
+        static bool reported = false;
+        if (const gl::GLenum error = gl::GetError(); error != 0 && !reported) {
+            reported = true;
+            std::printf("[falcon] OpenGL error 0x%04X after drawing the world (%s)\n", error, useMultiDraw_ ? "multi-draw" : "one draw per section");
+        }
+    }
     stats_.sectionsDrawn = static_cast<int>(visible_.size());
+    stats_.drawCalls = drawCalls;
+    stats_.drawCommands = drawCommands;
+    stats_.occlusionCulling = occlusionNow;
+    stats_.multiDraw = useMultiDraw_;
     stats_.quadsDrawn = quads;
     // The GPU timer covers this pass; endFrame() closes it after the outline too.
+}
+
+void WorldRenderer::setGrid(const SectionKey& key, const GpuSection* section, std::uint64_t visibility) {
+    if (key.y < 0 || key.y >= kSectionCount) return;
+    const std::size_t cell = gridIndex(key.x, key.y, key.z);
+    gridSection_[cell] = section;
+    gridVisibility_[cell] = visibility;
+}
+
+// The sections that may be seen, found by scanning every one with a mesh: those within the render distance and inside the view frustum,
+// nearest first.
+void WorldRenderer::collectVisibleByScan(const Camera& camera, const Frustum& frustum, float reach) {
+    for (const auto& [key, section] : sections_) {
+        const float ox = static_cast<float>(key.x * 16 - camera.x);
+        const float oy = static_cast<float>(kMinY + key.y * 16 - camera.y);
+        const float oz = static_cast<float>(key.z * 16 - camera.z);
+        const float cx = ox + 8.0f;
+        const float cz = oz + 8.0f;
+        const float horizontal2 = cx * cx + cz * cz;
+        if (horizontal2 > reach * reach) continue;  // beyond the render distance
+        if (!frustum.mayContain({ox, oy, oz}, {ox + 16.0f, oy + 16.0f, oz + 16.0f})) continue;
+        const float cy = oy + 8.0f;
+        visible_.push_back({&section, ox, oy, oz, horizontal2 + cy * cy});
+    }
+    std::sort(visible_.begin(), visible_.end(), [](const VisibleSection& a, const VisibleSection& b) { return a.distance2 < b.distance2; });
+}
+
+// The sections that may be seen, found by walking from the camera's own section through the faces that connect. A section is reached
+// through one of its faces and left through another that the mesher found connected to it (the camera's own section lets everything out);
+// a walk never turns back on a direction it has already moved in, which is what stops the view from going round corners it cannot. Sections
+// are reached in order of their distance (in steps), so the list comes out roughly nearest first.
+void WorldRenderer::collectVisibleByTraversal(const Camera& camera, const Frustum& frustum, float reach) {
+    static constexpr int kDx[6] = {-1, 1, 0, 0, 0, 0};  // west, east, down, up, north, south: the opposite of face f is f ^ 1
+    static constexpr int kDy[6] = {0, 0, -1, 1, 0, 0};
+    static constexpr int kDz[6] = {0, 0, 0, 0, -1, 1};
+    const int cameraChunkX = chunkOf(static_cast<int>(std::floor(camera.x)));
+    const int cameraChunkZ = chunkOf(static_cast<int>(std::floor(camera.z)));
+    const int cameraSection = std::clamp(sectionOf(static_cast<int>(std::floor(camera.y))), 0, kSectionCount - 1);
+    const float reach2 = reach * reach;
+
+    if (++traversalStamp_ == 0) {  // (the counter wrapped: forget every old mark)
+        std::fill(gridStamp_.begin(), gridStamp_.end(), 0u);
+        traversalStamp_ = 1;
+    }
+    if (gridIncoming_.empty()) {
+        gridIncoming_.assign(gridStamp_.size(), 0);
+        gridTravelled_.assign(gridStamp_.size(), 0);
+    }
+    traversal_.clear();
+    const std::uint32_t startCell = static_cast<std::uint32_t>(gridIndex(cameraChunkX, cameraSection, cameraChunkZ));
+    gridStamp_[startCell] = traversalStamp_;
+    gridIncoming_[startCell] = 0;
+    gridTravelled_[startCell] = 0;
+    traversal_.push_back({startCell, cameraChunkX, cameraChunkZ, static_cast<std::int8_t>(cameraSection)});
+
+    for (std::size_t head = 0; head < traversal_.size(); ++head) {
+        const TraversalNode node = traversal_[head];
+        // A section that has a mesh, and is in view, is drawn.
+        if (const GpuSection* section = gridSection_[node.cell]; section != nullptr) {
+            const float ox = static_cast<float>(node.x * 16 - camera.x);
+            const float oy = static_cast<float>(kMinY + node.y * 16 - camera.y);
+            const float oz = static_cast<float>(node.z * 16 - camera.z);
+            if (head != 0 || frustum.mayContain({ox, oy, oz}, {ox + 16.0f, oy + 16.0f, oz + 16.0f})) {  // (the others passed when they were reached)
+                const float cx = ox + 8.0f, cy = oy + 8.0f, cz = oz + 8.0f;
+                visible_.push_back({section, ox, oy, oz, cx * cx + cy * cy + cz * cz});
+            }
+        }
+        // Which faces it can be left through.
+        const unsigned travelled = gridTravelled_[node.cell];
+        unsigned outgoing = 0x3F;
+        if (head != 0) {
+            outgoing = 0;
+            const std::uint64_t connections = gridVisibility_[node.cell];
+            const unsigned incoming = gridIncoming_[node.cell];
+            for (int a = 0; a < 6; ++a) {
+                if ((incoming >> a & 1u) != 0) outgoing |= static_cast<unsigned>(connections >> (a * 6)) & 0x3Fu;
+            }
+        }
+        for (int f = 0; f < 6; ++f) {
+            if ((travelled >> (f ^ 1) & 1u) != 0) outgoing &= ~(1u << f);  // (never back the way it came)
+        }
+        for (int f = 0; f < 6; ++f) {
+            if ((outgoing >> f & 1u) == 0) continue;
+            const int ny = node.y + kDy[f];
+            if (ny < 0 || ny >= kSectionCount) continue;
+            const int nx = node.x + kDx[f];
+            const int nz = node.z + kDz[f];
+            const float cx = static_cast<float>(nx * 16 + 8) - static_cast<float>(camera.x);
+            const float cz = static_cast<float>(nz * 16 + 8) - static_cast<float>(camera.z);
+            if (cx * cx + cz * cz > reach2) continue;  // beyond the render distance
+            const auto cell = static_cast<std::uint32_t>(gridIndex(nx, ny, nz));
+            const unsigned enteredThrough = 1u << (f ^ 1);
+            const unsigned moved = travelled | (1u << f);
+            if (gridStamp_[cell] == traversalStamp_) {  // reached before (and not yet left): it may also be entered this way
+                gridIncoming_[cell] = static_cast<std::uint8_t>(gridIncoming_[cell] | enteredThrough);
+                gridTravelled_[cell] = static_cast<std::uint8_t>(gridTravelled_[cell] & moved);
+            } else {
+                gridStamp_[cell] = traversalStamp_;
+                // Only the sections in view are walked (and so only they cost anything). That loses nothing that can be seen: a ray through
+                // the view crosses a chain of sections that all touch the view, and the walk can follow it, one face at a time.
+                const float ox = static_cast<float>(nx * 16 - camera.x);
+                const float oy = static_cast<float>(kMinY + ny * 16 - camera.y);
+                const float oz = static_cast<float>(nz * 16 - camera.z);
+                if (!frustum.mayContain({ox, oy, oz}, {ox + 16.0f, oy + 16.0f, oz + 16.0f})) {
+                    gridIncoming_[cell] = 0;
+                    continue;
+                }
+                gridIncoming_[cell] = static_cast<std::uint8_t>(enteredThrough);
+                gridTravelled_[cell] = static_cast<std::uint8_t>(moved);
+                traversal_.push_back({cell, nx, nz, static_cast<std::int8_t>(ny)});
+            }
+        }
+    }
+}
+
+// The light map as a 16 x 16 picture: for every sky light level (across) and block light level (down), what the shader's lightColor
+// works out (the game's own light map, with the overworld's daytime values). The filter blends the levels between, as in the game.
+void WorldRenderer::updateLightmap() {
+    if (lightmapTex_ == 0) return;
+    float texels[16 * 16 * 4];
+    for (int b = 0; b < 16; ++b) {
+        for (int s = 0; s < 16; ++s) {
+            const float sky = static_cast<float>(s) / 15.0f;
+            const float blk = static_cast<float>(b) / 15.0f;
+            const float blockBrightness = (blk / (4.0f - 3.0f * blk)) * 1.4f;
+            const float skyBrightness = sky / (4.0f - 3.0f * sky);
+            const float parabolic = (2.0f * blk - 1.0f) * (2.0f * blk - 1.0f);
+            const float tint = 0.9f * parabolic;  // mix(vec3(1, 0.84705883, 0.54901963), vec3(1), tint)
+            const float mixed[3] = {1.0f, 0.84705883f + (1.0f - 0.84705883f) * tint, 0.54901963f + (1.0f - 0.54901963f) * tint};
+            float color[3];
+            for (int c = 0; c < 3; ++c) color[c] = std::clamp(skyBrightness + mixed[c] * blockBrightness, 0.0f, 1.0f);
+            const float m = std::max({color[0], color[1], color[2]});
+            if (m > 0.0f) {
+                const float inverted = 1.0f - m;
+                const float lift = (1.0f - inverted * inverted * inverted * inverted) / m;
+                for (float& c : color) c = c + (c * lift - c) * brightness_;
+            }
+            float* texel = &texels[(b * 16 + s) * 4];
+            texel[0] = color[0];
+            texel[1] = color[1];
+            texel[2] = color[2];
+            texel[3] = 1.0f;
+        }
+    }
+    gl::ActiveTexture(gl::TEXTURE0 + 2);
+    gl::BindTexture(gl::TEXTURE_2D, lightmapTex_);
+    gl::TexImage2D(gl::TEXTURE_2D, 0, static_cast<gl::GLint>(gl::RGBA16F), 16, 16, 0, gl::RGBA, gl::FLOAT, texels);
+    gl::ActiveTexture(gl::TEXTURE0);
+    lightmapBrightness_ = brightness_;
 }
 
 void WorldRenderer::drawSelection(const Camera& camera, int framebufferWidth, int framebufferHeight, int x, int y, int z) {
@@ -1064,6 +1412,7 @@ void WorldRenderer::meshNow(const SectionKey& key) {
         const bool lod = leafLodFor(key);
         SectionMesh mesh = meshSection(snapshotNeighborhood(level_, key.x, key.y, key.z), models_, key.x * 16, kMinY + key.y * 16, key.z * 16, smoothLighting_, cutoutLeaves_, lod);
         result.leafInterior = mesh.leafInterior;
+        result.visibility = mesh.visibility;
         result.lodFar = lod;
         packMesh(result, std::move(mesh));
     }
@@ -1133,14 +1482,7 @@ void WorldRenderer::drawHeld(const Matrix4f& mvp, const std::vector<MeshVertex>&
         gl::BindVertexArray(heldVao_);
         gl::BindBuffer(gl::ARRAY_BUFFER, heldVbo_);
         gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, indexBuffer_);
-        gl::EnableVertexAttribArray(0);
-        gl::VertexAttribPointer(0, 4, gl::SHORT, 0, sizeof(MeshVertex), nullptr);
-        gl::EnableVertexAttribArray(1);
-        gl::VertexAttribPointer(1, 2, gl::SHORT, 0, sizeof(MeshVertex), reinterpret_cast<const void*>(8));
-        gl::EnableVertexAttribArray(2);
-        gl::VertexAttribPointer(2, 4, gl::UNSIGNED_BYTE, 1, sizeof(MeshVertex), reinterpret_cast<const void*>(12));
-        gl::EnableVertexAttribArray(3);
-        gl::VertexAttribPointer(3, 4, gl::UNSIGNED_BYTE, 1, sizeof(MeshVertex), reinterpret_cast<const void*>(16));
+        bindVertexLayout();
     } else {
         gl::BindVertexArray(heldVao_);
         gl::BindBuffer(gl::ARRAY_BUFFER, heldVbo_);
@@ -1158,6 +1500,12 @@ void WorldRenderer::drawHeld(const Matrix4f& mvp, const std::vector<MeshVertex>&
     gl::Uniform1i(uTex_, 0);
     gl::Uniform1i(uHeldLight_, 1);      // (the sampler must not share unit 0 with the block textures, used or not)
     gl::Uniform1f(uHeldOn_, 0.0f);      // the held item is lit by its own vertices, not by the volume (its positions are model space)
+    if (lightmapBrightness_ != brightness_) updateLightmap();
+    gl::ActiveTexture(gl::TEXTURE0 + 2);
+    gl::BindTexture(gl::TEXTURE_2D, lightmapTex_);
+    gl::ActiveTexture(gl::TEXTURE0);
+    gl::Uniform1i(uLightmap_, 2);
+    gl::Uniform1f(uInstanced_, 0.0f);
     gl::BufferData(gl::ARRAY_BUFFER, static_cast<gl::GLsizeiptr>(quads * 4 * sizeof(MeshVertex)), vertices.data(), gl::STREAM_DRAW);
     gl::DrawElements(gl::TRIANGLES, static_cast<gl::GLsizei>(quads * 6), gl::UNSIGNED_INT, nullptr);
     gl::BindVertexArray(0);

@@ -626,6 +626,56 @@ struct Mesher {
     }
 };
 
+
+// The connectivity of the faces of the section (see kVisibilityOpen): flood fills the cells that do not block sight and notes, for every
+// connected region, which of the section's six faces it touches. Only the section's own blocks matter, not its neighbours'.
+std::uint64_t computeVisibility(const Padded& padded) {
+    thread_local std::array<std::uint64_t, kSectionVolume / 64> visited;
+    thread_local std::array<std::uint16_t, kSectionVolume> stack;
+    visited.fill(0);
+    const auto isVisited = [&](int i) { return (visited[static_cast<std::size_t>(i >> 6)] >> (i & 63) & 1u) != 0; };
+    const auto setVisited = [&](int i) { visited[static_cast<std::size_t>(i >> 6)] |= 1ull << (i & 63); };
+    std::uint64_t result = 0;
+    for (int first = 0; first < kSectionVolume; ++first) {
+        if (isVisited(first)) continue;
+        setVisited(first);
+        if (padded.opaque(first & 15, first >> 8, (first >> 4) & 15)) continue;
+        unsigned faces = 0;
+        int top = 0;
+        stack[static_cast<std::size_t>(top++)] = static_cast<std::uint16_t>(first);
+        while (top > 0) {
+            const int i = stack[static_cast<std::size_t>(--top)];
+            const int x = i & 15, z = (i >> 4) & 15, y = i >> 8;
+            if (x == 0) faces |= 1u << 0;
+            if (x == 15) faces |= 1u << 1;
+            if (y == 0) faces |= 1u << 2;
+            if (y == 15) faces |= 1u << 3;
+            if (z == 0) faces |= 1u << 4;
+            if (z == 15) faces |= 1u << 5;
+            const auto visit = [&](int nx, int ny, int nz) {
+                if (nx < 0 || nx > 15 || ny < 0 || ny > 15 || nz < 0 || nz > 15) return;
+                const int n = ny * 256 + nz * 16 + nx;
+                if (isVisited(n)) return;
+                setVisited(n);
+                if (padded.opaque(nx, ny, nz)) return;
+                stack[static_cast<std::size_t>(top++)] = static_cast<std::uint16_t>(n);
+            };
+            visit(x - 1, y, z);
+            visit(x + 1, y, z);
+            visit(x, y - 1, z);
+            visit(x, y + 1, z);
+            visit(x, y, z - 1);
+            visit(x, y, z + 1);
+        }
+        for (int a = 0; a < 6; ++a) {
+            if ((faces >> a & 1u) == 0) continue;
+            for (int b = 0; b < 6; ++b) {
+                if (a != b && (faces >> b & 1u) != 0) result |= 1ull << (a * 6 + b);
+            }
+        }
+    }
+    return result;
+}
 }  // namespace
 
 SectionMesh meshSection(const SectionNeighborhood& around, const BlockRenderProvider& models, int originX, int originY, int originZ,
@@ -637,12 +687,14 @@ SectionMesh meshSection(const SectionNeighborhood& around, const BlockRenderProv
     if (middle->isUniform() && registry.isAir(middle->uniform)) return mesh;
     const auto solidOpaque = [&](const SectionPtr& s) { return s && s->isUniform() && registry.state(s->uniform).has(kStateOpaqueCube); };
     if (solidOpaque(middle) && std::all_of(around.sections.begin(), around.sections.end(), solidOpaque)) {
-        return mesh;  // solid rock with solid sections all around it shows nothing: most of the ground below the surface
+        mesh.visibility = 0;  // (and nothing can be seen through it)
+        return mesh;          // solid rock with solid sections all around it shows nothing: most of the ground below the surface
     }
 
     thread_local Padded padded;
     fillPadded(around, registry, padded);
     fillLight(around, originY, padded);
+    mesh.visibility = computeVisibility(padded);
 
     Mesher m{models, registry, padded, mesh, originX, originY, originZ, {}, nullptr, {}, false};
     m.biomes = around.biomes.data();
