@@ -3,6 +3,7 @@
 #include "falcon/render/world_renderer.hpp"
 
 #include <algorithm>
+#include <cstdlib>
 #include <array>
 #include <cmath>
 
@@ -314,6 +315,8 @@ HandRenderer::HeldModel HandRenderer::buildHeldModel(const ItemStack& stack) {
             model.firstRight = info->transform("firstperson_righthand");
             model.firstLeft = info->transform("firstperson_lefthand");
             if (!model.firstLeft.present) model.firstLeft = model.firstRight;  // the game's fallback
+            model.ground = info->transform("ground");
+            model.thirdRight = info->transform("thirdperson_righthand");
             first = false;
         }
         if (info->generated) {
@@ -441,7 +444,16 @@ void HandRenderer::render(WorldRenderer& world, const HandFrame& frame) {
 
     gl::Clear(gl::DEPTH_BUFFER_BIT);  // the hand is always in front of the world
     gl::Enable(gl::DEPTH_TEST);
-    gl::Disable(gl::CULL_FACE);
+    // A held item is drawn with its back faces culled, as the game does. A flat item (a pickaxe, a sword) is a front face, a back face and a
+    // ring of edge faces; with both sides drawn the back face showed beside the front one, so the tool looked like two sprites on top of each
+    // other. (The bare arm is drawn without culling: its faces are not all wound the same way.)
+    if (!shown_.isEmpty()) {
+        gl::Enable(gl::CULL_FACE);
+        gl::CullFace(gl::BACK);
+        gl::FrontFace(gl::CCW);
+    } else {
+        gl::Disable(gl::CULL_FACE);
+    }
     gl::Disable(gl::BLEND);
 
     if (shown_.isEmpty()) {
@@ -469,5 +481,62 @@ void HandRenderer::render(WorldRenderer& world, const HandFrame& frame) {
     }
     world.drawHeld(mvp, vertices);
 }
+
+
+// ---------------------------------------------------------------------------------------------------------------
+// Items lying in the world (ItemEntityRenderer)
+
+namespace {
+float hashUnit(int id, int salt) {  // a repeatable number in [0, 1) for an item and a copy of it
+    std::uint32_t x = static_cast<std::uint32_t>(id) * 0x9E3779B1u + static_cast<std::uint32_t>(salt + 1) * 0x85EBCA6Bu;
+    x ^= x >> 15;
+    x *= 0x2C1B3C6Du;
+    x ^= x >> 12;
+    x *= 0x297A2D39u;
+    x ^= x >> 15;
+    return static_cast<float>(x & 0xFFFFFFu) / 16777216.0f;
+}
+}  // namespace
+
+void HandRenderer::renderGroundItems(WorldRenderer& world, const Matrix4f& viewProj, const std::array<double, 3>& cam, const std::vector<ItemEntity>& items, double partialTick) {
+    if (items.empty()) return;
+    gl::Enable(gl::DEPTH_TEST);
+    gl::Enable(gl::CULL_FACE);
+    gl::CullFace(gl::BACK);
+    gl::FrontFace(gl::CCW);
+    gl::Disable(gl::BLEND);
+    for (const ItemEntity& e : items) {
+        if (e.stack.isEmpty()) continue;
+        const double px = e.xo + (e.x - e.xo) * partialTick - cam[0];
+        const double py = e.yo + (e.y - e.yo) * partialTick - cam[1];
+        const double pz = e.zo + (e.z - e.zo) * partialTick - cam[2];
+        if (px * px + py * py + pz * pz > 64.0 * 64.0) continue;
+        const HeldModel& model = modelFor(e.stack);
+        if (model.empty) continue;
+        const DisplayTransform ground = model.ground.present ? model.ground : DisplayTransform{{0.0f, 0.0f, 0.0f}, {0.0f, 3.0f, 0.0f}, {0.25f, 0.25f, 0.25f}, true};
+        // The bobbing and the spin of ItemEntityRenderer: up and down 0.1 blocks over about 63 ticks, a full turn every 125.
+        const double age = static_cast<double>(e.age) + partialTick;
+        const double bob = std::sin(age / 10.0 + static_cast<double>(e.bobOffset)) * 0.1 + 0.1;
+        const double spinDegrees = (age / 20.0 + static_cast<double>(e.bobOffset)) / kDeg;
+        const M4 base = translate(px, py + bob + 0.25 * static_cast<double>(ground.scale[1]), pz) * rotY(spinDegrees);
+        int sky = 15, block = 0;
+        world.lightAt(static_cast<int>(std::floor(e.x)), static_cast<int>(std::floor(e.y + 0.1)), static_cast<int>(std::floor(e.z)), sky, block);
+        std::vector<MeshVertex> vertices = model.vertices;
+        for (MeshVertex& v : vertices) {
+            v.sky = static_cast<std::uint8_t>(sky * 17);
+            v.block = static_cast<std::uint8_t>(block * 17);
+        }
+        const int copies = ItemEntities::renderedAmount(e.stack.count);
+        for (int i = 0; i < copies; ++i) {  // a bigger stack is a little heap: the copies sit a few pixels apart
+            const double ox = i == 0 ? 0.0 : (static_cast<double>(hashUnit(e.id, i * 3)) * 2.0 - 1.0) * 0.15;
+            const double oy = i == 0 ? 0.0 : (static_cast<double>(hashUnit(e.id, i * 3 + 1)) * 2.0 - 1.0) * 0.05;
+            const double oz = i == 0 ? 0.0 : (static_cast<double>(hashUnit(e.id, i * 3 + 2)) * 2.0 - 1.0) * 0.15;
+            const M4 pose = base * translate(ox, oy, oz) * applyTransform(ground, false) * translate(-0.5, -0.5, -0.5);
+            world.drawHeld(viewProj * pose.toFloat(), vertices);
+        }
+    }
+}
+
+std::array<float, 3> entityLightColor(int sky, int block, float gamma) { return lightMapColor(sky, block, gamma); }
 
 }  // namespace falcon

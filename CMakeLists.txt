@@ -248,6 +248,7 @@ add_library(falcon_core
     src/render/item_icons.cpp
     src/render/entity_model.cpp
     src/render/player_preview.cpp
+    src/render/player_body.cpp
     src/render/world_renderer.cpp
     src/world/server_list.cpp
     src/worldgen/random.cpp

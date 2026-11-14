@@ -6,9 +6,11 @@
 #include "falcon/render/block_models.hpp"
 #include "falcon/render/camera.hpp"
 #include "falcon/render/item_icons.hpp"
+#include "falcon/world/item_entity.hpp"
 #include "falcon/world/item_stack.hpp"
 #include "falcon/world/mesher.hpp"
 
+#include <array>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -16,6 +18,9 @@
 namespace falcon {
 
 class WorldRenderer;
+
+// The game's light map colour for a sky and a block light level (0..15) and the Brightness option: what the world's shader multiplies a surface by.
+[[nodiscard]] std::array<float, 3> entityLightColor(int sky, int block, float gamma);
 
 // What the hand needs to know about the frame.
 struct HandFrame {
@@ -51,6 +56,9 @@ public:
 
     // Draws the hand over the world (clears the depth buffer first).
     void render(WorldRenderer& world, const HandFrame& frame);
+    // Draws the items lying in the world (ItemEntityRenderer): each bobs and turns slowly, a bigger stack is drawn as a few copies. `viewProj` is the
+    // frame's view and projection (the world is drawn relative to the camera, which is at `cam`).
+    void renderGroundItems(WorldRenderer& world, const Matrix4f& viewProj, const std::array<double, 3>& cam, const std::vector<ItemEntity>& items, double partialTick);
 
     // For tests: the progress values the animation has now.
     [[nodiscard]] float swingProgress(double partialTick) const;
@@ -60,6 +68,8 @@ private:
     struct HeldModel {
         std::vector<MeshVertex> vertices;  // in the model's own 0..1 space
         DisplayTransform firstRight, firstLeft;
+        DisplayTransform ground;      // lying in the world
+        DisplayTransform thirdRight;  // in the right hand of the player seen from outside
         bool empty = true;
     };
     const HeldModel& modelFor(const ItemStack& stack);
