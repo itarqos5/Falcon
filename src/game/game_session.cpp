@@ -873,7 +873,7 @@ bool GameSession::keyIs(const char* action, int key) const {
 
 void GameSession::onKey(int key, int mods) {
     for (int slot = 0; slot < 9; ++slot) {
-        if (keyIs(format("key.hotbar.%d", slot + 1).c_str(), key)) inventory_.setSelected(slot);
+        if (info_.gameType != 3 && keyIs(format("key.hotbar.%d", slot + 1).c_str(), key)) inventory_.setSelected(slot);  // (a spectator has no inventory to choose from)
     }
     // The debug key (F3): the debug screen is shown or hidden when it is let go, unless a chord (F3 + H, F3 + F4 ...) was used while it was
     // down (KeyboardHandler: handledDebugKey).
@@ -926,7 +926,7 @@ void GameSession::onKey(int key, int mods) {
     // F5: first person, from behind, from the front, and round again.
     if (keyIs("key.togglePerspective", key) && ready_) perspective_ = (perspective_ + 1) % 3;
     // F swaps the held item with the offhand one.
-    if (keyIs("key.swapOffhand", key) && ready_) std::swap(inventory_.selectedItem(), inventory_.offhand());
+    if (keyIs("key.swapOffhand", key) && ready_ && info_.gameType != 3) std::swap(inventory_.selectedItem(), inventory_.offhand());
 }
 
 void GameSession::drawPlayerPreview(GuiGraphics& g, int x0, int y0, int x1, int y1, float scale, float mouseX, float mouseY) {
@@ -1008,7 +1008,7 @@ void GameSession::pickBlock(Block block) {
 }
 
 void GameSession::onScroll(double dy) {
-    if (dy == 0.0) return;
+    if (dy == 0.0 || info_.gameType == 3) return;
     inventory_.setSelected(inventory_.selected - (dy > 0 ? 1 : -1));
 }
 
@@ -1243,7 +1243,7 @@ void GameSession::renderHud(GuiGraphics& g, int guiWidth, int guiHeight, bool ch
     if (!hudHidden_) {
         // Crosshair: 15x15 in the middle (only in first person).
         if (perspective_ == 0) g.blitSprite("hud/crosshair", (guiWidth - 15) / 2, (guiHeight - 15) / 2, 15, 15);
-        drawHotbar(g, guiWidth, guiHeight);
+        if (info_.gameType != 3) drawHotbar(g, guiWidth, guiHeight);  // (a spectator has no hotbar: no inventory)
         if (survivalBars()) drawSurvivalBars(g, guiWidth, guiHeight);
     }
 

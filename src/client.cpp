@@ -292,7 +292,7 @@ std::string usageText() {
            "  --move <X>,<Y>@<s>      Move the pointer there (repeatable)\n"
            "  --shift                 Treat shift as held (a shift-click)\n"
            "  --give <item>[:<n>]     Put items in the inventory once a world is open (repeatable)\n"
-           "  --gamemode <mode>       survival or creative, whatever the world says\n"
+           "  --gamemode <mode>       survival, creative, adventure or spectator, whatever the world says\n"
            "  --drop-from <blocks>    Lift the player that far once the world is ready and let them fall (to test fall damage)\n"
            "  --vitals <h>,<f>,<l>,<p>  What the survival bars show: health (20 = full), food (20), level, progress 0..1 (for screenshots)\n"
            "  --click <X>,<Y>@<s>     Inject a left click at that window position after <s> seconds\n"
@@ -466,8 +466,12 @@ ClientOptions parseOptions(int argc, const char* const* argv) {
                 o.gameType = 0;
             } else if (v == "creative") {
                 o.gameType = 1;
+            } else if (v == "adventure") {
+                o.gameType = 2;
+            } else if (v == "spectator") {
+                o.gameType = 3;
             } else {
-                throw std::invalid_argument("--gamemode expects survival or creative, got " + v);
+                throw std::invalid_argument("--gamemode expects survival, creative, adventure or spectator, got " + v);
             }
         } else if (arg == "--click") {
             const std::string v = nextValue(i, argc, argv);
