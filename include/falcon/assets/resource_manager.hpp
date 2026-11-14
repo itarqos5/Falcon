@@ -29,6 +29,10 @@ public:
     ResourceManager& operator=(const ResourceManager&) = delete;
 
     [[nodiscard]] const std::filesystem::path& root() const { return root_; }
+    // The folder with the game's exported data (registries.json, gameplay-facts.json, data/minecraft/..., worldgen, ...). By default the
+    // folder that holds the assets folder; --data points it somewhere else (the launcher downloads the assets itself).
+    [[nodiscard]] const std::filesystem::path& dataRoot() const { return dataRoot_; }
+    void setDataRoot(std::filesystem::path dir) { dataRoot_ = std::move(dir); }
     // Where the file would be in the base assets (ignores packs).
     [[nodiscard]] std::filesystem::path resolve(const ResourceLocation& loc) const;
 
@@ -48,13 +52,18 @@ public:
     void setPacks(PackList packs);
 
     // The same base assets with a different pack list.
-    [[nodiscard]] ResourceManager withPacks(PackList packs) const { return ResourceManager(root_, std::move(packs)); }
+    [[nodiscard]] ResourceManager withPacks(PackList packs) const {
+        ResourceManager other(root_, std::move(packs));
+        other.dataRoot_ = dataRoot_;
+        return other;
+    }
 
 private:
     using Snapshot = std::shared_ptr<const PackList>;
     [[nodiscard]] Snapshot snapshot() const;
 
     std::filesystem::path root_;
+    std::filesystem::path dataRoot_;
     mutable std::mutex mutex_;
     Snapshot packs_;
 };

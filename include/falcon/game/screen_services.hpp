@@ -11,6 +11,7 @@
 
 #include <filesystem>
 #include <functional>
+#include <string>
 
 namespace falcon {
 
@@ -42,6 +43,9 @@ struct ScreenServices {
     std::function<void(const std::string& folder)> startWorld;
     // Leaves the world and goes back to the title screen.
     std::function<void()> quitWorld;
+    // Who is playing: the name the chat shows, and the account's uuid (the launcher passes both with --username / --uuid).
+    std::string playerName = "Player";
+    std::string playerUuid;
 };
 
 // A button handler that opens screen T on top of the current one (T's constructor takes the

@@ -8,10 +8,10 @@ namespace falcon {
 namespace fs = std::filesystem;
 
 ResourceManager::ResourceManager(fs::path assetsRoot, PackList packs)
-    : root_(std::move(assetsRoot)), packs_(std::make_shared<const PackList>(std::move(packs))) {}
+    : root_(std::move(assetsRoot)), dataRoot_(root_.parent_path()), packs_(std::make_shared<const PackList>(std::move(packs))) {}
 
 ResourceManager::ResourceManager(const ResourceManager& other)
-    : root_(other.root_), packs_(other.snapshot()) {}
+    : root_(other.root_), dataRoot_(other.dataRoot_), packs_(other.snapshot()) {}
 
 ResourceManager::Snapshot ResourceManager::snapshot() const {
     std::lock_guard<std::mutex> lock(mutex_);

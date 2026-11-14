@@ -624,7 +624,7 @@ ItemIcons::Rendered ItemIcons::renderPart(const IconPart& part, int size) {
             if (!chestModelTried_) {
                 chestModelTried_ = true;
                 std::string error;
-                chestModel_ = loadEntityModel(models_.resources().root().parent_path(), "minecraft:chest#main", error);
+                chestModel_ = loadEntityModel(models_.resources().dataRoot(), "minecraft:chest#main", error);
                 if (!chestModel_) std::printf("[falcon] chest icon: %s\n", error.c_str());
             }
             const std::string textureName = "entity/chest/" + (part.specialTexture.empty() ? std::string("normal") : part.specialTexture);
