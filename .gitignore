@@ -66,3 +66,6 @@ tests/data/chunks_seed12345.bin
 /dist-launcher/
 node_modules/
 launcher/ui/dist/
+
+# Notes for the assistant working on this project: private, not part of the repository
+/CLAUDE.md
