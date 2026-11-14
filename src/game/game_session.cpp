@@ -726,6 +726,7 @@ void GameSession::update(double dt, bool active, int framebufferWidth, int frame
 
     const int distance = renderDistance();
     renderer_.setBrightness(static_cast<float>(services_.options.gamma));
+    renderer_.setGpuTiming(showDebug_ || benchmark_.running);
     renderer_.setSmoothLighting(services_.options.ambientOcclusion);
     renderer_.setCutoutLeaves(services_.options.cutoutLeaves);
     renderer_.update(player_.x, player_.z, distance, ready_ ? 1.5 : 6.0);

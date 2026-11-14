@@ -153,6 +153,8 @@ public:
     [[nodiscard]] RenderStats stats() const { return stats_; }
     // GPU time of the last finished world pass, in milliseconds (0 until a measurement is back).
     [[nodiscard]] double gpuMillis() const { return gpuMillis_; }
+    // The GPU timer queries cost the driver something every frame, so they only run while somebody looks at the number (F3, the benchmark).
+    void setGpuTiming(bool on) { gpuTiming_ = on; }
 
 private:
     struct SectionKey {
@@ -261,6 +263,7 @@ private:
     // The shared vertex arena: one buffer and one vertex array for every section.
     gl::GLuint arenaVao_ = 0;
     gl::GLuint arenaBuffer_ = 0;
+    gl::GLuint stagingBuffer_ = 0;  // new meshes are written here and copied into the arena by the GPU, so the CPU never waits for draws that use the arena
     std::size_t arenaCapacity_ = 0;  // vertices the buffer holds
     std::size_t arenaUsed_ = 0;      // bump pointer (vertices), including dead space
     std::size_t arenaDead_ = 0;      // freed vertices not yet reclaimed by a compaction
@@ -313,6 +316,7 @@ private:
     ChunkCache chunkCache_{128u * 1024u * 1024u};
     std::vector<VisibleSection> visible_;  // reused every frame
     double gpuMillis_ = 0.0;
+    bool gpuTiming_ = false;
 
     // ---- Occlusion culling ------------------------------------------------------------------------------------------------------
     // Every section of the area around the player has a cell in a dense grid (x and z wrap, 128 chunks across, which is more than the

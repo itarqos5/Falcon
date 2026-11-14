@@ -27,6 +27,7 @@ using GLubyte = unsigned char;
 using GLsizeiptr = std::ptrdiff_t;
 using GLintptr = std::ptrdiff_t;
 using GLuint64 = unsigned long long;
+using GLsync = void*;  // (the driver's own opaque pointer)
 
 inline constexpr GLenum FALSE_ = 0;
 inline constexpr GLenum TRUE_ = 1;
@@ -100,6 +101,8 @@ inline constexpr GLenum COLOR_ATTACHMENT0 = 0x8CE0;
 inline constexpr GLenum FRAMEBUFFER_COMPLETE = 0x8CD5;
 inline constexpr GLenum VENDOR = 0x1F00;
 inline constexpr GLenum RENDERER = 0x1F01;
+inline constexpr GLenum SYNC_GPU_COMMANDS_COMPLETE = 0x9117;
+inline constexpr GLbitfield SYNC_FLUSH_COMMANDS_BIT = 0x1;
 inline constexpr GLenum VERSION = 0x1F02;
 
 // X(return type, name without the "gl" prefix, parameter list)
@@ -175,7 +178,10 @@ inline constexpr GLenum VERSION = 0x1F02;
     X(void, GetQueryObjectui64v, (GLuint, GLenum, GLuint64*))                                 \
     X(void, GetQueryObjectiv, (GLuint, GLenum, GLint*))                                       \
     X(void, DrawElementsBaseVertex, (GLenum, GLsizei, GLenum, const void*, GLint))            \
-    X(void, VertexAttribDivisor, (GLuint, GLuint))
+    X(void, VertexAttribDivisor, (GLuint, GLuint))                                            \
+    X(GLsync, FenceSync, (GLenum, GLbitfield))                                                \
+    X(GLenum, ClientWaitSync, (GLsync, GLbitfield, GLuint64))                                 \
+    X(void, DeleteSync, (GLsync))
 
 #define FALCON_GL_DECLARE(ret, name, args)       \
     using PFN_##name = ret(APIENTRY*) args;    \

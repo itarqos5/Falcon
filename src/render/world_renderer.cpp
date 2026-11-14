@@ -378,6 +378,7 @@ WorldRenderer::~WorldRenderer() {
     pool_.clear();
     for (auto& [key, section] : sections_) destroySection(section);
     gl::DeleteBuffers(1, &arenaBuffer_);
+    if (stagingBuffer_ != 0) gl::DeleteBuffers(1, &stagingBuffer_);
     gl::DeleteVertexArrays(1, &arenaVao_);
     gl::DeleteBuffers(1, &indexBuffer_);
     gl::DeleteVertexArrays(1, &emptyVao_);
@@ -772,9 +773,20 @@ void WorldRenderer::uploadMesh(MeshResult&& result) {
         s.arenaBase = arenaAllocate(verts);
         s.arenaVerts = verts;
     }
+    // The mesh is written into a staging buffer (new storage each time, so nothing has to wait) and copied into the arena by the GPU, in order after
+    // the draws already queued. Writing straight into the arena made the driver wait for every frame in flight that was still drawing from it: with
+    // vsync that is one frame, without it (hundreds of fps) a queue of them, and each upload became a stall.
+    const auto bytes = static_cast<gl::GLsizeiptr>(verts) * static_cast<gl::GLsizeiptr>(sizeof(MeshVertex));
+    static const bool directUpload = std::getenv("FALCON_DIRECT_UPLOAD") != nullptr;  // (the old way, to compare)
     gl::BindBuffer(gl::ARRAY_BUFFER, arenaBuffer_);
-    gl::BufferSubData(gl::ARRAY_BUFFER, static_cast<gl::GLintptr>(s.arenaBase) * sizeof(MeshVertex),
-                      static_cast<gl::GLsizeiptr>(verts) * sizeof(MeshVertex), result.vertices.data());
+    if (directUpload) {
+        gl::BufferSubData(gl::ARRAY_BUFFER, static_cast<gl::GLintptr>(s.arenaBase) * static_cast<gl::GLintptr>(sizeof(MeshVertex)), bytes, result.vertices.data());
+    } else {
+        if (stagingBuffer_ == 0) gl::GenBuffers(1, &stagingBuffer_);
+        gl::BindBuffer(gl::COPY_READ_BUFFER, stagingBuffer_);
+        gl::BufferData(gl::COPY_READ_BUFFER, bytes, result.vertices.data(), gl::STREAM_DRAW);
+        gl::CopyBufferSubData(gl::COPY_READ_BUFFER, gl::ARRAY_BUFFER, 0, static_cast<gl::GLintptr>(s.arenaBase) * static_cast<gl::GLintptr>(sizeof(MeshVertex)), bytes);
+    }
     s.opaqueVertices = result.opaqueVertices;
     s.cutoutVertices = result.cutoutVertices;
     s.translucentVertices = result.translucentVertices;
@@ -922,8 +934,9 @@ bool WorldRenderer::sectionReady(int x, int y, int z) const {
 }
 
 void WorldRenderer::measureGpu(bool begin) {
+    if (!gpuTiming_ && !measuring_ && queriesInFlight_ == 0) return;  // (queries already started are still collected)
     if (begin) {
-        if (queriesInFlight_ < 3) {
+        if (queriesInFlight_ < 3 && gpuTiming_) {
             gl::BeginQuery(gl::TIME_ELAPSED, queries_[queryWrite_]);
             measuring_ = true;
         }

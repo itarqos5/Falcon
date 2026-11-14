@@ -23,6 +23,7 @@
 #include "falcon/game/game_session.hpp"
 #include "falcon/game/game_ui.hpp"
 #include "falcon/game/death_screen.hpp"
+#include "falcon/gfx/frame_queue.hpp"
 #include "falcon/game/in_game_screen.hpp"
 #include "falcon/game/lighting_audit.hpp"
 #include "falcon/game/vanilla_compare.hpp"
@@ -865,6 +866,7 @@ int Client::run() {
     bool trimAfterShow = false;     // hand back start-up memory once the window is up
     bool audioReported = false;     // the output device opens in the background: say when it is ready
     bool memSteady = false;
+    FrameQueue frameQueue;          // keeps an uncapped window from queueing frames far ahead of the graphics card
 
     while (!window.shouldClose()) {
         window.pollEvents();
@@ -1144,6 +1146,11 @@ int Client::run() {
             session->noteCpuMillis(std::chrono::duration<double, std::milli>(Clock::now() - now).count());
         }
         window.swapBuffers();
+        {   // Without vsync and without a frame cap the CPU would queue frames far ahead of the graphics card: allow two (see FrameQueue).
+            static const char* forcedAhead = std::getenv("FALCON_FRAME_AHEAD");  // (for tests: a number of frames, 0 = no limit, even in a hidden window)
+            const bool uncapped = !window.background() && window.focused() && !gameOptions.enableVsync && gameOptions.framerateLimit >= 260;
+            frameQueue.limit(forcedAhead != nullptr ? std::atoi(forcedAhead) : (uncapped ? 2 : 0));
+        }
         if (!windowShown) {  // the first frame is on screen: now the window can appear
             windowShown = true;
             window.show();
@@ -1162,8 +1169,9 @@ int Client::run() {
         // A background window's swaps do not wait for vsync: pace it ourselves (~60 fps) rather
         // than spinning a core while someone is busy doing something else. A window that is not the one being
         // used (another program has the focus) is held to 20 fps, so a game running next to it keeps the machine.
+        static const bool noPacing = std::getenv("FALCON_NO_PACING") != nullptr;  // (to measure a hidden window running flat out, as an uncapped one does)
         if (window.background()) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(16));
+            if (!noPacing) std::this_thread::sleep_for(std::chrono::milliseconds(16));
         } else if (!window.focused()) {
             const auto spent = Clock::now() - now;
             const auto budget = std::chrono::milliseconds(50);

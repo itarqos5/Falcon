@@ -47,3 +47,16 @@ The picture is unchanged: with occlusion culling and multi-draw on, the frames c
 
 `tools\benchmark.ps1` runs the benchmark with a hidden window (never a visible one) and `-Compare` compares frames of two builds pixel by pixel. Each part can be
 switched off with an environment variable (listed at the top of that script), which is how the numbers above were compared in a single build.
+
+## Uncapped (no vsync) feels choppy
+
+With vsync off the game can run at hundreds of frames a second and still look uneven. What was changed, from reading how the frame loop behaves rather than from a
+number measured on a window you can see (the measuring here uses hidden windows, which the display does not pace like a real one, so this one needs your eyes):
+
+* **A short queue to the graphics card** (`gfx/frame_queue.hpp`). Without vsync the swap does not wait, so the CPU can queue many frames ahead; the driver's queue then
+  fills and drains in bursts, and the frames come out unevenly spaced. Now, with vsync off and no frame cap, a fence after each frame and a wait for the one two back keeps
+  it at two. It costs nothing when the card is the faster one. (`FALCON_FRAME_AHEAD=<n>` forces a limit, 0 turns it off, for comparing.)
+* **New meshes are copied into the mesh arena by the GPU** from a staging buffer instead of being written into it from the CPU. Writing into a buffer that queued draws still
+  read from can make the driver wait for all of them; with a deep queue that was one stall per uploaded section while chunks stream in. (`FALCON_DIRECT_UPLOAD=1` is the old way.)
+* **The GPU timer queries only run while F3 or the benchmark shows the number**; they cost the driver something on every frame.
+* `FALCON_NO_PACING=1` skips the 16 ms sleep of a hidden window, to measure it running flat out.
