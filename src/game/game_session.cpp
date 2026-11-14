@@ -12,6 +12,8 @@
 #include "falcon/world/water_fog.hpp"
 
 #include <algorithm>
+#include <array>
+#include <chrono>
 #include <cctype>
 #include <cmath>
 #include <cstdarg>
@@ -83,14 +85,14 @@ std::shared_ptr<const BlockRegistry> loadRegistry(const ScreenServices& services
     if (!registry || !registry->isFromGameData()) {
         std::string error;
         // The data sits next to the assets: <game>/assets and <game>/data, registries.json, ...
-        registry = BlockRegistry::loadFromGameData(resources.root().parent_path(), services.gameDir / "falcon_cache", error);
+        registry = BlockRegistry::loadFromGameData(resources.dataRoot(), services.gameDir / "falcon_cache", error);
         if (!registry) throw std::runtime_error(error);
         installBlockRegistry(registry);
     }
     // The collision shapes of the same blocks, installed beside the registry. Without them only full cubes collide.
     if (!hasCollisionShapesFromGameData()) {
         std::string error;
-        auto shapes = CollisionShapes::loadFromGameData(resources.root().parent_path(), services.gameDir / "falcon_cache", *registry, error);
+        auto shapes = CollisionShapes::loadFromGameData(resources.dataRoot(), services.gameDir / "falcon_cache", *registry, error);
         if (shapes) {
             installCollisionShapes(std::move(shapes));
         } else {
@@ -100,7 +102,7 @@ std::shared_ptr<const BlockRegistry> loadRegistry(const ScreenServices& services
     // The outline shapes: what the cursor can hit (a torch is a small post, not a block) and the lines drawn round it.
     if (!hasBlockOutlinesFromGameData()) {
         std::string error;
-        auto outlines = BlockOutlines::loadFromGameData(resources.root().parent_path(), services.gameDir / "falcon_cache", *registry, error);
+        auto outlines = BlockOutlines::loadFromGameData(resources.dataRoot(), services.gameDir / "falcon_cache", *registry, error);
         if (outlines) {
             installBlockOutlines(std::move(outlines));
         } else {
@@ -117,7 +119,7 @@ std::shared_ptr<const ItemRegistry> loadItems(const ScreenServices& services, co
     std::shared_ptr<const ItemRegistry> items = currentItemRegistry();
     if (!items || !items->isFromGameData()) {
         std::string error;
-        const std::filesystem::path dataDir = resources.root().parent_path();
+        const std::filesystem::path dataDir = resources.dataRoot();
         const std::filesystem::path cache = services.gameDir / "falcon_cache";
         items = ItemRegistry::loadFromGameData(dataDir, cache, &blocks, error);
         if (!items) throw std::runtime_error(error);
@@ -145,7 +147,7 @@ std::shared_ptr<const ItemRegistry> loadItems(const ScreenServices& services, co
 std::shared_ptr<const worldgen::OverworldGenerator> makeOverworld(const ResourceManager& resources, const BlockRegistry& registry, const LevelInfo& info) {
     const char* preset = worldgen::worldPresetFor(info.style);
     if (preset == nullptr) return nullptr;
-    const std::filesystem::path dataDir = resources.root().parent_path();
+    const std::filesystem::path dataDir = resources.dataRoot();
     worldgen::GeneratorOptions options;
     std::string error;
     if (!worldgen::loadWorldPreset(dataDir, preset, options, error)) {
@@ -178,16 +180,19 @@ GameSession::GameSession(ScreenServices& services, const ResourceManager& resour
     MenuPlayer menuPlayer;
     menuPlayer.inventory = &inventory_;
     menuPlayer.infiniteMaterials = info.gameType == 1;
-    menuPlayer.dropHook = [this](const ItemStack&) { ++droppedCount_; };
+    menuPlayer.dropHook = [this](const ItemStack& thrown) { dropFromPlayer(thrown); };  // (Player.drop: a click outside the menu throws it)
     inventoryMenu_ = std::make_unique<InventoryMenu>(menuPlayer);
-    waterFogs_ = WaterFogTable::load(resources.root().parent_path());  // the biomes' water fog colours (data/.../worldgen/biome)
+    waterFogs_ = WaterFogTable::load(resources.dataRoot());  // the biomes' water fog colours (data/.../worldgen/biome)
     {
         std::string supportError;
-        support_ = BlockSupport::loadFromGameData(resources.root().parent_path(), *registry_, supportError);
+        support_ = BlockSupport::loadFromGameData(resources.dataRoot(), *registry_, supportError);
         if (!support_) std::printf("[falcon] plant rules: %s (plants will not pop off)\n", supportError.c_str());
         std::string previewError;
-        playerPreview_ = PlayerPreview::create(resources, resources.root().parent_path(), previewError);
+        playerPreview_ = PlayerPreview::create(resources, resources.dataRoot(), previewError);
         if (!playerPreview_) std::printf("[falcon] player model: %s (the inventory will not show the player)\n", previewError.c_str());
+        std::string bodyError;
+        body_ = PlayerBodyRenderer::create(resources, resources.dataRoot(), bodyError);
+        if (!body_) std::printf("[falcon] player model: %s (F5 will not show the player)\n", bodyError.c_str());
     }
     const auto spawn = renderer_.findSpawn();
     std::printf("[falcon] spawn found: %.1f %.1f %.1f (%s)\n", spawn.x, spawn.y, spawn.z, overworld_ ? "game generator" : "simple terrain");
@@ -223,6 +228,28 @@ Camera GameSession::camera() const {
         c.bobY = bob.y;
         c.bobRollDegrees = bob.rollDegrees;
         c.bobPitchDegrees = bob.pitchDegrees;
+    }
+    // GameRenderer.bobHurt: a hit tips the view to one side and back over half a second.
+    if (hurtTime_ > 0) {
+        const float left = std::max(0.0f, static_cast<float>(hurtTime_) - static_cast<float>(partialTick_)) / 10.0f;
+        const float tilt = std::sin(left * left * left * left * 3.1415927f) * 14.0f;
+        c.bobRollDegrees += hurtDirection_ == 0.0f ? -tilt : tilt;
+    }
+    // F5 (Camera.setup): from behind or in front, four blocks away along the view, brought closer where a block would be in the way (the nearest
+    // hit of eight rays from the corners of a small box round the eye); in front the camera looks back at the player.
+    if (perspective_ != 0 && ready_) {
+        const bool front = perspective_ == 2;
+        const Look look{front ? player_.yaw + 180.0f : player_.yaw, front ? -player_.pitch : player_.pitch};
+        const auto forward = look.forward();
+        double distance = 4.0;
+        for (int i = 0; i < 8; ++i) {
+            const std::array<double, 3> from = {c.x + ((i & 1) * 2 - 1) * 0.1, c.y + (((i >> 1) & 1) * 2 - 1) * 0.1, c.z + (((i >> 2) & 1) * 2 - 1) * 0.1};
+            if (const auto hit = raycastBlocks(renderer_.level(), from, {-forward[0], -forward[1], -forward[2]}, distance)) distance = std::min(distance, hit->distance);
+        }
+        c.x -= forward[0] * distance;
+        c.y -= forward[1] * distance;
+        c.z -= forward[2] * distance;
+        c.look = look;
     }
     return c;
 }
@@ -309,18 +336,34 @@ void GameSession::tickPlayer(double seconds, bool steering) {
     for (int i = 0; i < std::min(due, kMaxTicksPerFrame); ++i) {
         playerAgeTicks_ += 1.0;
         if (!pinnedPose_) {  // (a pinned camera, for screenshots, freezes the player; the world goes on)
+            const double vx = player_.vx, vy = player_.vy, vz = player_.vz;  // (what it was going at, for a splash)
             player_.tick(input, renderer_.level());
             waterVisionTicks_ = nextWaterVisionTicks(waterVisionTicks_, player_.isUnderWater(), info_.gameType == 3);  // the eyes get used to the water
+            if (ready_ && !dead_) {
+                footsteps(input.shift);
+                if (const int damage = player_.takeFallDamage(); damage > 0 && survivalBars()) fallDamage(damage);
+                if (player_.inWater && !wasInWater_) splash(vx, vy, vz);
+                wasInWater_ = player_.inWater;
+                tickBody();
+                pickUpItems();
+            }
         }
+        tickHealth();
+        if (ready_) itemEntities_.tick(renderer_.level());
         // The water that flows: its updates that are due this tick.
         fluids_.tick(renderer_.level(), [this](int bx, int by, int bz, Block b) { return renderer_.setBlock(bx, by, bz, b); });
     }
-    // Out of the world (below the void line) the game would kill the player: here they start again at the spawn.
+    // Out of the world (below the void line) the void hurts a survival player (4 a tick, through any protection) until they die; anyone else
+    // starts again at the spawn.
     if (!pinnedPose_ && player_.y < static_cast<double>(kMinY) - 64.0) {
-        player_.setPosition(spawn_[0], spawn_[1], spawn_[2]);
-        player_.vx = player_.vy = player_.vz = 0.0;
-        player_.fallDistance = 0.0;
-        player_.lastFallDamage = 0;
+        if (survivalBars()) {
+            hurt(4.0f, true);
+        } else {
+            player_.setPosition(spawn_[0], spawn_[1], spawn_[2]);
+            player_.vx = player_.vy = player_.vz = 0.0;
+            player_.fallDistance = 0.0;
+            player_.lastFallDamage = 0;
+        }
     }
 }
 
@@ -335,14 +378,224 @@ void GameSession::tickHud(double seconds) {
     }
 }
 
-// A block broken in survival: its item goes straight into the inventory (the game drops an item entity that is picked up
-// at once when it is next to the player; loot tables and tool rules are not here yet, so a block gives its own item).
-void GameSession::collectDrop(Block broken) {
+// A block broken in survival drops its item into the world (Block.popResource): a little above the middle of the block, thrown up a little.
+// (Loot tables and tool rules are not here yet, so a block gives its own item.)
+void GameSession::collectDrop(Block broken, int x, int y, int z) {
     const ItemRegistry& items = itemRegistry();
     const Item item = items.itemOfBlock(registry_->state(broken).block);
     if (item == Item::Air) return;
-    ItemStack stack(item, 1);
-    inventory_.add(stack);
+    const auto jitter = [this] { return static_cast<double>(randomFloat()) * 0.5 - 0.25; };
+    itemEntities_.spawn(ItemStack(item, 1), x + 0.5 + jitter(), y + 0.5 + jitter() - 0.125, z + 0.5 + jitter(), static_cast<double>(randomFloat()) * 0.2 - 0.1, 0.2,
+                        static_cast<double>(randomFloat()) * 0.2 - 0.1, 10, randomFloat() * 6.2831855f);
+}
+
+// Player.drop. Thrown from the hand: out of the face, in the direction of the look, with a little spread. Scattered (what is lost at death): up and
+// out in any direction.
+void GameSession::dropFromPlayer(const ItemStack& stack, bool scatter) {
+    if (stack.isEmpty()) return;
+    ++droppedCount_;
+    double vx, vy, vz;
+    if (scatter) {
+        const float f = randomFloat() * 0.5f, g = randomFloat() * 6.2831855f;
+        vx = -std::sin(g) * f;
+        vy = 0.2;
+        vz = std::cos(g) * f;
+    } else {
+        const float degrees = 0.017453292f;
+        const float sp = std::sin(player_.pitch * degrees), cp = std::cos(player_.pitch * degrees);
+        const float sy = std::sin(player_.yaw * degrees), cy = std::cos(player_.yaw * degrees);
+        const float k = randomFloat() * 6.2831855f, l = 0.02f * randomFloat();
+        vx = static_cast<double>(-sy * cp * 0.3f) + std::cos(k) * l;
+        vy = static_cast<double>(-sp * 0.3f + 0.1f + (randomFloat() - randomFloat()) * 0.1f);
+        vz = static_cast<double>(cy * cp * 0.3f) + std::sin(k) * l;
+    }
+    itemEntities_.spawn(stack, player_.x, player_.eyeY() - 0.3, player_.z, vx, vy, vz, 40, randomFloat() * 6.2831855f);
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Sounds of the world
+
+void GameSession::playWorldSound(const std::string& event, SoundSource source, float volume, float pitch, const std::array<double, 3>* at) {
+    if (at != nullptr) {  // fades linearly with the distance from the head: gone at 16 blocks (more for a louder sound)
+        const auto head = player_.eye();
+        const double dx = (*at)[0] - head[0], dy = (*at)[1] - head[1], dz = (*at)[2] - head[2];
+        const double distance = std::sqrt(dx * dx + dy * dy + dz * dz);
+        const double range = 16.0 * std::max(1.0f, volume);
+        if (distance >= range) return;
+        volume *= static_cast<float>(1.0 - std::max(0.0, distance - 1.0) / (range - 1.0));
+    }
+    pitch = std::clamp(pitch, 0.5f, 2.0f);
+    static const bool log = std::getenv("FALCON_SOUND_LOG") != nullptr;  // (for tests, which run muted: what would have been heard)
+    if (log) std::printf("[falcon] sound %s volume %.2f pitch %.2f\n", event.c_str(), static_cast<double>(volume), static_cast<double>(pitch));
+    services_.sounds.play(event, source, volume, pitch);
+}
+
+void GameSession::playBlockSound(Block block, const char* kind, SoundMix mix, SoundSource source, const std::array<double, 3>* at) {
+    const std::string& set = registry_->type(block).sound;
+    if (set.empty()) return;
+    playWorldSound(blockSoundEvent(set, kind), source, mix.volume, mix.pitch, at);
+}
+
+// Entity.applyMovementEmissionAndPlaySound for the player. Nothing sounds while flying or while sneaking on the ground (Player.getMovementEmission);
+// otherwise the walked distance runs the clock, and a step is due when it passes the next mark: on a block (not air), with the feet on the ground
+// (or edging along while sneaking), not swimming. In water the step is a swimming sound and a muffled step.
+void GameSession::footsteps(bool sneakKey) {
+    if (player_.flying || player_.spectator || (player_.onGround && sneakKey)) return;
+    const double dx = player_.x - player_.xo, dz = player_.z - player_.zo;
+    stepClock_.add(std::hypot(dx, dz));
+    if (!stepClock_.due()) return;
+    const int bx = static_cast<int>(std::floor(player_.x)), by = static_cast<int>(std::floor(player_.y - 0.2)), bz = static_cast<int>(std::floor(player_.z));
+    const Block under = renderer_.level().block(bx, by, bz);
+    if (registry_->isAir(under)) return;  // (the clock keeps running: the first step on the ground that is met sounds at once)
+    const BlockType& type = registry_->type(under);
+    const bool onFoot = (player_.onGround || (player_.sneaking && player_.y == player_.yo)) && !player_.isSwimming();
+    if (onFoot) {
+        stepClock_.played();
+        if (player_.inWater) {  // Player.playStepSound: waterSwimSound, then the muffled step
+            const float volume = std::min(1.0f, std::sqrt(static_cast<float>(player_.vx * player_.vx * 0.2 + player_.vy * player_.vy + player_.vz * player_.vz * 0.2)) * 0.4f);
+            playWorldSound("entity.player.swim", SoundSource::Players, volume, 1.0f + (randomFloat() - randomFloat()) * 0.4f);
+            const SoundMix mix = mutedStepMix(type.soundVolume, type.soundPitch);
+            playBlockSound(under, "step", mix, SoundSource::Players);
+        } else {
+            // A thin block on top (snow, a moss carpet) is what the foot lands on, so it sounds instead of the one below.
+            Block sounding = under;
+            const Block above = renderer_.level().block(bx, by + 1, bz);
+            if (!registry_->isAir(above)) {
+                const std::string& n = registry_->type(above).name;
+                if (n == "snow" || n == "moss_carpet" || n == "pale_moss_carpet") sounding = above;
+            }
+            const BlockType& stepType = registry_->type(sounding);
+            playBlockSound(sounding, "step", stepMix(stepType.soundVolume, stepType.soundPitch), SoundSource::Players);
+        }
+    } else if (player_.inWater) {
+        stepClock_.played();
+        const float volume = std::min(1.0f, std::sqrt(static_cast<float>(player_.vx * player_.vx * 0.2 + player_.vy * player_.vy + player_.vz * player_.vz * 0.2)) * 0.4f);
+        playWorldSound("entity.player.swim", SoundSource::Players, volume, 1.0f + (randomFloat() - randomFloat()) * 0.4f);
+    }
+}
+
+// Entity.doWaterSplashEffect: the harder it came down, the louder the splash (and the bigger one from 1.25 blocks a tick).
+void GameSession::splash(double vx, double vy, double vz) {
+    const float volume = std::min(1.0f, std::sqrt(static_cast<float>(vx * vx * 0.2 + vy * vy + vz * vz * 0.2)) * 0.2f);
+    playWorldSound(volume < 0.25f ? "entity.player.splash" : "entity.player.splash.high_speed", SoundSource::Players, volume, 1.0f + (randomFloat() - randomFloat()) * 0.4f);
+}
+
+// LivingEntity.causeFallDamage: the cry for the size of the fall, the block's fall sound, then the hurt itself.
+void GameSession::fallDamage(int damage) {
+    playWorldSound(fallDamageEvent(damage), SoundSource::Players, 1.0f, 1.0f);
+    const Block under = renderer_.level().block(static_cast<int>(std::floor(player_.x)), static_cast<int>(std::floor(player_.y - 0.2)), static_cast<int>(std::floor(player_.z)));
+    if (!registry_->isAir(under)) {
+        const BlockType& type = registry_->type(under);
+        playBlockSound(under, "fall", fallMix(type.soundVolume, type.soundPitch), SoundSource::Players);
+    }
+    hurt(static_cast<float>(damage));
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Health
+
+bool GameSession::hurt(float amount, bool bypassCooldown) {
+    if (!survivalBars() || dead_ || amount <= 0.0f) return false;  // creative and spectator players cannot be hurt
+    float applied = amount;
+    if (!bypassCooldown && invulnerableTime_ > 10) {  // LivingEntity.hurtServer: in the half second after a hit only a stronger one counts, for the difference
+        if (amount <= lastHurt_) return false;
+        applied = amount - lastHurt_;
+        lastHurt_ = amount;
+    } else {
+        lastHurt_ = amount;
+        invulnerableTime_ = 20;
+        hurtTime_ = 10;
+        hurtDirection_ = randomFloat() < 0.5f ? 0.0f : 180.0f;  // (a hit with no attacker tilts the view to a random side)
+        if (vitals_.health - applied > 0.0f) playWorldSound("entity.player.hurt", SoundSource::Players, 1.0f, 1.0f + (randomFloat() - randomFloat()) * 0.2f);
+    }
+    vitals_.health = std::max(0.0f, vitals_.health - applied);
+    if (vitals_.health <= 0.0f) die();
+    return true;
+}
+
+void GameSession::die() {
+    dead_ = true;
+    deathRequested_ = true;
+    playWorldSound("entity.player.death", SoundSource::Players, 1.0f, 1.0f + (randomFloat() - randomFloat()) * 0.2f);
+    // Inventory.dropAll: everything the player carried is scattered where they died.
+    for (int slot = 0; slot < Inventory::kSize; ++slot) {
+        ItemStack& stack = inventory_.item(slot);
+        if (stack.isEmpty()) continue;
+        dropFromPlayer(stack, true);
+        stack = ItemStack();
+    }
+}
+
+void GameSession::respawn() {
+    dead_ = false;
+    vitals_.health = vitals_.maxHealth;
+    vitals_.food = 20;
+    vitals_.saturation = 5.0f;
+    invulnerableTime_ = hurtTime_ = regenTimer_ = 0;
+    lastHurt_ = 0.0f;
+    lastHealthShown_ = displayHealth_ = static_cast<int>(vitals_.maxHealth);
+    player_.setPosition(spawn_[0], spawn_[1], spawn_[2]);
+    player_.vx = player_.vy = player_.vz = 0.0;
+    player_.fallDistance = 0.0;
+    player_.lastFallDamage = 0;
+    stepClock_ = StepClock();
+}
+
+// The part of a game tick that is about health: the protection and the tilt run down, and a player who is fed (18 or more of food) heals half a
+// heart every four seconds (FoodData.tick's slow healing; the fast one needs food to burn, and none is used up yet).
+void GameSession::tickHealth() {
+    if (invulnerableTime_ > 0) --invulnerableTime_;
+    if (hurtTime_ > 0) --hurtTime_;
+    if (!survivalBars() || dead_) return;
+    if (vitals_.health > 0.0f && vitals_.health < vitals_.maxHealth && vitals_.food >= 18) {
+        if (++regenTimer_ >= 80) {
+            vitals_.health = std::min(vitals_.maxHealth, vitals_.health + 1.0f);
+            regenTimer_ = 0;
+        }
+    } else {
+        regenTimer_ = 0;
+    }
+}
+
+// Player.aiStep: the items the player's box, grown by a block either side and half a block up and down, touches are taken once their delay is over.
+void GameSession::pickUpItems() {
+    if (info_.gameType == 3 || dead_) return;
+    Aabb reach = player_.boundingBox();
+    reach = {reach.minX - 1.0, reach.minY - 0.5, reach.minZ - 1.0, reach.maxX + 1.0, reach.maxY + 0.5, reach.maxZ + 1.0};
+    for (ItemEntity& e : itemEntities_.items()) {
+        if (e.pickupDelay > 0 || e.stack.isEmpty() || !e.box().intersects(reach)) continue;
+        const int before = e.stack.count;
+        inventory_.add(e.stack);
+        const int taken = before - (e.stack.isEmpty() ? 0 : e.stack.count);
+        if (taken > 0) playWorldSound("entity.item.pickup", SoundSource::Players, 0.2f, ((randomFloat() - randomFloat()) * 0.7f + 1.0f) * 2.0f);
+    }
+}
+
+// The walk cycle and where the body faces (LivingEntity.tick and tickHeadTurn): the body turns towards where the player is going, never more than
+// 75 degrees away from where the head looks.
+void GameSession::tickBody() {
+    const double dx = player_.x - player_.xo, dz = player_.z - player_.zo;
+    walkSpeedOld_ = walkSpeed_;
+    walkSpeed_ += (std::min(static_cast<float>(std::sqrt(dx * dx + dz * dz)) * 4.0f, 1.0f) - walkSpeed_) * 0.4f;
+    walkPosition_ += walkSpeed_;
+    const auto wrap = [](float degrees) {
+        float d = std::fmod(degrees, 360.0f);
+        if (d >= 180.0f) d -= 360.0f;
+        if (d < -180.0f) d += 360.0f;
+        return d;
+    };
+    bodyYawOld_ = bodyYaw_;
+    float target = bodyYaw_;
+    if (dx * dx + dz * dz > 0.0025000002) {
+        const float heading = static_cast<float>(std::atan2(dz, dx) * 57.29577951308232) - 90.0f;
+        const float away = std::abs(wrap(player_.yaw) - heading);
+        target = (95.0f < away && away < 265.0f) ? heading - 180.0f : heading;  // walking backwards faces the other way round
+    }
+    if (hand_.swingProgress(0.0) > 0.0f) target = player_.yaw;  // an attack or a placed block faces the way the player looks
+    bodyYaw_ += wrap(target - bodyYaw_) * 0.3f;
+    float diff = std::clamp(wrap(player_.yaw - bodyYaw_), -75.0f, 75.0f);
+    bodyYaw_ = player_.yaw - diff;
+    if (diff * diff > 2500.0f) bodyYaw_ += diff * 0.2f;
 }
 
 bool GameSession::giveItem(const std::string& spec) {
@@ -400,13 +653,21 @@ void GameSession::interact(double dt, bool active) {
             const Block broken = renderer_.level().block(target_->x, target_->y, target_->z);
             setBlock(target_->x, target_->y, target_->z, Block::Air);
             hand_.swing();
-            if (!creative() && !registry_->isAir(broken)) collectDrop(broken);
+            if (!registry_->isAir(broken)) {  // the break sound of the block, heard where it was
+                const std::array<double, 3> where = {target_->x + 0.5, target_->y + 0.5, target_->z + 0.5};
+                const BlockType& type = registry_->type(broken);
+                playBlockSound(broken, "break", breakOrPlaceMix(type.soundVolume, type.soundPitch), SoundSource::Blocks, &where);
+            }
+            if (!creative() && !registry_->isAir(broken)) collectDrop(broken, target_->x, target_->y, target_->z);
             target_ = raycastBlocks(renderer_.level(), eye, look, kReach);
         }
     }
     if (use && placeCooldown_ <= 0.0 && target_) {
         placeCooldown_ = kRepeatDelay;
-        const auto place = target_->placePosition();
+        // BlockPlaceContext: aiming at a block that can be replaced (grass, ferns, dead bushes, snow, water ...) puts the new block in ITS place; any other
+        // block gets the new one next to the face that was hit (a flower, a torch, a slab: beside or on top of it).
+        const bool replaceClicked = registry_->state(renderer_.level().block(target_->x, target_->y, target_->z)).has(kStateReplaceable);
+        const auto place = replaceClicked ? std::array<int, 3>{target_->x, target_->y, target_->z} : target_->placePosition();
         const Block there = renderer_.level().block(place[0], place[1], place[2]);
         const bool inWorld = place[1] >= kMinY && place[1] < kMaxY;
         // Not into the player's own body (whatever the pose).
@@ -430,6 +691,11 @@ void GameSession::interact(double dt, bool active) {
                 }
                 setBlock(place[0], place[1], place[2], placed);
                 hand_.swing();
+                {  // the place sound of the new block
+                    const std::array<double, 3> where = {place[0] + 0.5, place[1] + 0.5, place[2] + 0.5};
+                    const BlockType& type = registry_->type(placed);
+                    playBlockSound(placed, "place", breakOrPlaceMix(type.soundVolume, type.soundPitch), SoundSource::Blocks, &where);
+                }
                 if (!creative()) {
                     heldStack.shrink(1);
                     if (heldStack.isEmpty()) heldStack = ItemStack();
@@ -440,10 +706,15 @@ void GameSession::interact(double dt, bool active) {
 }
 
 void GameSession::update(double dt, bool active, int framebufferWidth, int framebufferHeight, bool keepTicking) {
-    (void)framebufferWidth;
-    (void)framebufferHeight;
+    framebufferWidth_ = framebufferWidth;
+    framebufferHeight_ = framebufferHeight;
     const double frameSeconds = dt;  // what the game ticks are made from (the catch-up limit is in ticks, not seconds)
     dt = std::min(dt, 0.25);
+    systemMemoryAge_ += dt;
+    if (showDebug_ && systemMemoryAge_ >= 1.0) {  // the PC's memory for the debug screen: once a second is plenty
+        systemMemory_ = systemMemory();
+        systemMemoryAge_ = 0.0;
+    }
     fpsAccumulated_ += dt;
     ++fpsFrames_;
     if (fpsAccumulated_ >= 0.5) {
@@ -499,9 +770,10 @@ void GameSession::update(double dt, bool active, int framebufferWidth, int frame
             benchmark_.done = true;
             benchmark_.endRss = processWorkingSetBytes();
             const RenderStats s = renderer_.stats();
-            benchmark_.finalStats = format("%d chunks, %d sections drawn of %d, %zu quads drawn of %zu, blocks %.1f MB, meshes %.1f MB",
+            benchmark_.finalStats = format("%d chunks, %d sections drawn of %d, %zu quads drawn of %zu, blocks %.1f MB, meshes %.1f MB; %d draw calls for %d runs (%s, %s)",
                                            s.chunksLoaded, s.sectionsDrawn, s.sectionsLoaded, s.quadsDrawn, s.quadsTotal, megabytes(s.levelBytes),
-                                           megabytes(s.meshBytes));
+                                           megabytes(s.meshBytes), s.drawCalls, s.drawCommands, s.multiDraw ? "multi-draw" : "one call per run",
+                                           s.occlusionCulling ? "occlusion culling" : "frustum culling only");
         }
     }
 
@@ -561,11 +833,16 @@ void GameSession::onKey(int key, int mods) {
     if (services_.options.toggleCrouch && keyIs("key.sneak", key)) sneakLatched_ = !sneakLatched_;
     if (services_.options.toggleSprint && keyIs("key.sprint", key)) sprintLatched_ = !sprintLatched_;
     if (keyIs("key.pickItem", key) && target_) pickBlock(renderer_.level().block(target_->x, target_->y, target_->z));
-    // Q throws the held item (Ctrl + Q the whole stack). Nothing is spawned yet: the stack just leaves the inventory.
-    if (keyIs("key.drop", key) && ready_) {
+    // Q throws the held item (Ctrl + Q the whole stack) out in front of the player.
+    if (keyIs("key.drop", key) && ready_ && info_.gameType != 3 && !dead_) {
         const ItemStack thrown = inventory_.removeFromSelected((mods & GLFW_MOD_CONTROL) != 0);
-        if (!thrown.isEmpty()) ++droppedCount_;
+        if (!thrown.isEmpty()) {
+            dropFromPlayer(thrown);
+            hand_.swing();
+        }
     }
+    // F5: first person, from behind, from the front, and round again.
+    if (keyIs("key.togglePerspective", key) && ready_) perspective_ = (perspective_ + 1) % 3;
     // F swaps the held item with the offhand one.
     if (keyIs("key.swapOffhand", key) && ready_) std::swap(inventory_.selectedItem(), inventory_.offhand());
 }
@@ -671,7 +948,35 @@ void GameSession::renderWorld(int framebufferWidth, int framebufferHeight) {
     }
     renderer_.render(cam, framebufferWidth, framebufferHeight, renderDistance());
     if (ready_ && target_) renderer_.drawSelection(cam, framebufferWidth, framebufferHeight, target_->x, target_->y, target_->z);
-    if (ready_ && !hudHidden_ && info_.gameType != 3) {  // the hand (F1 hides it, and spectators have none)
+    if (ready_) {
+        const std::array<double, 3> camPos = {cam.x, cam.y, cam.z};
+        hand_.renderGroundItems(renderer_, renderer_.viewProjection(), camPos, itemEntities_.items(), partialTick_);
+        if (perspective_ != 0 && body_ && info_.gameType != 3) {  // F5: the player seen from outside
+            const float t = static_cast<float>(partialTick_);
+            const auto wrap = [](float degrees) {
+                float d = std::fmod(degrees, 360.0f);
+                if (d >= 180.0f) d -= 360.0f;
+                if (d < -180.0f) d += 360.0f;
+                return d;
+            };
+            BodyPose pose;
+            pose.position = player_.position(partialTick_);
+            pose.bodyYaw = bodyYawOld_ + wrap(bodyYaw_ - bodyYawOld_) * t;
+            pose.headYaw = wrap(player_.yaw - pose.bodyYaw);
+            pose.headPitch = player_.pitch;
+            pose.walkPosition = walkPosition_ - walkSpeed_ * (1.0f - t);
+            pose.walkSpeed = std::min(1.0f, walkSpeedOld_ + (walkSpeed_ - walkSpeedOld_) * t);
+            pose.attackProgress = hand_.swingProgress(partialTick_);
+            pose.crouching = player_.sneaking;
+            pose.ageTicks = playerAgeTicks_ + partialTick_;
+            pose.parts = services_.options.modelParts;
+            int sky = 15, block = 0;
+            renderer_.lightAt(static_cast<int>(std::floor(pose.position[0])), static_cast<int>(std::floor(pose.position[1] + 1.0)), static_cast<int>(std::floor(pose.position[2])), sky, block);
+            pose.light = entityLightColor(sky, block, static_cast<float>(services_.options.gamma));
+            body_->render(renderer_.viewProjection(), camPos, pose);
+        }
+    }
+    if (ready_ && perspective_ == 0 && !hudHidden_ && info_.gameType != 3) {  // the hand (F1 hides it, and spectators have none)
         HandFrame frame;
         frame.width = framebufferWidth;
         frame.height = framebufferHeight;
@@ -696,7 +1001,7 @@ std::vector<std::string> GameSession::debugLines() const {
     const auto eye = player_.eye();
     std::vector<std::string> lines;
     lines.push_back(format("Falcon 0.1.0 (Minecraft 26.3) - %s", info_.name.c_str()));
-    lines.push_back(format("%.0f fps (%.1f ms)   cpu %.1f ms   gpu %.1f ms", fps_, frameMillis_, cpuMillis_, renderer_.gpuMillis()));
+    lines.push_back(format("%.0f fps (%.1f ms)  cpu %.1f  gpu %.1f", fps_, frameMillis_, cpuMillis_, renderer_.gpuMillis()));
     lines.push_back("");
     lines.push_back(format("XYZ: %.3f / %.3f / %.3f", player_.x, player_.y, player_.z));
     const int bx = static_cast<int>(std::floor(player_.x));
@@ -712,20 +1017,93 @@ std::vector<std::string> GameSession::debugLines() const {
                            player_.isSwimming() ? "swimming " : "", player_.sprinting ? "sprinting " : "", player_.sneaking ? "sneaking" : ""));
     lines.push_back(format("Speed: %.2f blocks/s   fall distance: %.1f", std::hypot(player_.x - player_.xo, player_.z - player_.zo) * 20.0, player_.fallDistance));
     lines.push_back("");
-    lines.push_back(format("Render distance: %d   chunks: %d   sections drawn: %d / %d", renderDistance(), s.chunksLoaded, s.sectionsDrawn, s.sectionsLoaded));
-    lines.push_back(format("Quads drawn: %zu / %zu   jobs waiting: %d   uploads: %d", s.quadsDrawn, s.quadsTotal, s.jobsWaiting, s.uploadsThisFrame));
-    lines.push_back(format("Water: %zu updates waiting (tick %lld)", fluids_.pending(), fluids_.gameTime()));
-    lines.push_back(format("Memory: %.0f MB in RAM   block data %.1f MB   GPU: meshes %.1f MB, textures %.2f MB", megabytes(processWorkingSetBytes()),
-                           megabytes(s.levelBytes), megabytes(s.meshBytes), megabytes(s.textureBytes)));
-    lines.push_back(format("Chunk cache: %zu chunks kept compressed, %.1f MB", s.cachedChunks, megabytes(s.cacheBytes)));
+    lines.push_back(format("Render distance: %d  chunks: %d", renderDistance(), s.chunksLoaded));
+    lines.push_back(format("Sections drawn: %d / %d", s.sectionsDrawn, s.sectionsLoaded));
+    lines.push_back(format("Quads: %zu / %zu", s.quadsDrawn, s.quadsTotal));
+    lines.push_back(format("Jobs waiting: %d  uploads: %d", s.jobsWaiting, s.uploadsThisFrame));
+    lines.push_back(format("Water: %zu waiting (tick %lld)", fluids_.pending(), fluids_.gameTime()));
+    lines.push_back(format("RAM: %.0f MB  block data %.1f MB", megabytes(processWorkingSetBytes()), megabytes(s.levelBytes)));
+    lines.push_back(format("GPU: meshes %.1f MB, textures %.2f MB", megabytes(s.meshBytes), megabytes(s.textureBytes)));
+    lines.push_back(format("Chunk cache: %zu chunks, %.1f MB", s.cachedChunks, megabytes(s.cacheBytes)));
+    (void)eye;
+    return lines;
+}
+
+// The graphics lines are read once (the OpenGL strings and the card's own memory never change); the rest is cheap.
+void GameSession::refreshSystemLines() {
+    if (systemMemory_.total == 0) systemMemory_ = systemMemory();
+    if (!gpuLines_.empty()) return;
+    const auto glString = [](GLenum name) {
+        const char* text = reinterpret_cast<const char*>(gl::GetString(name));
+        return std::string(text != nullptr ? text : "");
+    };
+    const std::string vendor = glString(gl::VENDOR), renderer = glString(gl::RENDERER), version = glString(gl::VERSION);
+    gpuLines_.push_back(format("Display: %dx%d (%s)", framebufferWidth_, framebufferHeight_, vendor.c_str()));
+    gpuLines_.push_back(renderer);
+    if (const auto adapter = findGpuAdapter(renderer); adapter && adapter->dedicatedBytes > 0) gpuLines_.push_back("Video memory: " + formatByteSize(adapter->dedicatedBytes));
+    gpuLines_.push_back("OpenGL " + version);
+}
+
+// The right-hand side (vanilla's too): the program, the PC, the screen and the card, and the block looked at.
+std::vector<std::string> GameSession::debugLinesRight() const {
+    std::vector<std::string> lines;
+    const SystemInfo& pc = systemInfo();
+    lines.push_back(format("C++20 (GCC %d.%d.%d), %d bit", __GNUC__, __GNUC_MINOR__, __GNUC_PATCHLEVEL__, static_cast<int>(sizeof(void*) * 8)));
+    if (systemMemory_.total > 0) {
+        lines.push_back("System RAM: " + formatByteSize(systemMemory_.total) + " (" + formatByteSize(systemMemory_.available) + " free)");
+    }
+    lines.push_back("");
+    if (!pc.cpu.empty()) lines.push_back(format("CPU: %dx %s", pc.logicalProcessors, pc.cpu.c_str()));
+    lines.push_back("OS: " + pc.os);
+    lines.push_back("");
+    lines.insert(lines.end(), gpuLines_.begin(), gpuLines_.end());
     if (target_) {
         const Block b = renderer_.level().block(target_->x, target_->y, target_->z);
         lines.push_back("");
-        lines.push_back(format("Targeted block: %d %d %d", target_->x, target_->y, target_->z));
-        lines.push_back("minecraft:" + registry_->describe(b));
+        lines.push_back(format("Targeted Block: %d, %d, %d", target_->x, target_->y, target_->z));
+        const std::string state = registry_->describe(b);  // "oak_log[axis=y]": the name, then one line a property
+        const std::size_t open = state.find('[');
+        lines.push_back("minecraft:" + state.substr(0, open));
+        for (std::size_t at = open == std::string::npos ? state.size() : open + 1; at < state.size();) {
+            std::size_t end = state.find_first_of(",]", at);
+            if (end == std::string::npos) end = state.size();
+            std::string property = state.substr(at, end - at);
+            if (const std::size_t eq = property.find('='); eq != std::string::npos) property.replace(eq, 1, ": ");
+            lines.push_back(property);
+            at = end + 1;
+        }
     }
-    (void)eye;
     return lines;
+}
+
+// Draws the two columns, each line on its translucent strip. A right-hand line that would run into the left-hand one of its row is cut with
+// "..." so the two columns never write over each other.
+void GameSession::drawDebugScreen(GuiGraphics& g, int guiWidth) {
+    refreshSystemLines();
+    const std::vector<std::string> left = debugLines();
+    std::vector<int> leftWidth(left.size(), 0);
+    float y = 2.0f;
+    for (std::size_t i = 0; i < left.size(); ++i, y += 10.0f) {
+        if (left[i].empty()) continue;
+        leftWidth[i] = g.textWidth(left[i]);
+        g.fill(1, static_cast<int>(y) - 1, 2 + leftWidth[i] + 1, static_cast<int>(y) + 9, 0x90505050u);
+        g.text(left[i], 2.0f, y, 0xFFE0E0E0u);
+    }
+    const std::vector<std::string> right = debugLinesRight();
+    y = 2.0f;
+    for (std::size_t i = 0; i < right.size(); ++i, y += 10.0f) {
+        std::string line = right[i];
+        if (line.empty()) continue;
+        const int room = guiWidth - 4 - (i < leftWidth.size() && leftWidth[i] > 0 ? leftWidth[i] + 6 : 0);
+        if (g.textWidth(line) > room) {
+            while (line.size() > 1 && g.textWidth(line + "...") > room) line.pop_back();
+            line += "...";
+        }
+        const int w = g.textWidth(line);
+        const int x = guiWidth - 2 - w;
+        g.fill(x - 1, static_cast<int>(y) - 1, x + w + 1, static_cast<int>(y) + 9, 0x90505050u);
+        g.text(line, static_cast<float>(x), y, 0xFFE0E0E0u);
+    }
 }
 
 void GameSession::renderLoading(GuiGraphics& g, int guiWidth, int guiHeight, float deltaTicks) {
@@ -780,22 +1158,13 @@ void GameSession::renderHud(GuiGraphics& g, int guiWidth, int guiHeight, bool ch
 
     // F1 hides the crosshair and the hotbar (the debug screen stays, which is what people take screenshots with).
     if (!hudHidden_) {
-        // Crosshair: 15x15 in the middle.
-        g.blitSprite("hud/crosshair", (guiWidth - 15) / 2, (guiHeight - 15) / 2, 15, 15);
+        // Crosshair: 15x15 in the middle (only in first person).
+        if (perspective_ == 0) g.blitSprite("hud/crosshair", (guiWidth - 15) / 2, (guiHeight - 15) / 2, 15, 15);
         drawHotbar(g, guiWidth, guiHeight);
+        if (survivalBars()) drawSurvivalBars(g, guiWidth, guiHeight);
     }
 
-    if (showDebug_) {
-        float y = 2.0f;
-        for (const std::string& line : debugLines()) {
-            if (!line.empty()) {
-                const int w = g.textWidth(line);
-                g.fill(1, static_cast<int>(y) - 1, 2 + w + 1, static_cast<int>(y) + 9, 0x90505050u);
-                g.text(line, 2.0f, y, 0xFFE0E0E0u);
-            }
-            y += 10.0f;
-        }
-    }
+    if (showDebug_) drawDebugScreen(g, guiWidth);
 
     // The chat: faded on the HUD, full and scrollable when its screen is open (F1 hides it unless it is open).
     if (!hudHidden_ || chatFocused) chat_.render(g, guiWidth, guiHeight, services_.options, chatFocused);
@@ -804,7 +1173,7 @@ void GameSession::renderHud(GuiGraphics& g, int guiWidth, int guiHeight, bool ch
 // Hud.extractItemHotbar and extractSelectedItemName: the 182x22 bar at the bottom middle with the nine hotbar stacks, the selected
 // slot ringed, the offhand stack in its own little frame to the left, and the fading name of the held item above.
 void GameSession::drawHotbar(GuiGraphics& g, int guiWidth, int guiHeight) {
-    const HotbarLayout layout = computeHotbarLayout(guiWidth, guiHeight, !creative());
+    const HotbarLayout layout = computeHotbarLayout(guiWidth, guiHeight, survivalBars());  // (the name sits higher where the bars are)
     g.blitSprite("hud/hotbar", layout.left, layout.top, 182, 22);
     g.blitSprite("hud/hotbar_selection", layout.selectionX(inventory_.selected), layout.selectionY(), 24, 23);
     const ItemStack& offhand = inventory_.offhand();
@@ -826,6 +1195,64 @@ void GameSession::drawHotbar(GuiGraphics& g, int guiWidth, int guiHeight) {
     }
 }
 
+// Hud.extractPlayerHealth (hearts and food, 9x9 sprites) and ExperienceBar (the 182x5 strip, the level in green with a black outline above it).
+void GameSession::drawSurvivalBars(GuiGraphics& g, int guiWidth, int guiHeight) {
+    const SurvivalLayout l = computeSurvivalLayout(guiWidth, guiHeight, vitals_.maxHealth);
+    const long long tick = static_cast<long long>(playerAgeTicks_);
+    const bool hardcore = info_.hardcore;
+    const int maxHearts = static_cast<int>(std::ceil(vitals_.maxHealth / 2.0f));
+    // The hearts blink after a hit or a heal, and the hearts just lost stay white for a moment (the game's own bookkeeping in extractPlayerHealth).
+    const int health = static_cast<int>(std::ceil(vitals_.health));
+    const bool blink = healthBlinkTime_ > tick && ((healthBlinkTime_ - tick) / 3) % 2 == 1;
+    const double now = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now().time_since_epoch()).count();
+    if (health < lastHealthShown_ && invulnerableTime_ > 0) {
+        lastHealthMillis_ = now;
+        healthBlinkTime_ = tick + 20;
+    } else if (health > lastHealthShown_ && invulnerableTime_ > 0) {
+        lastHealthMillis_ = now;
+        healthBlinkTime_ = tick + 10;
+    }
+    if (now - lastHealthMillis_ > 1000.0) {
+        displayHealth_ = health;
+        lastHealthMillis_ = now;
+    }
+    lastHealthShown_ = health;
+    const auto heartSprite = [hardcore](const char* kind, bool blinking) {
+        return std::string("hud/heart/") + (hardcore ? "hardcore_" : "") + kind + (blinking ? "_blinking" : "");
+    };
+    for (int heart = maxHearts - 1; heart >= 0; --heart) {
+        int y = l.heartY(heart);
+        if (heartsShake(vitals_.health)) y += tickJitter(tick, heart, 2);
+        const int x = l.heartX(heart);
+        g.blitSprite(std::string("hud/heart/container") + (hardcore ? "_hardcore" : "") + (blink ? "_blinking" : ""), x, y, 9, 9);
+        if (blink && displayHealth_ > heart * 2) g.blitSprite(heartSprite(heart * 2 + 1 == displayHealth_ ? "half" : "full", true), x, y, 9, 9);
+        const BarFill fill = heartFill(heart, vitals_.health);
+        if (fill != BarFill::Empty) g.blitSprite(heartSprite(fill == BarFill::Full ? "full" : "half", false), x, y, 9, 9);
+    }
+    for (int icon = 0; icon < 10; ++icon) {
+        int y = l.rowY;
+        if (foodShakes(vitals_.saturation, vitals_.food, tick)) y += tickJitter(tick, icon, 3) - 1;
+        const int x = l.foodX(icon);
+        g.blitSprite("hud/food_empty", x, y, 9, 9);
+        const BarFill fill = foodFill(icon, vitals_.food);
+        if (fill != BarFill::Empty) g.blitSprite(fill == BarFill::Full ? "hud/food_full" : "hud/food_half", x, y, 9, 9);
+    }
+    // The experience strip: the sprite is 182 wide and only the filled part of it is drawn.
+    g.blitSprite("hud/experience_bar_background", l.xpLeft, l.xpTop, 182, 5);
+    if (const int filled = experienceFillWidth(vitals_.progress); filled > 0) {
+        g.pushScissor(l.xpLeft, l.xpTop, l.xpLeft + filled, l.xpTop + 5);
+        g.blitSprite("hud/experience_bar_progress", l.xpLeft, l.xpTop, 182, 5);
+        g.popScissor();
+    }
+    if (vitals_.level > 0) {
+        const std::string level = std::to_string(vitals_.level);
+        const float x = static_cast<float>((guiWidth - g.textWidth(level)) / 2);
+        const float y = static_cast<float>(l.levelBaselineY);
+        for (const auto& [dx, dy] : {std::pair{1.0f, 0.0f}, std::pair{-1.0f, 0.0f}, std::pair{0.0f, 1.0f}, std::pair{0.0f, -1.0f}}) g.text(level, x + dx, y + dy, 0xFF000000u, false);
+        g.text(level, x, y, 0xFF80FF20u, false);
+    }
+}
+
 void GameSession::addChatMessage(const std::string& text) {
     if (chatFont_ != nullptr) chat_.addMessage(text, *chatFont_, services_.options);
 }
@@ -838,7 +1265,7 @@ void GameSession::chatInput(const std::string& text) {
         addChatMessage("§cUnknown or incomplete command, see below for error");
         addChatMessage("§c" + text + "§r§c<--[HERE]");
     } else {
-        addChatMessage("<Player> " + text);
+        addChatMessage("<" + services_.playerName + "> " + text);
     }
 }
 
@@ -854,9 +1281,9 @@ std::vector<std::string> GameSession::benchmarkReport() const {
     lines.push_back(format("  frame time (wall clock, includes the pacing sleep): avg %.2f ms, p50 %.2f, p95 %.2f, p99 %.2f, max %.2f", static_cast<double>(avgFrame),
                            static_cast<double>(percentile(b.frame, 0.5)), static_cast<double>(percentile(b.frame, 0.95)),
                            static_cast<double>(percentile(b.frame, 0.99)), static_cast<double>(percentile(b.frame, 1.0))));
-    lines.push_back(format("  CPU work per frame: avg %.2f ms, p95 %.2f, p99 %.2f, max %.2f", static_cast<double>(average(b.cpu)),
+    lines.push_back(format("  CPU work per frame: avg %.2f ms, p50 %.2f, p95 %.2f, p99 %.2f, max %.2f", static_cast<double>(average(b.cpu)), static_cast<double>(percentile(b.cpu, 0.5)),
                            static_cast<double>(percentile(b.cpu, 0.95)), static_cast<double>(percentile(b.cpu, 0.99)), static_cast<double>(percentile(b.cpu, 1.0))));
-    lines.push_back(format("  GPU time of the world pass: avg %.2f ms, p95 %.2f, max %.2f", static_cast<double>(average(b.gpu)),
+    lines.push_back(format("  GPU time of the world pass: avg %.2f ms, p50 %.2f, p95 %.2f, max %.2f", static_cast<double>(average(b.gpu)), static_cast<double>(percentile(b.gpu, 0.5)),
                            static_cast<double>(percentile(b.gpu, 0.95)), static_cast<double>(percentile(b.gpu, 1.0))));
     const double busy = std::max(static_cast<double>(average(b.cpu)), static_cast<double>(average(b.gpu)));
     if (busy > 0.0) lines.push_back(format("  headroom: the slower of CPU and GPU averages %.2f ms, so roughly %.0f fps if nothing else limited it", busy, 1000.0 / busy));

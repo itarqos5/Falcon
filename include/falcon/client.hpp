@@ -53,7 +53,11 @@ struct ScriptedPacks {
 
 struct ClientOptions {
     std::optional<std::filesystem::path> assetsDir;  // --assets <dir>
+    std::optional<std::filesystem::path> dataDir;    // --data <dir>: the game's exported data (registries.json, ...); default: next to the assets folder
+    bool borderless = false;                         // --borderless: no title bar or frame (the top edge of the window moves it)
     std::optional<std::string> language;             // --language <code>: start in this language (e.g. de_de)
+    std::optional<std::string> username;             // --username <name>: the player's name (the launcher passes the account's)
+    std::optional<std::string> uuid;                 // --uuid <id>: the player's account id
     std::optional<std::filesystem::path> gameDir;    // --game-dir <dir>: the ".minecraft" folder (resourcepacks/ lives in it)
     std::vector<ScriptedPacks> packs;                // --packs ID,ID@S, for tests
     int width = 854;                                  // --size WxH (the game's default window)
@@ -67,6 +71,8 @@ struct ClientOptions {
     bool holdShift = false;                            // --shift: shift counts as held (for a shift-click)
     std::vector<std::string> give;                     // --give ITEM[:COUNT] (repeatable): put items in the inventory
     std::optional<int> gameType;                       // --gamemode survival|creative: overrides the world's game mode
+    std::optional<double> dropFrom;                    // --drop-from BLOCKS: once the world is ready the player is lifted that far and falls (to test fall damage)
+    std::optional<std::array<float, 4>> vitals;        // --vitals HEALTH,FOOD,LEVEL,PROGRESS: what the survival bars show (health in half hearts: 20 is full)
     std::vector<ScriptedScroll> scrolls;               // --scroll X,Y,DY@S
     std::vector<ScriptedText> typed;                   // --type TEXT@S
     std::vector<ScriptedKey> keys;                     // --key CODE@S (256 = Escape)

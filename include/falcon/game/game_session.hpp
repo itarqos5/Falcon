@@ -4,6 +4,11 @@
 #include "falcon/game/chat.hpp"
 #include "falcon/game/screen_services.hpp"
 #include "falcon/game/hotbar_hud.hpp"
+#include "falcon/game/survival_hud.hpp"
+#include "falcon/game/world_sounds.hpp"
+#include "falcon/platform/system_info.hpp"
+#include "falcon/render/player_body.hpp"
+#include "falcon/world/item_entity.hpp"
 #include "falcon/platform/window.hpp"
 #include "falcon/render/block_icons.hpp"
 #include "falcon/render/block_models.hpp"
@@ -24,6 +29,7 @@
 #include <array>
 #include <memory>
 #include <optional>
+#include <random>
 #include <string>
 #include <vector>
 
@@ -54,7 +60,7 @@ public:
     // stop the game (the inventory: in singleplayer the world goes on, the player only cannot steer).
     void update(double dt, bool active, int framebufferWidth, int framebufferHeight, bool keepTicking = false);
     void renderWorld(int framebufferWidth, int framebufferHeight);
-    // The crosshair, hotbar and (F3) debug screen.
+    // The crosshair, hotbar, the survival bars (hearts, food, experience) and the (F3) debug screen.
     void renderHud(GuiGraphics& graphics, int guiWidth, int guiHeight, bool chatFocused = false);
     // The game's "Loading terrain..." screen (LevelLoadingScreen), drawn instead of the HUD until ready(): the blurred panorama,
     // the text, a progress bar and a map of the chunks around the spawn.
@@ -108,6 +114,11 @@ public:
     // The game mode: 0 survival, 1 creative, 2 adventure, 3 spectator; and the one before it (-1 until it has changed).
     [[nodiscard]] int gameType() const { return info_.gameType; }
     [[nodiscard]] int previousGameType() const { return previousGameType_; }
+    // Survival and adventure show hearts, food and the experience bar (Hud: gameMode.canHurtPlayer / hasExperience); creative and spectator do not.
+    [[nodiscard]] bool survivalBars() const { return info_.gameType == 0 || info_.gameType == 2; }
+    // What the bars show (nothing changes health, food or experience yet, see Vitals); `--vitals` sets it for screenshots.
+    void setVitals(const Vitals& vitals) { vitals_ = vitals; }
+    [[nodiscard]] const Vitals& vitals() const { return vitals_; }
     // Whether the game mode may be changed from here (Minecraft.canSwitchGameMode plus the /gamemode permission): the world has cheats
     // on (Create New World: Allow Cheats).
     [[nodiscard]] bool canSwitchGameMode() const { return ready_ && info_.allowCommands; }
@@ -123,8 +134,31 @@ public:
     [[nodiscard]] bool advancedTooltips() const { return advancedTooltips_; }
     // Puts "diamond_pickaxe" or "apple:5" (an item and a count) into the inventory (--give). False if the item does not exist.
     bool giveItem(const std::string& spec);
-    // Everything thrown out of a menu or with Q: no item entity exists yet, so it is only counted.
+    // Everything thrown out of a menu or with Q (or lost at death) becomes an item in the world; this counts them.
     [[nodiscard]] int droppedCount() const { return droppedCount_; }
+    // The items lying in the world.
+    [[nodiscard]] ItemEntities& itemEntities() { return itemEntities_; }
+    // Player.drop: puts a stack in the world at the player's hands, thrown the way they look (or, for what is lost at death, scattered at random).
+    void dropFromPlayer(const ItemStack& stack, bool scatter = false);
+
+    // ---- health ----
+    // LivingEntity.hurt for the player: false if it counted for nothing (creative, spectator, dead, or a hit weaker than the one just taken).
+    // Within the half second after a hit only a stronger one counts, and only for the difference; `bypassCooldown` is for the void.
+    bool hurt(float amount, bool bypassCooldown = false);
+    [[nodiscard]] bool dead() const { return dead_; }
+    // True once after the player died: the game shows the death screen.
+    [[nodiscard]] bool consumeDeathRequest() {
+        const bool asked = deathRequested_;
+        deathRequested_ = false;
+        return asked;
+    }
+    // Back at the spawn with full health (the death screen's Respawn).
+    void respawn();
+
+    // ---- F5: the camera ----
+    // 0 first person, 1 from behind (the player's back), 2 from the front (looking back at the player's face).
+    [[nodiscard]] int perspective() const { return perspective_; }
+    void setPerspective(int perspective) { perspective_ = ((perspective % 3) + 3) % 3; }
     // The game's pick block for a block state: the held slot or a free hotbar slot takes its item (creative) or the stack
     // that holds it is brought to the hotbar (survival).
     void pickBlock(Block block);
@@ -145,8 +179,28 @@ private:
     void tickPlayer(double seconds, bool steering);
     // The 20 ticks a second of the HUD (the fading name of the held item).
     void tickHud(double seconds);
+    // ---- world sounds ----
+    // Plays a sound of the world; `at` (a place in the world) makes it fade with the distance from the player's head (linear, over 16 blocks).
+    void playWorldSound(const std::string& event, SoundSource source, float volume, float pitch, const std::array<double, 3>* at = nullptr);
+    // A sound of a block ("break", "place", "step", "fall") with the volume and pitch already worked out.
+    void playBlockSound(Block block, const char* kind, SoundMix mix, SoundSource source, const std::array<double, 3>* at = nullptr);
+    void footsteps(bool sneakKey);
+    void fallDamage(int damage);
+    void splash(double vx, double vy, double vz);
+    [[nodiscard]] float randomFloat() { return std::uniform_real_distribution<float>(0.0f, 1.0f)(rng_); }
+    // ---- the player's body ----
+    void tickBody();
+    void tickHealth();
+    void pickUpItems();
+    void die();
     void drawHotbar(GuiGraphics& graphics, int guiWidth, int guiHeight);
-    void collectDrop(Block broken);
+    // Hud.extractPlayerHealth and the experience bar: the hearts above the left of the hotbar, the food above the right, the experience strip between.
+    void drawSurvivalBars(GuiGraphics& graphics, int guiWidth, int guiHeight);
+    // The debug screen's two columns: the left one is the game (position, world, drawing), the right one the PC and what is looked at.
+    void drawDebugScreen(GuiGraphics& graphics, int guiWidth);
+    [[nodiscard]] std::vector<std::string> debugLinesRight() const;
+    void refreshSystemLines();
+    void collectDrop(Block broken, int x, int y, int z);
     void interact(double dt, bool active);
     [[nodiscard]] Camera camera() const;
     [[nodiscard]] std::vector<std::string> debugLines() const;
@@ -182,7 +236,34 @@ private:
     Inventory inventory_;
     std::unique_ptr<InventoryMenu> inventoryMenu_;
     SelectedItemHighlight highlight_;
+    Vitals vitals_;
+    std::mt19937 rng_{std::random_device{}()};
+    ItemEntities itemEntities_;
+    StepClock stepClock_;
+    bool wasInWater_ = false;
+    int invulnerableTime_ = 0;   // ticks left of the protection after a hit (20 at a hit, only a stronger hit counts above 10)
+    int hurtTime_ = 0;           // ticks of the camera's tilt after a hit
+    float lastHurt_ = 0.0f;      // the damage of the last hit
+    float hurtDirection_ = 0.0f; // which way the view tilts, degrees (0 or 180)
+    int regenTimer_ = 0;
+    bool dead_ = false;
+    bool deathRequested_ = false;
+    // The hearts blink after a hit (Hud.extractPlayerHealth's own bookkeeping).
+    long long healthBlinkTime_ = 0;
+    int lastHealthShown_ = 20;
+    int displayHealth_ = 20;
+    double lastHealthMillis_ = 0.0;
+    // F5 and the body seen from outside.
+    int perspective_ = 0;
+    std::unique_ptr<PlayerBodyRenderer> body_;
+    float walkPosition_ = 0.0f, walkSpeed_ = 0.0f, walkSpeedOld_ = 0.0f;  // WalkAnimationState
+    float bodyYaw_ = 0.0f, bodyYawOld_ = 0.0f;
     double hudTickAccumulator_ = 0.0;
+    int framebufferWidth_ = 0, framebufferHeight_ = 0;
+    // The right-hand side of the debug screen: the graphics lines never change (read once), the memory of the PC is read once a second.
+    std::vector<std::string> gpuLines_;
+    SystemMemory systemMemory_;
+    double systemMemoryAge_ = 1.0e9;
     bool advancedTooltips_ = false;
     int droppedCount_ = 0;
     std::optional<BlockHit> target_;

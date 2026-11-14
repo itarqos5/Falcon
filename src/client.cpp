@@ -22,6 +22,7 @@
 #include "falcon/game/now_playing_toast.hpp"
 #include "falcon/game/game_session.hpp"
 #include "falcon/game/game_ui.hpp"
+#include "falcon/game/death_screen.hpp"
 #include "falcon/game/in_game_screen.hpp"
 #include "falcon/game/lighting_audit.hpp"
 #include "falcon/game/vanilla_compare.hpp"
@@ -34,6 +35,7 @@
 #include "falcon/game/splash_manager.hpp"
 #include "falcon/ui/sprite_manager.hpp"
 #include "falcon/game/title_screen.hpp"
+#include "falcon/ui/confirm_screen.hpp"
 #include "falcon/world/level_info.hpp"
 #include "falcon/version.hpp"
 
@@ -264,6 +266,11 @@ std::string usageText() {
            "  --audio-test            Decode and play a click and a music track, report, and exit\n"
            "  --audio-devices         List the output devices, switch to each one silently, report, and exit\n"
            "  --language <code>       Start in this language (e.g. de_de, fr_fr, ja_jp)\n"
+           "  --borderless            No title bar or frame; the top edge of the window moves it (F11 still toggles fullscreen)\n"
+           "  --data <dir>            The folder with the game's exported data (registries.json, gameplay-facts.json, ...);\n"
+           "                          by default the folder that holds the assets folder\n"
+           "  --username <name>       The player's name (shown in chat); the launcher passes the account's\n"
+           "  --uuid <id>             The player's account id\n"
            "  --game-dir <dir>        The .minecraft folder to use (its resourcepacks/ folder lists the packs)\n"
            "  --packs <ids>@<s>       Select resource packs (comma-separated ids, lowest priority first, e.g.\n"
            "                          high_contrast or file/MyPack.zip) after <s> seconds, as the packs screen would\n"
@@ -285,6 +292,8 @@ std::string usageText() {
            "  --shift                 Treat shift as held (a shift-click)\n"
            "  --give <item>[:<n>]     Put items in the inventory once a world is open (repeatable)\n"
            "  --gamemode <mode>       survival or creative, whatever the world says\n"
+           "  --drop-from <blocks>    Lift the player that far once the world is ready and let them fall (to test fall damage)\n"
+           "  --vitals <h>,<f>,<l>,<p>  What the survival bars show: health (20 = full), food (20), level, progress 0..1 (for screenshots)\n"
            "  --click <X>,<Y>@<s>     Inject a left click at that window position after <s> seconds\n"
            "                          (repeatable; for scripted tests)\n"
            "  --help                  Show this message\n";
@@ -384,6 +393,14 @@ ClientOptions parseOptions(int argc, const char* const* argv) {
             o.captureLoading = true;
         } else if (arg == "--language") {
             o.language = nextValue(i, argc, argv);
+        } else if (arg == "--borderless") {
+            o.borderless = true;
+        } else if (arg == "--data") {
+            o.dataDir = std::filesystem::path(nextValue(i, argc, argv));
+        } else if (arg == "--username") {
+            o.username = nextValue(i, argc, argv);
+        } else if (arg == "--uuid") {
+            o.uuid = nextValue(i, argc, argv);
         } else if (arg == "--game-dir") {
             o.gameDir = std::filesystem::path(nextValue(i, argc, argv));
         } else if (arg == "--packs") {
@@ -429,6 +446,19 @@ ClientOptions parseOptions(int argc, const char* const* argv) {
             o.holdShift = true;
         } else if (arg == "--give") {
             o.give.push_back(nextValue(i, argc, argv));
+        } else if (arg == "--drop-from") {
+            o.dropFrom = std::stod(nextValue(i, argc, argv));
+        } else if (arg == "--vitals") {  // for screenshots of the survival bars: 13,7,5,0.4 = 6.5 hearts, 3.5 food, level 5, 40% of the bar
+            const std::string v = nextValue(i, argc, argv);
+            std::array<float, 4> values{};
+            std::size_t from = 0;
+            for (std::size_t k = 0; k < values.size(); ++k) {
+                const std::size_t comma = v.find(',', from);
+                if (comma == std::string::npos && k + 1 < values.size()) throw std::invalid_argument("--vitals expects HEALTH,FOOD,LEVEL,PROGRESS, got " + v);
+                values[k] = std::stof(v.substr(from, comma == std::string::npos ? std::string::npos : comma - from));
+                from = comma + 1;
+            }
+            o.vitals = values;
         } else if (arg == "--gamemode") {
             const std::string v = nextValue(i, argc, argv);
             if (v == "survival") {
@@ -548,6 +578,7 @@ int Client::run() {
     // ResourceReloader), so none of them is const; everything else only ever reads them through
     // const references.
     ResourceManager resources(search.location->root);
+    if (options_.dataDir) resources.setDataRoot(*options_.dataDir);
 
     // ---- start-up loading that needs no OpenGL, on other threads ---------------------------
     // Creating the window and the GL context is the slowest single step (mostly the graphics
@@ -584,7 +615,7 @@ int Client::run() {
     // whatever the person is doing. --background does the same for any other run. A normal run starts
     // hidden too and is shown with its first finished frame, so nothing blank is ever on screen.
     const bool background = options_.background || options_.capturePath.has_value();
-    Window window(options_.width, options_.height, "Falcon", background, /*startHidden=*/true);
+    Window window(options_.width, options_.height, "Falcon", background, /*startHidden=*/true, options_.borderless);
     memStage("window + GL context");
     window.setIconFromExecutable();  // the Falcon icon linked into the exe
     memStage("window icon");
@@ -698,7 +729,9 @@ int Client::run() {
     int framebufferNowW = options_.width;  // the window's current size, for the GUI Scale button's range
     int framebufferNowH = options_.height;
     ScreenServices services{language, font, panorama, gameOptions, sounds, music, packs, {}, gameDir, {}, {},
-                            loadLanguageList(resources), nullptr, {}, {}};
+                            loadLanguageList(resources), nullptr, {}, {}, "Player", {}};
+    if (options_.username && !options_.username->empty()) services.playerName = *options_.username;
+    if (options_.uuid) services.playerUuid = *options_.uuid;
     services.maxGuiScale = [&] { return calculateGuiScale(framebufferNowW, framebufferNowH, /*requested=*/0, false); };
     services.videoModes = [&window] { return window.videoModes(); };
     GameUiContext gameUi(services);  // what the UI library needs from the game
@@ -712,6 +745,8 @@ int Client::run() {
     bool quitWorldRequested = false;
     std::vector<std::string> pendingEdits = options_.edits;
     std::vector<std::string> pendingGives = options_.give;
+    std::optional<std::array<float, 4>> pendingVitals = options_.vitals;
+    std::optional<double> pendingDropFrom = options_.dropFrom;
     navigator.setHoldShift(options_.holdShift);
     bool leftWorld = false;  // a world was played and then quit (a --capture run then no longer waits for one)
     services.startWorld = [&worldToStart](const std::string& folder) { worldToStart = folder; };
@@ -921,6 +956,11 @@ int Client::run() {
                     std::printf("[falcon] could not start the world: %s\n", e.what());
                     services.session = nullptr;
                     session.reset();
+                    // (Not only on the console: someone who started Falcon from the launcher has none.)
+                    std::string why = e.what();
+                    if (!why.empty() && why[0] >= 'a' && why[0] <= 'z') why[0] = static_cast<char>(why[0] - 'a' + 'A');
+                    navigator.push(std::make_unique<ConfirmScreen>(navigator, "Could not open the world", why, language.get("gui.done"),
+                                                                    language.get("gui.cancel"), [](bool) {}));
                 }
             }
         }
@@ -961,7 +1001,10 @@ int Client::run() {
             if (e.seconds >= 0.0 && millis >= e.seconds * 1000.0) {
                 e.seconds = -1.0;
                 fakeMouse = std::make_pair(e.x, e.y);
-                if (e.button >= 0) window.onMouseButton(e.button, e.press ? 1 : 0);
+                if (e.button >= 0) {
+                    window.setSimulatedButton(e.button, e.press);
+                    window.onMouseButton(e.button, e.press ? 1 : 0);
+                }
             }
         }
         for (ScriptedScroll& s : scriptedScrolls) {
@@ -980,8 +1023,14 @@ int Client::run() {
         for (ScriptedKey& k : scriptedKeys) {
             if (k.seconds >= 0.0 && millis >= k.seconds * 1000.0) {
                 k.seconds = -1.0;
-                if (k.press) window.onKey(k.key, 1, 0);
-                if (k.release) window.onKey(k.key, 0, 0);
+                if (k.press) {
+                    window.setSimulatedKey(k.key, !k.release);  // (a held key stays down until its release)
+                    window.onKey(k.key, 1, 0);
+                }
+                if (k.release) {
+                    window.setSimulatedKey(k.key, false);
+                    window.onKey(k.key, 0, 0);
+                }
             }
         }
 
@@ -996,12 +1045,28 @@ int Client::run() {
             // The inventory leaves the world running behind it (singleplayer does not pause for it): only the player cannot steer.
             const bool keepTicking = !steering && screens.back()->keepsWorldTicking();
             session->update(static_cast<double>(deltaTicks) * 0.05, steering, fbW, fbH, keepTicking);
+            if (session->consumeDeathRequest()) navigator.push(std::make_unique<DeathScreen>(navigator, services));  // "You Died!"
         }
         if (session != nullptr && session->ready() && !pendingGives.empty()) {  // --give
             for (const std::string& spec : pendingGives) {
                 if (!session->giveItem(spec)) std::printf("[falcon] --give: no item called '%s'\n", spec.c_str());
             }
             pendingGives.clear();
+        }
+        if (session != nullptr && session->ready() && pendingDropFrom) {  // --drop-from
+            Player& p = session->player();
+            p.setPosition(p.x, p.y + *pendingDropFrom, p.z);
+            p.fallDistance = 0.0;
+            pendingDropFrom.reset();
+        }
+        if (session != nullptr && session->ready() && pendingVitals) {  // --vitals
+            Vitals vitals;
+            vitals.health = (*pendingVitals)[0];
+            vitals.food = static_cast<int>((*pendingVitals)[1]);
+            vitals.level = static_cast<int>((*pendingVitals)[2]);
+            vitals.progress = (*pendingVitals)[3];
+            session->setVitals(vitals);
+            pendingVitals.reset();
         }
         if (session != nullptr && session->ready() && !pendingEdits.empty()) {  // --edit
             for (const std::string& edit : pendingEdits) {
