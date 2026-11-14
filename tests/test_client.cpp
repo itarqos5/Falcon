@@ -32,6 +32,7 @@
 #include "falcon/world/item_entity.hpp"
 #include "falcon/world/item_registry.hpp"
 #include "falcon/world/world_save.hpp"
+#include "falcon/platform/ownership.hpp"
 #include "falcon/platform/system_info.hpp"
 #include "falcon/world/chunk_cache.hpp"
 #include "falcon/game/gamemode_switcher_screen.hpp"
@@ -701,6 +702,26 @@ void test_world_save() {
     std::filesystem::remove(dir / "falcon_save.dat_old");
     CHECK(!falcon::readWorldSave(file, none, noneEdits, registry, error) && !error.empty());
     std::filesystem::remove_all(dir);
+}
+
+// The part of the ownership check that needs no network: reading Mojang's two answers.
+void test_ownership_answers() {
+    CHECK(falcon::entitlementsListGame(R"({"items":[{"name":"product_minecraft","signature":"x"},{"name":"game_minecraft","signature":"y"}],"signature":"z","keyId":"1"})"));
+    CHECK(falcon::entitlementsListGame(R"({"items":[{"name":"game_minecraft"}]})"));
+    CHECK(!falcon::entitlementsListGame(R"({"items":[]})"));  // an account that owns nothing
+    CHECK(!falcon::entitlementsListGame(R"({"items":[{"name":"game_minecraft_bedrock"}]})"));
+    CHECK(!falcon::entitlementsListGame("not json") && !falcon::entitlementsListGame("{}") && !falcon::entitlementsListGame(""));
+    std::string why;
+    const std::string profile = R"({"id":"069a79f444e94726a5befca90e38aaf5","name":"Notch","skins":[]})";
+    CHECK(falcon::profileMatches(profile, "069a79f444e94726a5befca90e38aaf5", "Notch", why));
+    CHECK(falcon::profileMatches(profile, "069A79F4-44E9-4726-A5BE-FCA90E38AAF5", "Notch", why));  // dashes and case do not matter
+    CHECK(falcon::profileMatches(profile, "", "", why));                                           // nothing to compare
+    CHECK(!falcon::profileMatches(profile, "11111111111111111111111111111111", "Notch", why) && !why.empty());
+    CHECK(!falcon::profileMatches(profile, "069a79f444e94726a5befca90e38aaf5", "Jeb_", why) && !why.empty());
+    CHECK(!falcon::profileMatches(R"({"error":"NOT_FOUND"})", "", "", why) && !why.empty());
+    // With no token there is nothing to ask: the check says what to do and does not go to the network.
+    const falcon::OwnershipCheck none = falcon::verifyMinecraftOwnership("", "", "");
+    CHECK(!none.ok && none.message.find("Launcher") != std::string::npos);
 }
 
 void test_options_layout() {
@@ -4381,6 +4402,7 @@ int main() {
     test_world_sounds();
     test_item_entities();
     test_world_save();
+    test_ownership_answers();
     test_player_physics();
     test_block_registry();
     test_light();

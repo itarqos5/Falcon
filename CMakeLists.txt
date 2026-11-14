@@ -176,6 +176,7 @@ add_library(falcon_base
     src/platform/dialog.cpp
     src/platform/memory.cpp
     src/platform/system_info.cpp
+    src/platform/ownership.cpp
     src/platform/mapped_file.cpp
     src/platform/file_lock.cpp
 )
@@ -189,7 +190,7 @@ target_link_libraries(falcon_base
     PRIVATE falcon_stb falcon_warnings
 )
 if(WIN32)
-    target_link_libraries(falcon_base PRIVATE user32 psapi dwmapi winmm)  # message boxes, console attach; memory use; dark title bar
+    target_link_libraries(falcon_base PRIVATE user32 psapi dwmapi winmm winhttp)  # message boxes, console attach; memory use; dark title bar; the ownership check
 endif()
 
 # ---------------------------------------------------------------------------
@@ -437,6 +438,31 @@ PRODUCTVERSION ${PROJECT_VERSION_MAJOR},${PROJECT_VERSION_MINOR},${PROJECT_VERSI
     # (the launcher's resource file uses the same icon file)
     add_custom_target(falcon_icon DEPENDS "${FALCON_ICO}")
     target_sources(falcon_client PRIVATE $<TARGET_OBJECTS:falcon_rc>)
+endif()
+
+# The client that goes into the launcher: the same game, but it only starts for an account that owns Minecraft: Java Edition. The launcher gives it the account's
+# Minecraft access token and the client asks Mojang's servers about it itself (src/platform/ownership.cpp), so the check cannot be passed with a made-up answer. The
+# Falcon.exe in dist/ has no such check, for development, tests and screenshots; anyone who builds Falcon from source can build either (it is a licence check, not
+# copy protection). Built only as part of the launcher: cmake --build --preset launcher.
+add_executable(falcon_client_licensed EXCLUDE_FROM_ALL src/main.cpp)
+target_compile_definitions(falcon_client_licensed PRIVATE FALCON_REQUIRE_OWNERSHIP=1)
+target_link_libraries(falcon_client_licensed PRIVATE falcon::core falcon_warnings)
+set_target_properties(falcon_client_licensed PROPERTIES OUTPUT_NAME "Falcon" RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/licensed")
+if(MINGW)
+    target_link_options(falcon_client_licensed PRIVATE -static)
+endif()
+if(NOT MSVC)
+    target_link_options(falcon_client_licensed PRIVATE $<$<CONFIG:Release>:-s>)
+endif()
+if(WIN32 AND NOT FALCON_CONSOLE)
+    if(MSVC)
+        target_link_options(falcon_client_licensed PRIVATE /SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup)
+    else()
+        target_link_options(falcon_client_licensed PRIVATE -mwindows)
+    endif()
+endif()
+if(TARGET falcon_rc)
+    target_sources(falcon_client_licensed PRIVATE $<TARGET_OBJECTS:falcon_rc>)
 endif()
 
 # ---------------------------------------------------------------------------
