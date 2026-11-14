@@ -1375,11 +1375,16 @@ void GameSession::drawHotbar(GuiGraphics& g, int guiWidth, int guiHeight) {
     const int alpha = highlight_.alpha();
     if (alpha > 0) {
         const ItemStack& stack = highlight_.stack();
-        const std::string name = itemDisplayName(stack, services_.language);
+        // An item with a name of its own (an anvil name) shows it in italics.
+        const std::string name = (stack.customName.empty() ? "" : "\xC2\xA7o") + itemDisplayName(stack, services_.language);
         const int width = g.textWidth(name);
         const int x = (guiWidth - width) / 2;
-        // textWithBackdrop: a box of the background colour (half black) behind the text, both faded with the name.
-        g.fill(x - 2, layout.nameY - 2, x + width + 2, layout.nameY + Font::kLineHeight + 2, (static_cast<std::uint32_t>(alpha * 128 / 255) << 24));
+        // textWithBackdrop: the box behind the text is the background colour of the "text background" option, which only reaches the HUD when it is set to
+        // "Everywhere" (by default it is for the chat alone, and the name stands on the world without a box); it fades with the name.
+        if (!services_.options.backgroundForChatOnly) {
+            const int background = static_cast<int>(static_cast<float>(services_.options.textBackgroundOpacity) * 255.0f);
+            if (background > 0) g.fill(x - 2, layout.nameY - 2, x + width + 2, layout.nameY + Font::kLineHeight + 2, static_cast<std::uint32_t>(background * alpha / 255) << 24);
+        }
         g.text(name, static_cast<float>(x), static_cast<float>(layout.nameY), (static_cast<std::uint32_t>(alpha) << 24) | (rarityColor(stack.type().rarity) & 0xFFFFFFu));
     }
 }

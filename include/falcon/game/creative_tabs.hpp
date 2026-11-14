@@ -33,7 +33,8 @@ struct CreativeTab {
     std::vector<CreativeEntry> entries;
 
     [[nodiscard]] bool alignedRight() const { return column == 6; }
-    [[nodiscard]] bool showTitle() const { return type != CreativeTabType::Search && type != CreativeTabType::Inventory; }
+    // (only the survival inventory tab hides its title: the search tab shows "Search Items" at the left of the box)
+    [[nodiscard]] bool showTitle() const { return type != CreativeTabType::Inventory; }
     [[nodiscard]] bool canScroll() const { return type != CreativeTabType::Inventory; }
     // Whether the tab lists this item (any stack of it, whatever the components).
     [[nodiscard]] bool contains(const ItemStack& stack) const;
