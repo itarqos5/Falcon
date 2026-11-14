@@ -27,6 +27,7 @@
 #include <array>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -93,6 +94,10 @@ public:
 
     // The chunk's blocks (24 sections; uniform ones are shared). Thread-safe.
     [[nodiscard]] std::shared_ptr<Chunk> generate(int chunkX, int chunkZ) const;
+    // A step run on the chunk's block array after the surface rules and before the chunk is packed (index (y - minY) + 384 * (x + 16 * z)): the carvers and ores of
+    // worldgen/underground.hpp. Set once, before any chunk is made.
+    using ChunkStage = std::function<void(std::vector<Block>& blocks, int chunkX, int chunkZ)>;
+    void setChunkStage(ChunkStage stage) { stage_ = std::move(stage); }
     // The same with the chunk's biomes, heightmaps and fluid updates.
     [[nodiscard]] std::shared_ptr<Chunk> generate(int chunkX, int chunkZ, ChunkExtras& extras) const;
 
@@ -138,6 +143,7 @@ private:
     void buildChunk(Workspace& w, Chunk& chunk, ChunkExtras* extras) const;
 
     std::int64_t seed_ = 0;
+    ChunkStage stage_;  // see setChunkStage
     std::uint64_t id_ = 0;
     GeneratorOptions options_;
     std::filesystem::path worldgenDir_;

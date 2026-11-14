@@ -14,6 +14,7 @@
 #include "falcon/worldgen/biome.hpp"
 #include "falcon/worldgen/material.hpp"
 #include "falcon/worldgen/overworld_generator.hpp"
+#include "falcon/worldgen/underground.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -1041,6 +1042,73 @@ void testErrorsAndFacts(const GameData& gd, const falcon::BlockRegistry& registr
           worldPresetFor(falcon::NewWorldType::Superflat) == nullptr);
 }
 
+// The carvers and the ores (worldgen/underground.hpp): caves cut into the rock and join across chunk borders, lava lies at the bottom of them, the ores appear in their
+// stone and deepslate variants, and a chunk is the same however often it is made.
+void testUnderground(const GameData& gd, const falcon::BlockRegistry& registry, const OverworldGenerator& plain) {
+    using falcon::Block;
+    std::string error;
+    auto gen = OverworldGenerator::create(gd.root, registry, 12345, error);
+    CHECK(gen != nullptr);
+    if (!gen) return;
+    const falcon::worldgen::Underground underground(registry, 12345);
+    const OverworldGenerator* self = gen.get();
+    gen->setChunkStage([&underground, self](std::vector<Block>& blocks, int cx, int cz) { underground.apply(blocks, cx, cz, *self); });
+
+    const auto name = [&](Block b) { return registry.type(b).name; };
+    long carvedAir = 0, lavaDeep = 0;
+    std::map<std::string, long> found;
+    long airNextToAir = 0, airAtBorder = 0;
+    const auto spawn = gen->findSpawn();  // dry land: a region round it has caves under land, not only under the sea
+    const int baseX = static_cast<int>(std::floor(spawn.x)) >> 4, baseZ = static_cast<int>(std::floor(spawn.z)) >> 4;
+    double withStage = 0.0, without = 0.0;
+    for (int cz = baseZ - 2; cz <= baseZ + 2; ++cz) {
+        for (int cx = baseX - 2; cx <= baseX + 2; ++cx) {
+            const auto s0 = std::chrono::steady_clock::now();
+            const auto a = gen->generate(cx, cz);
+            const auto s1 = std::chrono::steady_clock::now();
+            const auto b = plain.generate(cx, cz);
+            const auto s2 = std::chrono::steady_clock::now();
+            withStage += std::chrono::duration<double, std::milli>(s1 - s0).count();
+            without += std::chrono::duration<double, std::milli>(s2 - s1).count();
+            const auto next = gen->generate(cx + 1, cz);  // for the seam
+            for (int z = 0; z < 16; ++z) {
+                for (int x = 0; x < 16; ++x) {
+                    for (int y = falcon::kMinY; y < 150; ++y) {
+                        const Block blockA = a->at(x, y, z), blockB = b->at(x, y, z);
+                        if (registry.isAir(blockA) && !registry.isAir(blockB)) ++carvedAir;
+                        if (blockA != blockB && name(blockA).find("lava") != std::string::npos && y <= -56) ++lavaDeep;
+                    }
+                    for (int y = falcon::kMinY; y < 320; ++y) {
+                        const std::string n = name(a->at(x, y, z));
+                        if (n.size() > 4 && n.compare(n.size() - 4, 4, "_ore") == 0) ++found[n];
+                        if (n == "tuff" || n == "granite" || n == "gravel") ++found[n];
+                    }
+                }
+                for (int y = -50; y < 40; ++y) {  // the seam between this chunk and the next one to the east
+                    if (registry.isAir(a->at(15, y, z)) && !registry.isAir(b->at(15, y, z))) {
+                        ++airAtBorder;
+                        if (registry.isAir(next->at(0, y, z))) ++airNextToAir;
+                    }
+                }
+            }
+        }
+    }
+    std::printf("  underground: %ld cave blocks cut in 25 chunks, %ld lava blocks; a chunk takes %.1f ms with the carvers and ores, %.1f ms without\n", carvedAir, lavaDeep, withStage / 25.0, without / 25.0);
+    CHECK(carvedAir > 5000);                       // caves are a few percent of the rock
+    CHECK(lavaDeep > 0);                           // the deep ones are lava-lit
+    for (const char* ore : {"coal_ore", "iron_ore", "copper_ore", "deepslate_iron_ore", "deepslate_redstone_ore"}) CHECK(found[ore] > 20);
+    CHECK(found["tuff"] > 100 && found["gravel"] > 100);
+    CHECK(airAtBorder > 50 && static_cast<double>(airNextToAir) > 0.5 * static_cast<double>(airAtBorder));  // a cave goes on over the border
+    // The same chunk twice is the same, and made from other threads' point of view as well.
+    const auto one = gen->generate(3, -4);
+    const auto two = gen->generate(3, -4);
+    bool same = true;
+    for (int y = falcon::kMinY; y < falcon::kMaxY && same; ++y) {
+        for (int i = 0; i < 256 && same; ++i) same = one->at(i & 15, y, i >> 4) == two->at(i & 15, y, i >> 4);
+    }
+    CHECK(same);
+}
+
 void testFluidTracking(const GameData& gd, const falcon::BlockRegistry& registry, const OverworldGenerator& gen) {
     GeneratorOptions opts;
     opts.trackFluidUpdates = true;
@@ -1166,6 +1234,7 @@ int main() {
                     testPresetsAndSpawn(gd, *registry, *gen);
                     testErrorsAndFacts(gd, *registry, *gen);
                     testFluidTracking(gd, *registry, *gen);
+                    testUnderground(gd, *registry, *gen);
                     performanceReport(gd, *registry);
                 }
             }

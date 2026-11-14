@@ -10,6 +10,7 @@
 #include "falcon/util/text_util.hpp"
 #include "falcon/world/recipes.hpp"
 #include "falcon/world/water_fog.hpp"
+#include "falcon/worldgen/underground.hpp"
 
 #include <algorithm>
 #include <array>
@@ -159,6 +160,10 @@ std::shared_ptr<const worldgen::OverworldGenerator> makeOverworld(const Resource
         std::printf("[falcon] the world generator could not start (%s): using the simple terrain\n", error.c_str());
         return nullptr;
     }
+    // After the terrain and its surface: the game's caves and canyons, and the ores (see worldgen/underground.hpp).
+    auto underground = std::make_shared<const worldgen::Underground>(registry, info.seed);
+    const worldgen::OverworldGenerator* self = generator.get();
+    generator->setChunkStage([underground, self](std::vector<Block>& blocks, int chunkX, int chunkZ) { underground->apply(blocks, chunkX, chunkZ, *self); });
     return generator;
 }
 

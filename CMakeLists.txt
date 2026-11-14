@@ -265,6 +265,7 @@ add_library(falcon_core
     src/worldgen/legacy_noise.cpp
     src/worldgen/material.cpp
     src/worldgen/overworld_generator.cpp
+    src/worldgen/underground.cpp
     src/net/server_pinger.cpp
     src/audio/vorbis_impl.c
     src/audio/miniaudio_impl.cpp

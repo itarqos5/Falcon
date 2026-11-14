@@ -404,6 +404,7 @@ void OverworldGenerator::buildChunk(Workspace& w, Chunk& chunk, ChunkExtras* ext
 std::shared_ptr<Chunk> OverworldGenerator::generate(int chunkX, int chunkZ, ChunkExtras& extras) const {
     Workspace& w = workspace();
     runStages(w, chunkX, chunkZ, Stage::Surface);
+    if (stage_) stage_(w.blocks, chunkX, chunkZ);
     auto chunk = std::make_shared<Chunk>();
     buildChunk(w, *chunk, &extras);
     return chunk;
@@ -412,6 +413,7 @@ std::shared_ptr<Chunk> OverworldGenerator::generate(int chunkX, int chunkZ, Chun
 std::shared_ptr<Chunk> OverworldGenerator::generate(int chunkX, int chunkZ) const {
     Workspace& w = workspace();
     runStages(w, chunkX, chunkZ, Stage::Surface);
+    if (stage_) stage_(w.blocks, chunkX, chunkZ);
     auto chunk = std::make_shared<Chunk>();
     buildChunk(w, *chunk, nullptr);
     return chunk;

@@ -35,10 +35,10 @@ from your own installation: see "Game assets" below.</sub>
   frame on a Ryzen 5 5600G with an RX 580. Numbers and method are in the README below.
 * **Checked against the real game**: `tools/vanilla-reference.ps1` makes a world with the real server on a seed and
   `Falcon --compare-vanilla` diffs Falcon's terrain with it block by block. On one seed the spawn is the same block and **98.8 %** of
-  the surface columns have the same height. The remaining gap (the game's ores, blobs, trees and structures) is listed in
+  the surface columns have the same height. The remaining gap (the game's exact trees, flowers, dripstone and structures) is listed in
   "Checking the terrain against the real game".
 
-Not built yet: joining servers, Realms, mobs, the game's feature placement (ores, exact trees) and structures, a day and
+Not built yet: joining servers, Realms, mobs, the game's exact feature placement (trees, flowers, dripstone) and structures, a day and
 night cycle. Vulkan is on the Graphics API button but only OpenGL draws (see `docs/RENDERING.md`).
 
 ## Not affiliated, and nothing of Minecraft is in here
@@ -338,7 +338,7 @@ running next to it keeps the machine.
   veins, bedrock and deepslate, the surface rules, the 67 biomes). It was checked against the real game's own output for seed 12345:
   every block of 39 reference chunks (3.8 million blocks each) matches, so **the seed gives the same land, sea, rivers, mountains,
   badlands and deserts as Minecraft**, except in 18 columns where two biomes tie exactly. **Not built yet:** the game's own placed
-  features and carvers (classic caves and ravines, and the exact trees, flowers and ores), structures, and mobs. On top of the exact
+  features (the exact trees, flowers, dripstone and the rest), structures, and mobs. The classic caves and canyons are there (ported from the game's carver code with its own random numbers, but not yet checked against what the real game cuts for a seed, and what fills them is simplified) and so are the ores and the blobs of other rock (the game's veins, counts, sizes and heights, but NOT its random numbers: a seed does not give its exact ore positions); see `worldgen/underground.hpp`. On top of the exact
   terrain Falcon adds **its own approximation** of the plants: the trees each biome grows (oak, birch, spruce, acacia, jungle, cherry,
   dark oak), grass, ferns, flowers, cacti, dead bushes, seagrass and kelp, and snow and ice in the cold biomes. These follow the
   game's biomes but are NOT the game's trees: a seed does not give the game's exact forests. They are laid down the way the game's
