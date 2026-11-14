@@ -86,7 +86,7 @@ file(GENERATE OUTPUT "${LAUNCHER_RC}" CONTENT
 "1 ICON \"${FALCON_ICO}\"
 1 24 \"${CMAKE_CURRENT_SOURCE_DIR}/src/launcher.manifest\"
 LAUNCHER_UI RCDATA \"${UI_DIST}/index.html\"
-FALCON_CLIENT RCDATA \"$<TARGET_FILE:falcon_client>\"
+FALCON_CLIENT RCDATA \"$<TARGET_FILE:falcon_client_licensed>\"
 WEBVIEW2_LOADER RCDATA \"${WV2_LOADER}\"
 
 1 VERSIONINFO
@@ -112,10 +112,10 @@ PRODUCTVERSION ${PROJECT_VERSION_MAJOR},${PROJECT_VERSION_MINOR},${PROJECT_VERSI
 }
 ")
 set_source_files_properties("${LAUNCHER_RC}" PROPERTIES GENERATED TRUE
-    OBJECT_DEPENDS "${UI_DIST}/index.html;${CMAKE_BINARY_DIR}/Falcon.exe;${WV2_LOADER};${FALCON_ICO}")
+    OBJECT_DEPENDS "${UI_DIST}/index.html;${CMAKE_BINARY_DIR}/licensed/Falcon.exe;${WV2_LOADER};${FALCON_ICO}")
 # (Its own target so windres gets no -I flags, as with the game's resource file.)
 add_library(falcon_launcher_rc OBJECT EXCLUDE_FROM_ALL "${LAUNCHER_RC}")
-add_dependencies(falcon_launcher_rc falcon_launcher_ui falcon_client falcon_icon)
+add_dependencies(falcon_launcher_rc falcon_launcher_ui falcon_client_licensed falcon_icon)
 
 add_executable(falcon_launcher WIN32 EXCLUDE_FROM_ALL
     src/main.cpp

@@ -610,8 +610,14 @@ void App::launchJob() {
     si.cb = sizeof(si);
     PROCESS_INFORMATION pi{};
     std::wstring mutableCommand = command;
-    if (!CreateProcessW(nullptr, mutableCommand.data(), nullptr, nullptr, FALSE, 0, nullptr, exe->parent_path().c_str(), &si, &pi)) {
-        return setGameError({"spawn", "The game could not be started (error " + std::to_string(GetLastError()) + ")."});
+    // The client asks Mojang itself whether this account owns the game, with the account's Minecraft access token: it gets the token in its environment, for this
+    // one start only (the variable is gone from the launcher again at once).
+    SetEnvironmentVariableW(L"FALCON_MC_TOKEN", widen(account->accessToken).c_str());
+    const BOOL started = CreateProcessW(nullptr, mutableCommand.data(), nullptr, nullptr, FALSE, 0, nullptr, exe->parent_path().c_str(), &si, &pi);
+    const DWORD startError = GetLastError();
+    SetEnvironmentVariableW(L"FALCON_MC_TOKEN", nullptr);
+    if (!started) {
+        return setGameError({"spawn", "The game could not be started (error " + std::to_string(startError) + ")."});
     }
     CloseHandle(pi.hThread);
     logLine("started the client, process " + std::to_string(pi.dwProcessId));
