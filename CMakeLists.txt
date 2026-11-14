@@ -235,6 +235,7 @@ add_library(falcon_core
     src/world/level_info.cpp
     src/world/player.cpp
     src/world/item_entity.cpp
+    src/world/world_save.cpp
     src/world/collision_shapes.cpp
     src/world/block_outlines.cpp
     src/world/block_support.cpp

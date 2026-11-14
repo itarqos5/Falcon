@@ -38,7 +38,7 @@ from your own installation: see "Game assets" below.</sub>
   the surface columns have the same height. The remaining gap (the game's ores, blobs, trees and structures) is listed in
   "Checking the terrain against the real game".
 
-Not built yet: joining servers, Realms, mobs, saving worlds, the game's feature placement (ores, exact trees) and structures, a day and
+Not built yet: joining servers, Realms, mobs, the game's feature placement (ores, exact trees) and structures, a day and
 night cycle. Vulkan is on the Graphics API button but only OpenGL draws (see `docs/RENDERING.md`).
 
 ## Not affiliated, and nothing of Minecraft is in here
@@ -442,7 +442,7 @@ running next to it keeps the machine.
   air), attack-cooldown dip, turn sway and view bobbing; items use their own first-person display transforms (blocks as small cubes,
   tools and other flat items as the picture pushed out one pixel, drawn with back faces culled as the game does so a tool is one solid sprite, not two). Not built: the off hand, use animations (eating, bows, shields),
   the other default skins.
-- **Changes are not saved.** Break and place as much as you like: the world is generated afresh next time.
+- **Worlds are saved.** Leaving a world (Save and Quit to Title, closing the window) and every five minutes of play write `falcon_save.dat` into the world's folder: where the player stands and looks, health, the whole inventory, the items lying about, and every block that was changed (as the difference from what the generator makes, so a world stays small, and a chunk that is made again gets its changes back whatever the cache did). Only worlds Falcon made are saved (a world made by Minecraft is not ours to write into), and a test run (`--capture`, `--bench`, `--cam`) leaves the world as it found it unless `FALCON_SAVE=1`. Water that was flowing when the world was left stops where it was.
 - **Movement is the game's own physics**, 20 ticks a second with the game's float and double arithmetic: walking
   4.317, sprinting 5.612 and sneaking 1.295 blocks a second, diagonal input stretched to the unit square, ground friction (ice slides,
   soul sand slows), the 1.25 block jump and the sprint-jump boost, gravity and drag (78.4 blocks a second at most), step-up onto
@@ -616,7 +616,7 @@ own `--game-dir`.
 
 ## Not done yet
 
-Credits & Attribution (locked), Edit World, Re-Create, joining a server, saving what you change in a world, reading the
+Credits & Attribution (locked), Edit World, Re-Create, joining a server, reading the
 blocks of worlds made by Minecraft, caves, trees and the other placed features of the world generator, mobs, light and weather, the editors behind Create
 New World's Customize, Game Rules, Experiments and Data Packs, LAN worlds, the Realms screens (the
 button is locked), keyboard focus navigation (Tab) in the menus, the Realms notification overlay, the `<NAME> IS YOU` splash, italic text, and

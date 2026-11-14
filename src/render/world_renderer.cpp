@@ -532,6 +532,7 @@ void WorldRenderer::requestChunk(ChunkPos pos, float priority) {
             } else {
                 chunk = generator_.generate(pos.x, pos.z);
             }
+            if (edits_ && chunk) edits_->applyTo(pos, *chunk);  // what the player changed here comes back (a chunk from the cache has it already)
         }
         {
             std::lock_guard<std::mutex> lock(resultsMutex_);
@@ -1435,6 +1436,7 @@ void WorldRenderer::meshNow(const SectionKey& key) {
 
 bool WorldRenderer::setBlock(int x, int y, int z, Block block) {
     if (!level_.setBlock(x, y, z, block)) return false;
+    if (edits_) edits_->set(x, y, z, block);
     ++blockEdits_;  // the carried light may now reach round a corner, or stop at a wall
     const int lx = x & 15;
     const int lz = z & 15;

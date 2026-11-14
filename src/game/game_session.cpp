@@ -201,6 +201,76 @@ GameSession::GameSession(ScreenServices& services, const ResourceManager& resour
     player_.canFly = info.gameType == 1 || info.gameType == 3;  // creative and spectator
     player_.spectator = info.gameType == 3;
     player_.flying = player_.spectator;
+    // The world's own save: what the player changed comes back as the chunks are made, and the player stands where they left off.
+    savePath_ = services.gameDir / "saves" / info.folder / "falcon_save.dat";
+    renderer_.setEdits(edits_);
+    if (info_.madeByFalcon) loadSave();
+}
+
+GameSession::~GameSession() { save(); }
+
+// What loadSave() puts back: the player (where they stood, what they carried and how they were), and the items lying about. The block edits are read into
+// `edits_` and applied by the renderer to every chunk it makes.
+void GameSession::loadSave() {
+    WorldSave saved;
+    std::string error;
+    if (!readWorldSave(savePath_, saved, *edits_, *registry_, error)) {
+        if (!error.empty()) std::printf("[falcon] %s: starting from the spawn\n", error.c_str());
+        return;
+    }
+    std::printf("[falcon] loaded the save: %zu edited blocks in %zu chunks, %zu items lying about\n", edits_->size(), edits_->chunkCount(), saved.items.size());
+    if (saved.hasPlayer) {
+        const SavedPlayer& p = saved.player;
+        if (p.gameType >= 0 && p.gameType != info_.gameType) setGameType(p.gameType);
+        player_.setPosition(p.x, p.y, p.z);
+        player_.yaw = player_.yawO = p.yaw;
+        player_.pitch = player_.pitchO = p.pitch;
+        player_.flying = p.flying && player_.canFly;
+        vitals_.health = std::clamp(p.health, 1.0f, vitals_.maxHealth);
+        vitals_.food = p.food;
+        vitals_.saturation = p.saturation;
+        vitals_.level = p.level;
+        vitals_.progress = p.progress;
+        lastHealthShown_ = displayHealth_ = static_cast<int>(std::ceil(vitals_.health));
+        for (const auto& [slot, stack] : p.inventory) {
+            if (slot >= 0 && slot < Inventory::kSize) inventory_.item(slot) = stack;
+        }
+        inventory_.setSelected(p.selectedSlot);
+    }
+    for (const ItemEntity& e : saved.items) itemEntities_.items().push_back(e);
+}
+
+void GameSession::save() {
+    static const bool forced = std::getenv("FALCON_SAVE") != nullptr;  // (test runs do not save unless asked to)
+    if (!ready_ || !info_.madeByFalcon || (!forced && (!savingEnabled_ || pinnedPose_))) return;
+    WorldSave out;
+    out.hasPlayer = true;
+    SavedPlayer& p = out.player;
+    // A player who is dead when the world is left starts again at the spawn with full health, as after Respawn.
+    p.x = dead_ ? spawn_[0] : player_.x;
+    p.y = dead_ ? spawn_[1] : player_.y;
+    p.z = dead_ ? spawn_[2] : player_.z;
+    p.yaw = player_.yaw;
+    p.pitch = player_.pitch;
+    p.flying = player_.flying;
+    p.health = dead_ ? vitals_.maxHealth : vitals_.health;
+    p.food = dead_ ? 20 : vitals_.food;
+    p.saturation = vitals_.saturation;
+    p.level = vitals_.level;
+    p.progress = vitals_.progress;
+    p.selectedSlot = inventory_.selected;
+    p.gameType = info_.gameType;
+    for (int slot = 0; slot < Inventory::kSize; ++slot) {
+        if (!inventory_.item(slot).isEmpty()) p.inventory.emplace_back(slot, inventory_.item(slot));
+    }
+    out.items = itemEntities_.items();
+    const std::string error = writeWorldSave(savePath_, out, *edits_, *registry_);
+    if (!error.empty()) {
+        std::printf("[falcon] could not save the world: %s\n", error.c_str());
+        return;
+    }
+    lastSaveTicks_ = playerAgeTicks_;
+    std::printf("[falcon] saved the world: %zu edited blocks in %zu chunks\n", edits_->size(), edits_->chunkCount());
 }
 
 int GameSession::renderDistance() const { return std::clamp(services_.options.renderDistance, kMinRenderDistance, kMaxRenderDistance); }
@@ -782,6 +852,10 @@ void GameSession::update(double dt, bool active, int framebufferWidth, int frame
     // The game's clock runs while the player steers and while the inventory is open; the pause menu and the others stop it.
     if (active || keepTicking) tickPlayer(frameSeconds, active);  // (a pinned camera, for screenshots, freezes the player, not the world)
     if (active || keepTicking) tickHud(frameSeconds);
+    if (playerAgeTicks_ - lastSaveTicks_ >= 6000.0) {  // every five minutes of play, as the game does
+        lastSaveTicks_ = playerAgeTicks_;
+        save();
+    }
     interact(dt, active);
 }
 

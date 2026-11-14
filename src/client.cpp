@@ -943,6 +943,7 @@ int Client::run() {
                 try {
                     session = std::make_unique<GameSession>(services, resources, window, *levelInfo);
                     services.session = session.get();
+                    session->setSavingEnabled(!options_.capturePath && !options_.benchmark);  // (a test run leaves the world as it found it)
                     music.setSituation(levelInfo->gameType == 1 ? MusicManager::Situation::Creative : MusicManager::Situation::Survival);
                     if (options_.camera) {
                         const auto& c = *options_.camera;

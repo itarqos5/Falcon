@@ -7,6 +7,7 @@
 #include "falcon/world/chunk.hpp"
 #include "falcon/world/chunk_cache.hpp"
 #include "falcon/world/mesher.hpp"
+#include "falcon/world/world_save.hpp"
 #include "falcon/world/terrain.hpp"
 #include "falcon/world/decoration.hpp"
 #include "falcon/worldgen/overworld_generator.hpp"
@@ -122,6 +123,9 @@ public:
     void setSmoothLighting(bool on);
     // The Leaves video option: true draws leaves see-through (Cutout), false solid (Opaque). Re-meshes the world on a change.
     void setCutoutLeaves(bool on);
+    // The world's edits: every block changed through setBlock() is recorded in them, and every chunk made (again) has its edits put back before it is
+    // used. Set once, before the first update().
+    void setEdits(std::shared_ptr<WorldEdits> edits) { edits_ = std::move(edits); }
     // A small model drawn on top of the world with the world's shader (the held item): `mvp` takes its 0..1 space to the screen.
     void drawHeld(const Matrix4f& mvp, const std::vector<MeshVertex>& vertices);
     // The view and projection of the last frame drawn (the world is drawn relative to the camera): for drawing other things in it.
@@ -236,6 +240,7 @@ private:
     BlockModels& models_;
     TerrainGenerator generator_;
     std::shared_ptr<const worldgen::OverworldGenerator> overworld_;
+    std::shared_ptr<WorldEdits> edits_;            // what the player changed (see setEdits)
     std::shared_ptr<const Decorator> decorator_;  // trees, plants and snow on the generated terrain (null without the generator)
     Level level_;
 

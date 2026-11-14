@@ -31,6 +31,7 @@
 #include "falcon/game/world_sounds.hpp"
 #include "falcon/world/item_entity.hpp"
 #include "falcon/world/item_registry.hpp"
+#include "falcon/world/world_save.hpp"
 #include "falcon/platform/system_info.hpp"
 #include "falcon/world/chunk_cache.hpp"
 #include "falcon/game/gamemode_switcher_screen.hpp"
@@ -617,6 +618,89 @@ void test_item_entities() {
     CHECK(old.items().empty());
     CHECK(falcon::ItemEntities::renderedAmount(1) == 1 && falcon::ItemEntities::renderedAmount(16) == 2 && falcon::ItemEntities::renderedAmount(17) == 3 &&
           falcon::ItemEntities::renderedAmount(33) == 4 && falcon::ItemEntities::renderedAmount(49) == 5);
+}
+
+// A world's save: the block edits go into chunks as they are made, and the player, the inventory and the items lying about survive a write and a read.
+void test_world_save() {
+    const falcon::BlockRegistry& registry = falcon::blockRegistry();
+    const falcon::Block stone = registry.find("stone").value();
+    const falcon::Block dirt = registry.find("dirt").value();
+    falcon::WorldEdits edits;
+    edits.set(5, 70, -3, stone);
+    edits.set(5, 71, -3, dirt);
+    edits.set(100, falcon::kMinY, 100, stone);
+    edits.set(1, falcon::kMaxY, 1, stone);  // outside the world: ignored
+    CHECK(edits.size() == 3 && edits.chunkCount() == 2 && edits.changed());
+    falcon::Chunk chunk;
+    edits.applyTo({0, -1}, chunk);  // x 5, z -3 is local x 5, z 13 in chunk (0, -1)
+    CHECK(chunk.at(5, 70, 13) == stone && chunk.at(5, 71, 13) == dirt && chunk.at(5, 72, 13) == falcon::Block::Air);
+    falcon::Chunk untouched;
+    edits.applyTo({3, 3}, untouched);
+    CHECK(untouched.at(5, 70, 13) == falcon::Block::Air);
+
+    // Through NBT and back.
+    falcon::WorldEdits again;
+    CHECK(again.fromNbt(edits.toNbt(registry), registry) && !edits.changed());
+    CHECK(again.size() == 3 && again.chunkCount() == 2);
+    falcon::Chunk restored;
+    again.applyTo({0, -1}, restored);
+    CHECK(restored.at(5, 70, 13) == stone && restored.at(5, 71, 13) == dirt);
+    // An edit that was overwritten counts once, with the last block.
+    edits.set(5, 70, -3, dirt);
+    falcon::Chunk last;
+    edits.applyTo({0, -1}, last);
+    CHECK(edits.size() == 3 && last.at(5, 70, 13) == dirt);
+
+    // The whole file.
+    falcon::WorldSave save;
+    save.hasPlayer = true;
+    save.player.x = 12.5;
+    save.player.y = 70.0;
+    save.player.z = -3.25;
+    save.player.yaw = 135.0f;
+    save.player.pitch = -20.0f;
+    save.player.health = 13.0f;
+    save.player.food = 17;
+    save.player.selectedSlot = 4;
+    save.player.gameType = 0;
+    falcon::ItemStack pick(falcon::itemRegistry().find("stone").value(), 42);
+    pick.customName = "Rocky";
+    save.player.inventory.emplace_back(4, pick);
+    falcon::ItemEntity lying;
+    lying.stack = falcon::ItemStack(falcon::itemRegistry().find("dirt").value(), 3);
+    lying.x = 1.5;
+    lying.y = 64.0;
+    lying.z = 2.5;
+    lying.age = 77;
+    lying.pickupDelay = 9;
+    save.items.push_back(lying);
+    const std::filesystem::path dir = std::filesystem::temp_directory_path() / "falcon-save-test";
+    std::filesystem::remove_all(dir);
+    const std::filesystem::path file = dir / "falcon_save.dat";
+    CHECK(falcon::writeWorldSave(file, save, edits, registry).empty() && std::filesystem::exists(file));
+    CHECK(falcon::writeWorldSave(file, save, edits, registry).empty() && std::filesystem::exists(dir / "falcon_save.dat_old"));  // the previous save is kept
+    falcon::WorldSave loaded;
+    falcon::WorldEdits loadedEdits;
+    std::string error;
+    CHECK(falcon::readWorldSave(file, loaded, loadedEdits, registry, error) && error.empty());
+    CHECK(loaded.hasPlayer && loaded.player.x == 12.5 && loaded.player.z == -3.25 && loaded.player.yaw == 135.0f && loaded.player.health == 13.0f && loaded.player.food == 17);
+    CHECK(loaded.player.selectedSlot == 4 && loaded.player.inventory.size() == 1 && loaded.player.inventory[0].first == 4);
+    CHECK(loaded.player.inventory[0].second.count == 42 && loaded.player.inventory[0].second.customName == "Rocky");
+    CHECK(loaded.items.size() == 1 && loaded.items[0].stack.count == 3 && loaded.items[0].age == 77 && loaded.items[0].pickupDelay == 9 && loaded.items[0].y == 64.0);
+    CHECK(loadedEdits.size() == 3);
+    // A world that was never saved says nothing; a damaged file falls back on the spare, and with no spare says so.
+    falcon::WorldSave none;
+    falcon::WorldEdits noneEdits;
+    CHECK(!falcon::readWorldSave(dir / "missing.dat", none, noneEdits, registry, error) && error.empty());
+    {
+        std::ofstream damaged(file, std::ios::binary | std::ios::trunc);
+        damaged << "not nbt";
+    }
+    falcon::WorldSave fromSpare;
+    CHECK(falcon::readWorldSave(file, fromSpare, noneEdits, registry, error) && fromSpare.hasPlayer);
+    std::filesystem::remove(dir / "falcon_save.dat_old");
+    CHECK(!falcon::readWorldSave(file, none, noneEdits, registry, error) && !error.empty());
+    std::filesystem::remove_all(dir);
 }
 
 void test_options_layout() {
@@ -4296,6 +4380,7 @@ int main() {
     test_system_info();
     test_world_sounds();
     test_item_entities();
+    test_world_save();
     test_player_physics();
     test_block_registry();
     test_light();

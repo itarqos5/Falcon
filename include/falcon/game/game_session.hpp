@@ -27,6 +27,7 @@
 #include "falcon/world/block_support.hpp"
 
 #include <array>
+#include <filesystem>
 #include <memory>
 #include <optional>
 #include <random>
@@ -41,11 +42,13 @@ namespace falcon {
 //
 // This is a first, small singleplayer: a generated world (Superflat, or this client's own simple hills; see
 // TerrainGenerator) to walk, fly and swim in, with blocks to break and place, an inventory and the E screens. There are no
-// mobs, dropped items, health, light levels or day and night, and changes to the world are not saved. The player is simulated in game ticks, 20 a
+// mobs, light levels or day and night. The world is saved when it is left (see save()). The player is simulated in game ticks, 20 a
 // second (see Player); between ticks the camera shows the interpolated position. A paused game does not tick.
 class GameSession {
 public:
     GameSession(ScreenServices& services, const ResourceManager& resources, Window& window, const LevelInfo& info);
+    // Leaving the world (quitting to the title, closing the window) saves it.
+    ~GameSession();
 
     [[nodiscard]] const LevelInfo& info() const { return info_; }
     // The spawn area is loaded and the player can move. Like the game's LevelLoadTracker this waits for the chunks around the
@@ -155,6 +158,13 @@ public:
     // Back at the spawn with full health (the death screen's Respawn).
     void respawn();
 
+    // ---- saving ----
+    // Writes the player, the items lying about and every changed block to <world>/falcon_save.dat. Only worlds Falcon made are saved (a world made by
+    // Minecraft is not ours to write into), and not from test runs (a pinned camera, --capture, --bench) unless FALCON_SAVE=1. Also done every five minutes.
+    void save();
+    void setSavingEnabled(bool enabled) { savingEnabled_ = enabled; }
+    [[nodiscard]] const WorldEdits& edits() const { return *edits_; }
+
     // ---- F5: the camera ----
     // 0 first person, 1 from behind (the player's back), 2 from the front (looking back at the player's face).
     [[nodiscard]] int perspective() const { return perspective_; }
@@ -190,6 +200,7 @@ private:
     [[nodiscard]] float randomFloat() { return std::uniform_real_distribution<float>(0.0f, 1.0f)(rng_); }
     // ---- the player's body ----
     void tickBody();
+    void loadSave();
     void tickHealth();
     void pickUpItems();
     void die();
@@ -237,6 +248,10 @@ private:
     std::unique_ptr<InventoryMenu> inventoryMenu_;
     SelectedItemHighlight highlight_;
     Vitals vitals_;
+    std::shared_ptr<WorldEdits> edits_ = std::make_shared<WorldEdits>();
+    std::filesystem::path savePath_;
+    bool savingEnabled_ = true;
+    double lastSaveTicks_ = 0.0;
     std::mt19937 rng_{std::random_device{}()};
     ItemEntities itemEntities_;
     StepClock stepClock_;
