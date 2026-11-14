@@ -30,6 +30,7 @@ std::optional<LevelInfo> readLevelInfo(const std::filesystem::path& worldDir) {
 
     // Falcon's own note: the world type the player picked.
     const NbtTag* own = data->get("Falcon");
+    if (own == nullptr) own = data->get("ApexClient");  // (worlds made while the game was still called Apex Client are Falcon's too)
     if (own != nullptr) {
         info.madeByFalcon = true;
         const std::string type = own->getString("world_type");
