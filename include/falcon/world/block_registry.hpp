@@ -68,7 +68,9 @@ struct BlockType {
     std::uint16_t defaultState = 0;
     std::vector<BlockProperty> properties;  // sorted like the game's (by name)
     std::string item;   // the item that stands for it ("oak_stairs"), empty if none
-    std::string sound;  // sound set: "stone", "grass", "wood", ...
+    std::string sound;  // sound set: "stone", "grass", "wood", ... (its events are "block.<set>.break", ".place", ".step", ".hit", ".fall")
+    float soundVolume = 1.0f;  // the SoundType's own volume and pitch
+    float soundPitch = 1.0f;
 };
 
 class BlockRegistry {

@@ -262,4 +262,10 @@ private:
     float cameraEyeHeightOld_ = 1.62f;
 };
 
+// The move a box may make through the world's collision shapes (Entity.collide without the step up), for what is not the player: dropped
+// items. Chunks that are not loaded are solid. Returns the allowed (dx, dy, dz).
+[[nodiscard]] std::array<double, 3> collideAabb(const Level& level, const Aabb& box, double dx, double dy, double dz);
+// Whether a box overlaps any collision shape (an unloaded chunk counts as solid).
+[[nodiscard]] bool aabbCollides(const Level& level, const Aabb& box);
+
 }  // namespace falcon

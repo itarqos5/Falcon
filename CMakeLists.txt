@@ -175,6 +175,7 @@ add_library(falcon_base
     src/platform/key_names.cpp
     src/platform/dialog.cpp
     src/platform/memory.cpp
+    src/platform/system_info.cpp
     src/platform/mapped_file.cpp
     src/platform/file_lock.cpp
 )
@@ -233,6 +234,7 @@ add_library(falcon_core
     src/world/mesher.cpp
     src/world/level_info.cpp
     src/world/player.cpp
+    src/world/item_entity.cpp
     src/world/collision_shapes.cpp
     src/world/block_outlines.cpp
     src/world/block_support.cpp
@@ -429,12 +431,12 @@ PRODUCTVERSION ${PROJECT_VERSION_MAJOR},${PROJECT_VERSION_MINOR},${PROJECT_VERSI
     # Compiled in its own target so windres gets no -I flags: it splits quoted include paths
     # at spaces, which breaks when the checkout lives in a folder with a space in its name.
     add_library(falcon_rc OBJECT "${FALCON_RC}")
+    # (the launcher's resource file uses the same icon file)
+    add_custom_target(falcon_icon DEPENDS "${FALCON_ICO}")
     target_sources(falcon_client PRIVATE $<TARGET_OBJECTS:falcon_rc>)
 endif()
 
 # ---------------------------------------------------------------------------
-    # (the launcher's resource file uses the same icon file)
-    add_custom_target(falcon_icon DEPENDS "${FALCON_ICO}")
 # Tests
 # ---------------------------------------------------------------------------
 if(FALCON_BUILD_TESTS)

@@ -87,9 +87,9 @@ public:
     using string_t = json::string_t;
     using binary_t = json::binary_t;
 
-    FactsHandler(std::vector<StateInfo>& states, std::vector<std::string>& item, std::vector<std::string>& sound,
+    FactsHandler(std::vector<StateInfo>& states, std::vector<std::string>& item, std::vector<std::string>& sound, std::vector<std::array<float, 2>>& soundMix,
                  const std::vector<char>& wantStrings)
-        : states_(states), item_(item), sound_(sound), want_(wantStrings) {}
+        : states_(states), item_(item), sound_(sound), soundMix_(soundMix), want_(wantStrings) {}
 
     bool null() { return true; }
     bool boolean(bool v) { return value(v ? 1.0 : 0.0); }
@@ -149,6 +149,7 @@ private:
         renderModel_ = false;
         curItem_.clear();
         curSound_.clear();
+        curSoundMix_ = {1.0f, 1.0f};
     }
     void endState() {
         if (curId_ < 0 || static_cast<std::size_t>(curId_) >= states_.size()) return;
@@ -158,6 +159,7 @@ private:
         if (static_cast<std::size_t>(curId_) < want_.size() && want_[static_cast<std::size_t>(curId_)]) {
             item_[static_cast<std::size_t>(curId_)] = curItem_;
             sound_[static_cast<std::size_t>(curId_)] = curSound_;
+            soundMix_[static_cast<std::size_t>(curId_)] = curSoundMix_;
         }
         ++seen;
     }
@@ -165,6 +167,11 @@ private:
         if (on) curFlags_ |= f;
     }
     bool value(double v) {
+        if (depth_ == 4 && keys_[3] == "sound") {  // the sound type's own volume and pitch ("sound": {"volume": 1.0, "pitch": 1.0, ...})
+            if (keys_[4] == "volume") curSoundMix_[0] = static_cast<float>(v);
+            else if (keys_[4] == "pitch") curSoundMix_[1] = static_cast<float>(v);
+            return true;
+        }
         if (depth_ != 3) return true;
         const std::string& k = keys_[3];
         if (k == "id") curId_ = static_cast<int>(v);
@@ -193,6 +200,8 @@ private:
     std::vector<StateInfo>& states_;
     std::vector<std::string>& item_;
     std::vector<std::string>& sound_;
+    std::vector<std::array<float, 2>>& soundMix_;
+    std::array<float, 2> curSoundMix_{1.0f, 1.0f};
     const std::vector<char>& want_;
     std::array<std::string, 8> keys_;
     int depth_ = 0;
@@ -259,7 +268,7 @@ private:
 
 // ---------------------------------------------------------------------------------------------------------------
 // The binary cache.
-constexpr char kCacheMagic[4] = {'F', 'B', 'R', '3'};
+constexpr char kCacheMagic[4] = {'F', 'B', 'R', '4'};  // (4: the sound volume and pitch are kept)
 
 struct Fingerprint {
     std::uint64_t size[4] = {};
@@ -429,8 +438,8 @@ std::shared_ptr<const BlockRegistry> BlockRegistry::loadFromGameData(const fs::p
             BlockRegistryBuilder::blocks(*reg).resize(blockCount);
             for (BlockType& t : BlockRegistryBuilder::blocks(*reg)) {
                 std::uint8_t propCount = 0;
-                ok = ok && getString(in, t.name) && getString(in, t.item) && getString(in, t.sound) && readPod(in, t.firstState) &&
-                     readPod(in, t.stateCount) && readPod(in, t.defaultState) && readPod(in, propCount);
+                ok = ok && getString(in, t.name) && getString(in, t.item) && getString(in, t.sound) && readPod(in, t.soundVolume) && readPod(in, t.soundPitch) &&
+                     readPod(in, t.firstState) && readPod(in, t.stateCount) && readPod(in, t.defaultState) && readPod(in, propCount);
                 if (!ok) break;
                 t.properties.resize(propCount);
                 for (BlockProperty& p : t.properties) {
@@ -533,10 +542,11 @@ std::shared_ptr<const BlockRegistry> BlockRegistry::loadFromGameData(const fs::p
         {
             auto& states = BlockRegistryBuilder::states(*reg);
             std::vector<std::string> item(states.size()), sound(states.size());
+            std::vector<std::array<float, 2>> soundMix(states.size(), std::array<float, 2>{1.0f, 1.0f});
             std::vector<char> want(states.size(), 0);
             for (const BlockType& t : BlockRegistryBuilder::blocks(*reg)) want[t.defaultState] = 1;
             std::ifstream in(dir / "gameplay-facts.json");
-            FactsHandler handler(states, item, sound, want);
+            FactsHandler handler(states, item, sound, soundMix, want);
             if (!json::sax_parse(in, &handler)) throw std::runtime_error("gameplay-facts.json: " + handler.error);
             if (handler.seen != states.size()) {
                 throw std::runtime_error("gameplay-facts.json has " + std::to_string(handler.seen) + " states, expected " + std::to_string(states.size()));
@@ -549,6 +559,8 @@ std::shared_ptr<const BlockRegistry> BlockRegistry::loadFromGameData(const fs::p
                 if (s.rfind("block.", 0) == 0) s.erase(0, 6);
                 if (s.size() > 5 && s.compare(s.size() - 5, 5, ".step") == 0) s.erase(s.size() - 5);
                 t.sound = std::move(s);
+                t.soundVolume = soundMix[t.defaultState][0];
+                t.soundPitch = soundMix[t.defaultState][1];
             }
         }
         BlockRegistryBuilder::finish(*reg);
@@ -573,6 +585,8 @@ std::shared_ptr<const BlockRegistry> BlockRegistry::loadFromGameData(const fs::p
                 putString(out, t.name);
                 putString(out, t.item);
                 putString(out, t.sound);
+                writePod(out, t.soundVolume);
+                writePod(out, t.soundPitch);
                 writePod(out, t.firstState);
                 writePod(out, t.stateCount);
                 writePod(out, t.defaultState);

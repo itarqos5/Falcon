@@ -1144,3 +1144,50 @@ ViewBob Player::viewBob(double partial) const {
 }
 
 }  // namespace falcon
+
+namespace falcon {
+
+// Entity.collide for a box that is not the player: Y first, then the longer of X and Z, each stopped by the shapes in its way.
+std::array<double, 3> collideAabb(const Level& level, const Aabb& box, double dx, double dy, double dz) {
+    struct Hit {
+        VoxelShape shape;
+        int x, y, z;
+    };
+    std::vector<Hit> shapes;
+    forEachCollider<Hit>(level, box.expandedTowards(dx, dy, dz), [&](const Hit& h) {
+        shapes.push_back(h);
+        return false;
+    });
+    std::array<double, 3> want = {dx, dy, dz}, allowed = {0.0, 0.0, 0.0};
+    if (shapes.empty()) return want;
+    const bool zFirst = std::abs(dx) < std::abs(dz);
+    const int order[3] = {1, zFirst ? 2 : 0, zFirst ? 0 : 2};
+    for (const int axis : order) {
+        double d = want[static_cast<std::size_t>(axis)];
+        if (d == 0.0) continue;
+        const Aabb moved = box.moved(allowed[0], allowed[1], allowed[2]);
+        for (const Hit& h : shapes) {
+            if (std::abs(d) < 1.0E-7) {
+                d = 0.0;
+                break;
+            }
+            d = h.shape.collide(axis, moved, d, h.x, h.y, h.z);
+        }
+        allowed[static_cast<std::size_t>(axis)] = d;
+    }
+    return allowed;
+}
+
+}  // namespace falcon
+
+namespace falcon {
+
+bool aabbCollides(const Level& level, const Aabb& box) {
+    struct Hit {
+        VoxelShape shape;
+        int x, y, z;
+    };
+    return forEachCollider<Hit>(level, box, [](const Hit&) { return true; });
+}
+
+}  // namespace falcon
