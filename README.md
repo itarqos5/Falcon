@@ -101,10 +101,12 @@ compiling stays light with `cmake --build --preset release -j 3`.
 | `--shift`               | Treat shift as held (a shift-click) |
 | `--give <item>[:n[:wear]]` | With `--play`: put items in the inventory once the world is ready (repeatable), e.g. `--give diamond_pickaxe:1:700` |
 | `--gamemode <mode>`     | `survival` or `creative`, instead of what the world says |
+| `--drop-from <blocks>`  | Lift the player that far once the world is ready and let them fall (to test fall damage and the death screen) |
+| `--vitals <h>,<f>,<l>,<p>` | What the survival bars show, for screenshots: health (20 = full), food (20), experience level, progress 0..1 (e.g. `13,7,12,0.45`) |
 | `--java-edition`        | Keep the original "JAVA EDITION" title badge (default is "C++ EDITION") |
 | `--scroll <X>,<Y>,<DY>@<s>` | Inject a mouse-wheel turn (`DY` > 0 is up) at that position   |
 | `--type <text>@<s>`     | Inject typed characters (e.g. into the pack search box)        |
-| `--key <code>@<s>`      | Tap a key by GLFW code (`256` = Escape); `@<s>+` only presses it and `@<s>-` only lets it go, so a chord like F3 + F4 is `292@1+ 293@1.5 292@2-` |
+| `--key <code>@<s>`      | Tap a key by GLFW code (`256` = Escape); `@<s>+` only presses it and `@<s>-` only lets it go, so a chord like F3 + F4 is `292@1+ 293@1.5 292@2-`. A key held that way also counts as held for walking (`87@3+ 87@6-` walks forward for three seconds), and `--press` / `--release` do the same for a mouse button |
 | `--mute` / `--audio`    | No sound / sound even while capturing (captures are silent)    |
 | `--music-toast`         | Show the "now playing" toast when a track starts (game default: off) |
 | `--audio-test`          | Play a click and a music track through the real device, report |
@@ -319,8 +321,12 @@ surface, and the mouse looks around. Movement uses **your key bindings** (Key Bi
 walks you off an edge), sprint, swim, and in a creative world double-tap Jump to fly (Jump rises, Sneak descends, touching the
 ground ends it). Attack breaks the block you look at (an outline shows which), Use places the block of the held item (and uses it
 up outside creative), Pick Block copies the one you look at, the number keys or the wheel pick a hotbar slot, the Inventory key (E)
-opens the inventory (see "Items and inventory"), and F3 shows the debug screen
-(fps, CPU and GPU time, position, chunks, memory). Escape opens the Game Menu (Back to Game, Options, Save and Quit to
+opens the inventory (see "Items and inventory"), and F3 shows the debug screen: on the left the game (fps, CPU and GPU time, position,
+chunks, drawing and memory use), on the right, as in the game, the PC (processor and its thread count, Windows version, the RAM in the PC and
+how much of it is free), the screen and the graphics card (its name, its video memory, the OpenGL version) and the block you look at with its
+properties. In survival and adventure the hotbar has the hearts above its left half, the food above its right half and the experience strip
+between them, laid out as the game's `Hud` does (the numbers are in `tests/test_client.cpp`, `test_survival_hud`); in creative and spectator
+they are not drawn. Escape opens the Game Menu (Back to Game, Options, Save and Quit to
 Title; Advancements, Statistics and World Options are locked). FOV, Render Distance, Mouse Sensitivity, Invert Mouse, VSync
 and Max Framerate act live. Losing the keyboard focus opens the Game Menu, and an unfocused Falcon is held to 20 fps, so a game
 running next to it keeps the machine.
@@ -434,17 +440,25 @@ running next to it keeps the machine.
 - **The hand**: your arm (the default Steve skin; the Main Hand option picks the side and the sleeve option the sleeve) or the held
   item at the bottom of the screen, placed by the game's chain of transforms, with equip, swing (breaking, placing, a swing at the
   air), attack-cooldown dip, turn sway and view bobbing; items use their own first-person display transforms (blocks as small cubes,
-  tools and other flat items as the picture pushed out one pixel). Not built: the off hand, use animations (eating, bows, shields),
+  tools and other flat items as the picture pushed out one pixel, drawn with back faces culled as the game does so a tool is one solid sprite, not two). Not built: the off hand, use animations (eating, bows, shields),
   the other default skins.
 - **Changes are not saved.** Break and place as much as you like: the world is generated afresh next time.
 - **Movement is the game's own physics**, 20 ticks a second with the game's float and double arithmetic: walking
   4.317, sprinting 5.612 and sneaking 1.295 blocks a second, diagonal input stretched to the unit square, ground friction (ice slides,
   soul sand slows), the 1.25 block jump and the sprint-jump boost, gravity and drag (78.4 blocks a second at most), step-up onto
   slabs, stairs and 0.6 high ledges, sneaking at edges, crouch, crawl and swim poses, ladders and vines, water and lava, creative
-  flight (10.9 blocks a second, 21.8 sprinting), fall damage worked out (nothing takes health yet) and the camera easing and view
+  flight (10.9 blocks a second, 21.8 sprinting), fall damage and the camera easing and view
   bobbing between ticks. Collision uses the game's shapes for every block state (`cached-collision.nbt`, kept as a small cache
   in `falcon_cache`). Not built: water currents, elytra, honey sliding, powder snow, scaffolding, bamboo, auto-jump.
-- No health, hunger, damage, day and night, weather, clouds or sound effects, and no mobs. Every block of the game draws from its own
+- **Health** is real: a fall hurts by the game's rule (`LivingEntity.causeFallDamage`: the cry for the size of the fall, the block's fall sound, then the hurt, with
+  the half second of protection after a hit, the hearts blinking and the view tipping to one side), the void kills a survival player, a fed player heals half a heart
+  every four seconds, and at 0 the **You Died!** screen scatters everything the player carried where they died and offers Respawn or Title Screen. Food and
+  experience stay as they are (nothing uses food up, and there is no way to eat or earn experience yet), and there is no armor row or air bubbles. There is no day and
+  night, weather or clouds, and no mobs.
+- **Sounds of the world**: breaking and placing a block play the block's own sound (`block.<set>.break` / `.place`, with its SoundType volume and pitch, in the Blocks
+  slider), walking makes a step on the pace the game uses (a step every 1.67 blocks; a landing counts; none while sneaking on the ground or flying; muffled steps and a
+  swim sound in water), a fall plays the cry and the block's fall sound, and a splash, a hurt, a death and picking an item up have theirs. The sounds fade with the distance.
+  `FALCON_SOUND_LOG=1` prints each one (for tests, which run muted). Every block of the game draws from its own
   model (stairs, slabs, fences, plants, glass, water, lava ...); blocks are placed in their default state (facing and half are not chosen yet).
 - The menus over the world dim it instead of blurring it.
 - Changing resource packs does not reload the block textures while a world is open.
@@ -487,9 +501,16 @@ then the offhand are tried first when picking something up).
 - **Hotbar**: nine stacks drawn with their picture, count (right-bottom, shadowed) and durability bar, the selected slot ringed, the
   offhand stack in its own frame to the left, and the name of the held item above the bar that fades after two seconds (the game's
   40-tick timer, opaque until the last 10). F1 hides all of it. The number keys, the wheel, **Q** (drop one; Ctrl+Q the stack) and
-  **F** (swap with the offhand) work like the game's; thrown items just vanish, since there are no item entities yet.
-- **Break, place, pick**: in survival a broken block's item goes into the inventory (the block's own item: loot tables are not
-  there), placing uses up one item, and creative has infinite materials. Pick Block selects the slot that has the item, or swaps
+  **F** (swap with the offhand) work like the game's.
+- **Items in the world**: Q throws the held item out in front of the player, a click outside a menu throws what the cursor holds, and a block broken in survival drops
+  its item. They are the game's `ItemEntity`: gravity 0.04 and drag 0.98, the friction of the block under them, floating in water, burning up in lava, joining a
+  neighbouring stack of the same item, gone after five minutes. They bob and turn, a bigger stack is drawn as a small heap, and the player takes them when they come within a
+  block (after 10 ticks for a dropped block, 40 for a thrown item).
+- **F5** cycles first person, from behind and from the front (the camera is four blocks away along the view, closer where a block is in the way). The player is the real
+  model, in the default skin, with the walk swing, the head following the view, the crouching pose and the swing of an arm.
+- **Break, place, pick**: in survival a broken block drops its item (the block's own item: loot tables are not
+  there), aiming at something that can be replaced (grass, ferns, snow, water ...) puts the new block in its place and anything else gets it beside the face you hit
+  (`BlockPlaceContext`), placing uses up one item, and creative has infinite materials. Pick Block selects the slot that has the item, or swaps
   it into the hotbar, or (creative) puts it in a free hotbar slot, as the game does. The state a placed block gets is chosen in one
   function, `blockStateForPlacement()` (`game/block_placement.hpp`), which for now returns the block's default state.
 - **E in survival**: the 176 x 166 inventory screen laid out from `gui/container/inventory.png` and the game's menu constants:
@@ -596,7 +617,7 @@ own `--game-dir`.
 ## Not done yet
 
 Credits & Attribution (locked), Edit World, Re-Create, joining a server, saving what you change in a world, reading the
-blocks of worlds made by Minecraft, caves, trees and the other placed features of the world generator, mobs, item entities (what is thrown out vanishes), health, light and weather, the editors behind Create
+blocks of worlds made by Minecraft, caves, trees and the other placed features of the world generator, mobs, light and weather, the editors behind Create
 New World's Customize, Game Rules, Experiments and Data Packs, LAN worlds, the Realms screens (the
 button is locked), keyboard focus navigation (Tab) in the menus, the Realms notification overlay, the `<NAME> IS YOU` splash, italic text, and
 right-to-left text handling (Arabic and Hebrew show in logical order, unshaped).
