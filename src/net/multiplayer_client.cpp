@@ -1,4 +1,5 @@
 #include "falcon/net/multiplayer_client.hpp"
+#include "falcon/world/boat.hpp"
 
 #include "falcon/net/crypto.hpp"
 
@@ -66,6 +67,8 @@ int inventorySlotOfMenu(int menu) {
 
 }  // namespace
 
+#include "mount_seats.inc"
+
 // Steps over a value of entity data by the number of its kind (EntityDataSerializers, in the order they are registered); false for a kind whose layout is not known here.
 bool skipEntityDataValue(int serializer, Reader& r) {
     switch (serializer) {
@@ -85,8 +88,16 @@ bool skipEntityDataValue(int serializer, Reader& r) {
         case 14: r.varint(); return r.ok;                                       // block state
         case 15: r.varint(); return r.ok;                                       // optional block state
         case 19: r.varint(); return r.ok;                                       // optional unsigned int
+        case 18: r.varint(); r.varint(); r.varint(); return r.ok;               // villager data: type, profession, level
         case 20: r.varint(); return r.ok;                                       // pose
+        case 21: case 22: case 23: case 24: case 25: case 26: case 27: case 28:
+        case 29: case 30: case 31: case 32: r.varint(); return r.ok;            // the variants of animals (a holder of a registry each)
+        case 33: if (r.boolean()) { (void)r.string(); r.i64(); } return r.ok;   // optional global position
         case 34: r.varint(); return r.ok;                                       // painting variant
+        case 35: case 36: case 37: case 38: r.varint(); return r.ok;            // states of a sniffer, an armadillo, a copper golem, a copper block
+        case 39: r.f32(); r.f32(); r.f32(); return r.ok;                        // a vector
+        case 40: r.f32(); r.f32(); r.f32(); r.f32(); return r.ok;               // a quaternion
+        case 42: case 43: r.varint(); return r.ok;                              // the arm that is the main one, a dye colour
         default: return false;
     }
 }
@@ -101,6 +112,23 @@ int defaultSkinOf(const Uuid& id) {
     const std::int64_t hilo = static_cast<std::int64_t>(msb ^ lsb);
     const std::int32_t hash = static_cast<std::int32_t>(hilo >> 32) ^ static_cast<std::int32_t>(hilo);
     return ((hash % 18) + 18) % 18;  // Math.floorMod
+}
+
+// The kinds of value that need what this connection knows (the particle types, the item components).
+bool MultiplayerClient::skipDataValue(int serializer, Reader& r) {
+    switch (serializer) {
+        case 16: return skipParticle(r, particleKinds_, componentIds_);
+        case 17: {  // a list of particles (the particles of a potion's effects)
+            const int n = r.varint();
+            if (!r.ok || n < 0 || n > 4096) return false;
+            for (int i = 0; i < n; ++i) {
+                if (!skipParticle(r, particleKinds_, componentIds_)) return false;
+            }
+            return r.ok;
+        }
+        case 41: return skipResolvableProfile(r);
+        default: return skipEntityDataValue(serializer, r);
+    }
 }
 
 MultiplayerClient::MultiplayerClient(const BlockRegistry& registry) : registry_(registry) {}
@@ -439,6 +467,14 @@ bool MultiplayerClient::nameTagVisible(const Uuid& id) const {
     return true;
 }
 
+void MultiplayerClient::injectPlayPacket(int id, const Bytes& body, RemoteHandler& h) {
+    phase_ = Phase::Play;
+    Packet p;
+    p.id = id;
+    p.body = body;
+    handlePlay(p, h);
+}
+
 void MultiplayerClient::tickPlayers() {
     for (auto& [id, item] : items_) {
         item.xo = item.x;
@@ -474,9 +510,27 @@ void MultiplayerClient::tickPlayers() {
             p.headYaw += wrap(p.sheadYaw - p.headYaw) / static_cast<float>(p.headSteps);
             --p.headSteps;
         }
-        const double dx = p.x - p.xo, dz = p.z - p.zo;
-        if (isPlayerEntity(p)) {  // LivingEntity.tick and tickHeadTurn: the body turns toward the way it walks (backwards when the walk is more against the look than with it),
-                                  // at three tenths of the way a tick, and never more than 50 degrees from where they look; an arm swing turns it to the look
+        const double dx = p.x - p.xo, dy = p.y - p.yo, dz = p.z - p.zo;
+        p.deltaXO = p.deltaX;
+        p.deltaYO = p.deltaY;
+        p.deltaZO = p.deltaZ;
+        p.deltaX = dx;
+        p.deltaY = dy;
+        p.deltaZ = dz;
+        const bool player = isPlayerEntity(p);
+        // LivingEntity.updateSwingTime: a swing takes six ticks
+        p.swingO = p.swing;
+        if (p.swinging) {
+            if (++p.swingTicks >= 6) {
+                p.swingTicks = 0;
+                p.swinging = false;
+            }
+        } else {
+            p.swingTicks = 0;
+        }
+        p.swing = static_cast<float>(p.swingTicks) / 6.0f;
+        if (player) {  // LivingEntity.tick and tickHeadTurn: the body turns toward the way it walks (backwards when the walk is more against the look than with it),
+                       // at three tenths of the way a tick, and never more than 50 degrees from where they look; an arm swing turns it to the look
             float target = p.bodyYaw;
             if (static_cast<float>(dx * dx + dz * dz) > 0.0025000002f) {
                 const float walk = static_cast<float>(std::atan2(dz, dx)) * 57.295776f - 90.0f;
@@ -487,13 +541,90 @@ void MultiplayerClient::tickPlayers() {
             p.bodyYaw += wrap(target - p.bodyYaw) * 0.3f;
             const float off = wrap(p.yaw - p.bodyYaw);
             if (std::abs(off) > 50.0f) p.bodyYaw += off - (off > 0.0f ? 1.0f : off < 0.0f ? -1.0f : 0.0f) * 50.0f;
+            // Player.updateSwimAmount: into the swimming pose and out of it at 0.09 a tick
+            p.swimAmountO = p.swimAmount;
+            p.swimAmount = p.pose == 3 ? std::min(1.0f, p.swimAmount + 0.09f) : std::max(0.0f, p.swimAmount - 0.09f);
+            const bool gliding = (p.entityFlags & 0x80) != 0;
+            p.fallFlyingTicks = gliding ? p.fallFlyingTicks + 1 : 0;
+            // ElytraAnimationState.tick: the wings go toward where they are held (folded, spread by the dive, or tucked in when crouching) by three tenths a tick
+            p.elytraXO = p.elytraX;
+            p.elytraYO = p.elytraY;
+            p.elytraZO = p.elytraZ;
+            float targetX = 0.2617994f, targetZ = -0.2617994f, targetY = 0.0f;
+            if (gliding) {
+                float spread = 1.0f;
+                const double length = std::sqrt(dx * dx + dy * dy + dz * dz);
+                if (dy < 0.0 && length > 0.0) spread = 1.0f - static_cast<float>(std::pow(-dy / length, 1.5));
+                targetX = spread * 0.34906584f + (1.0f - spread) * targetX;
+                targetZ = spread * -1.5707964f + (1.0f - spread) * targetZ;
+            } else if (p.sneaking) {
+                targetX = 0.6981317f;
+                targetZ = -0.7853982f;
+                targetY = 0.08726646f;
+            }
+            p.elytraX += (targetX - p.elytraX) * 0.3f;
+            p.elytraY += (targetY - p.elytraY) * 0.3f;
+            p.elytraZ += (targetZ - p.elytraZ) * 0.3f;
         }
+        if (p.hurtTime > 0) --p.hurtTime;
+        if (p.dying) ++p.deathTime;
+        // LivingEntity.calculateEntityAnimation: how far it walked this tick sets how hard the legs swing
         p.walkSpeedO = p.walkSpeed;
         p.walkSpeed += (std::min(static_cast<float>(std::sqrt(dx * dx + dz * dz)) * 4.0f, 1.0f) - p.walkSpeed) * 0.4f;
         p.walkPosition += p.walkSpeed;
-        if (p.swing > 0.0f) {
-            p.swing += 1.0f / 6.0f;
-            if (p.swing >= 1.0f) p.swing = 0.0f;
+    }
+    // Entity.positionRider for what rides something (the server does not say where a passenger is; it follows its mount): a place on a boat, a minecart or a mount, from the table of
+    // the game's passenger attachment points, less the rider's own 0.6, turned with the mount.
+    for (auto& [id, p] : players_) p.vehicle = -1;
+    for (const auto& [vehicleId, riders] : passengers_) {
+        const auto mount = players_.find(vehicleId);
+        if (mount == players_.end()) continue;
+        const RemotePlayer& v = mount->second;
+        const std::string* typeName = mobName(v.type);
+        const std::string name = typeName != nullptr ? *typeName : std::string();
+        const auto ends = [&name](const char* tail) {
+            const std::string t = tail;
+            return name.size() >= t.size() && name.compare(name.size() - t.size(), t.size(), t) == 0;
+        };
+        const bool boat = ends("_boat") || ends("_raft"), raft = ends("_raft");
+        const MountSeat* table = nullptr;
+        for (const MountSeat& s : kMountSeats) {
+            if (name == s.type) table = &s;
+        }
+        for (std::size_t i = 0; i < riders.size(); ++i) {
+            const auto found = players_.find(riders[i]);
+            if (found == players_.end() || riders[i] == controlledEntity_) continue;
+            RemotePlayer& rider = found->second;
+            double sx = v.x, sy = v.y, sz = v.z;
+            if (boat) {
+                BoatBody body;
+                body.x = v.x;
+                body.y = v.y;
+                body.z = v.z;
+                body.yaw = v.yaw;
+                const std::array<double, 3> at = body.seat(raft, static_cast<int>(i), static_cast<int>(riders.size()));
+                sx = at[0];
+                sy = at[1];
+                sz = at[2];
+            } else {
+                float ax = 0.0f, ay = 0.5f, az = 0.0f;  // (a mount that is not in the table: about at its middle)
+                if (table != nullptr) {
+                    const int slot = std::min(static_cast<int>(i), std::max(0, table->riders - 1));
+                    ax = table->seat[slot][0];
+                    ay = table->seat[slot][1];
+                    az = table->seat[slot][2];
+                }
+                const double angle = static_cast<double>(-v.yaw * 0.017453292f);  // Vec3.yRot
+                sx = v.x + ax * std::cos(angle) + az * std::sin(angle);
+                sy = v.y + ay - 0.6;
+                sz = v.z + az * std::cos(angle) - ax * std::sin(angle);
+            }
+            rider.x = rider.sx = sx;
+            rider.y = rider.sy = sy;
+            rider.z = rider.sz = sz;
+            rider.lerpSteps = 0;
+            rider.vehicle = vehicleId;
+            rider.seatIndex = static_cast<int>(i);
         }
     }
     for (auto& [id, e] : players_) {  // what flies goes by its velocity (Projectile.tick without the world: no collisions, the server corrects the place)
@@ -720,35 +851,56 @@ void MultiplayerClient::handlePlay(const Packet& p, RemoteHandler& h) {
             if (r.ok && h.cursor) h.cursor(stack);
             break;
         }
-        case 101: {  // set_entity_data: entries of (index, kind of value, value) up to 0xFF; what is read here is the flags every entity has (a player sneaks, burns) and the stack of an item
+        case 101: {  // set_entity_data: entries of (index, kind of value, value) up to 0xFF. What is kept: the flags and the pose of an entity (a player sneaks, glides, swims), what a living
+                     // one is doing (using an item), a player's skin parts and main arm, an armor stand's flags and poses, an item frame's rotation, the stack of an item or a frame
             const int entity = r.varint();
+            const auto found = players_.find(entity);
+            RemotePlayer* who = found != players_.end() ? &found->second : nullptr;
             while (r.ok) {
                 const int index = r.u8();
                 if (index == 0xFF || !r.ok) break;
                 const int serializer = r.varint();
-                if (serializer == 0 && index == 0) {
-                    const int flags = r.u8();
-                    if (const auto it = players_.find(entity); it != players_.end() && r.ok) it->second.sneaking = (flags & 2) != 0;
-                    if (entity == selfEntity_ && r.ok && h.selfFlags) h.selfFlags(flags);
-                } else if (serializer == 0 && index == 15) {  // an armor stand's flags: small, has arms, no base plate, marker
-                    const int flags = r.u8();
-                    if (const auto it = players_.find(entity); it != players_.end() && r.ok) it->second.standFlags = flags;
+                if (serializer == 0) {  // a byte
+                    const int value = r.u8();
+                    if (!r.ok) break;
+                    if (index == 0) {
+                        if (who != nullptr) {
+                            who->entityFlags = value;
+                            who->sneaking = (value & 2) != 0 || who->pose == 5;
+                        }
+                        if (entity == selfEntity_ && h.selfFlags) h.selfFlags(value);
+                    } else if (index == 8 && who != nullptr) {
+                        who->livingFlags = value;
+                    } else if (index == 15 && who != nullptr) {  // an armor stand's flags: small, has arms, no base plate, marker
+                        who->standFlags = value;
+                    } else if (index == 16 && who != nullptr && isPlayerEntity(*who)) {
+                        who->skinParts = value;
+                    }
+                } else if (serializer == 20) {  // the pose
+                    const int pose = r.varint();
+                    if (who != nullptr && r.ok && index == 6) {
+                        who->pose = pose;
+                        who->sneaking = (who->entityFlags & 2) != 0 || pose == 5;
+                    }
+                } else if (serializer == 42) {  // the main arm: 0 is the left
+                    const int arm = r.varint();
+                    if (who != nullptr && r.ok && index == 15) who->mainArmLeft = arm == 0;
                 } else if (serializer == 1 && index == 9) {  // an item frame's rotation
                     const int rotation = r.varint();
-                    if (const auto it = players_.find(entity); it != players_.end() && r.ok) it->second.frameRotation = rotation;
+                    if (who != nullptr && r.ok) who->frameRotation = rotation;
                 } else if (serializer == 9 && index >= 16 && index <= 21) {  // the pose of a part of an armor stand: three angles in degrees
                     const float x = r.f32(), y = r.f32(), z = r.f32();
-                    if (const auto it = players_.find(entity); it != players_.end() && r.ok) it->second.standPose[static_cast<std::size_t>(index - 16)] = {x, y, z};
+                    if (who != nullptr && r.ok) who->standPose[static_cast<std::size_t>(index - 16)] = {x, y, z};
                 } else if (serializer == 34) {  // a painting's variant: a holder of the registry (its number plus one; 0 would be the data written out, which is not read)
                     const int holder = r.varint();
-                    if (const auto it = players_.find(entity); it != players_.end() && r.ok && holder > 0) it->second.variant = holder - 1;
+                    if (who != nullptr && r.ok && holder > 0) who->variant = holder - 1;
                 } else if (serializer == 7) {  // an item stack (the item of an item entity is entry 8)
                     bool known = true;
                     const ItemStack stack = readItemStack(r, componentIds_, known);
                     if (const auto item = items_.find(entity); item != items_.end() && index == 8 && r.ok) item->second.stack = stack;
-                    if (const auto frame = players_.find(entity); frame != players_.end() && index == 8 && r.ok) frame->second.stack = stack;  // (an item frame's)
+                    if (who != nullptr && index == 8 && r.ok) who->stack = stack;  // (an item frame's)
                     if (!known) break;
-                } else if (!skipEntityDataValue(serializer, r)) {
+                } else if (!skipDataValue(serializer, r)) {
                     break;  // a kind of value whose layout is not known here: the rest of the entries cannot be told apart
                 }
             }
@@ -939,6 +1091,17 @@ void MultiplayerClient::handlePlay(const Packet& p, RemoteHandler& h) {
             for (int i = 0; i < n && r.ok && i < 64; ++i) riders.push_back(r.varint());
             if (!r.ok) break;
             const bool mine = std::find(riders.begin(), riders.end(), selfEntity_) != riders.end();
+            for (auto it = passengers_.begin(); it != passengers_.end();) {  // (Entity.startRiding: whoever boards this vehicle is off the one it sat on before)
+                if (it->first != vehicle) {
+                    auto& list = it->second;
+                    list.erase(std::remove_if(list.begin(), list.end(), [&riders](int e) { return std::find(riders.begin(), riders.end(), e) != riders.end(); }), list.end());
+                    if (list.empty()) {
+                        it = passengers_.erase(it);
+                        continue;
+                    }
+                }
+                ++it;
+            }
             if (riders.empty()) passengers_.erase(vehicle);
             else passengers_[vehicle] = riders;
             if (mine) vehicle_ = vehicle;
@@ -1047,6 +1210,58 @@ void MultiplayerClient::handlePlay(const Packet& p, RemoteHandler& h) {
             }
             break;
         }
+        case 35: {  // entity_position_sync: where the server really has an entity (sent now and then, so that the small moves in between never drift)
+            const int id = r.varint();
+            const PositionMoveRotation m = readPositionMoveRotation(r);
+            const bool onGround = r.boolean();
+            if (!r.ok) break;
+            if (const auto it = id == controlledEntity_ ? players_.end() : players_.find(id); it != players_.end()) {
+                RemotePlayer& e = it->second;
+                e.sx = m.x;
+                e.sy = m.y;
+                e.sz = m.z;
+                e.syaw = m.yaw;
+                e.spitch = m.pitch;
+                e.lerpSteps = 3;
+                e.onGround = onGround;
+                if (projectilePhysics_.count(e.type) != 0) {
+                    e.x = m.x;
+                    e.y = m.y;
+                    e.z = m.z;
+                    e.yaw = m.yaw;
+                    e.pitch = m.pitch;
+                }
+            }
+            if (const auto item = items_.find(id); item != items_.end()) {
+                item->second.x = m.x;
+                item->second.y = m.y;
+                item->second.z = m.z;
+                item->second.onGround = onGround;
+            }
+            break;
+        }
+        case 34: {  // entity_event: 2 and its kin are a hit (the red flash), 3 is a death
+            const int id = r.i32();
+            const int status = static_cast<std::int8_t>(r.u8());
+            if (const auto it = players_.find(id); it != players_.end() && r.ok) {
+                if (status == 2 || status == 33 || status == 36 || status == 37 || status == 44) it->second.hurtTime = 10;
+                if (status == 3) {
+                    it->second.dying = true;
+                    it->second.hurtTime = 10;
+                }
+            }
+            break;
+        }
+        case 43: {  // hurt_animation
+            const int id = r.varint();
+            if (const auto it = players_.find(id); it != players_.end() && r.ok) it->second.hurtTime = 10;
+            break;
+        }
+        case 25: {  // damage_event
+            const int id = r.varint();
+            if (const auto it = players_.find(id); it != players_.end() && r.ok) it->second.hurtTime = 10;
+            break;
+        }
         case 85: {  // rotate_head
             const int id = r.varint();
             const auto it = players_.find(id);
@@ -1075,7 +1290,14 @@ void MultiplayerClient::handlePlay(const Packet& p, RemoteHandler& h) {
             const int id = r.varint();
             const int action = r.u8();
             const auto it = players_.find(id);
-            if (it != players_.end() && action == 0) it->second.swing = 0.0001f;
+            if (it != players_.end() && (action == 0 || action == 3)) {  // LivingEntity.swing: a swing that is past its middle (or none) starts over
+                RemotePlayer& e = it->second;
+                if (!e.swinging || e.swingTicks >= 3 || e.swingTicks < 0) {
+                    e.swingTicks = -1;
+                    e.swinging = true;
+                    e.swingOffHand = action == 3;
+                }
+            }
             break;
         }
         default: break;

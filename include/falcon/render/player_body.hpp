@@ -15,6 +15,9 @@ namespace falcon {
 
 class ResourceManager;
 
+// How an arm is held (HumanoidModel.ArmPose): by what is in the hand and what the player is doing with it.
+enum class ArmPose : std::uint8_t { Empty, Item, Block, BowAndArrow, ThrowTrident, Spyglass, TootHorn, Brush };
+
 // How the player's body stands and moves this frame (what the game's player renderer and PlayerModel.setupAnim work from).
 struct BodyPose {
     std::array<double, 3> position{};  // the feet, in world coordinates
@@ -41,9 +44,20 @@ struct BodyPose {
     bool inWater = false;
     // What is worn, as item names ("iron_helmet"): head, chest, legs, feet; empty for nothing.
     std::array<std::string, 4> armor;
-    // Something is held in the right and the left hand: the arm is then raised a little (HumanoidModel.ArmPose.ITEM).
-    bool rightArmItem = false;
-    bool leftArmItem = false;
+    // How the right and the left arm are held (the arm that holds the main hand's item is the main arm: the left one for a left-handed player).
+    ArmPose rightArmPose = ArmPose::Empty;
+    ArmPose leftArmPose = ArmPose::Empty;
+    bool leftHanded = false;     // the main arm is the left one: it is the one that swings
+    bool swingOffHand = false;   // the swing in progress is of the off hand: the other arm
+    bool riding = false;         // sitting on a boat, a minecart or a mount: the legs go forward
+    bool fallFlying = false;     // gliding with elytra: the head looks along the flight, the limbs swing less (limbScale) and the body leans (glideLean degrees about X, then glideTurn radians about Y)
+    float glideLean = 0.0f;
+    float glideTurn = 0.0f;
+    float limbScale = 1.0f;
+    float hurt = 0.0f;           // 1 while the red flash of a hit shows
+    float deathAngle = 0.0f;     // how far a dying body has fallen over, degrees
+    bool elytra = false;         // elytra are worn: the wings are drawn, held as the three angles say (ElytraAnimationState)
+    float elytraX = 0.2617994f, elytraY = 0.0f, elytraZ = -0.2617994f;
 };
 
 // Where the hands are after a body was drawn: each arm's place in the camera-relative world as a 4x4 matrix (column-major), the start of what ItemInHandLayer puts an item on.
@@ -75,6 +89,12 @@ private:
     std::array<bool, 4> haveArmorSlim_{};
     std::map<int, std::unique_ptr<Texture2D>> skins_;  // the default skins, loaded when a player wears one; null for one that cannot be read
     const Texture2D& skinTexture(int index);
+    EntityPart elytraModel_;        // the wings (minecraft:elytra#main)
+    bool haveElytra_ = false;
+    std::unique_ptr<Texture2D> elytraTexture_;
+    bool elytraTextureTried_ = false;
+    const Texture2D* elytraTexture();
+    gl::GLint uHurt_ = -1;
     std::array<EntityPart, 4> armorModels_;  // helmet, chestplate, leggings, boots (the armor layers of the player model)
     std::array<bool, 4> haveArmorModel_{};
     std::map<std::string, std::unique_ptr<Texture2D>> armorTextures_;  // by "humanoid/iron"; null for one that cannot be read

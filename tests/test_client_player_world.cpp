@@ -1,6 +1,7 @@
 // Client tests: player, world.
 #include "test_support.hpp"
 
+#include "falcon/net/multiplayer_client.hpp"
 #include "falcon/ui/text_edit.hpp"
 #include "falcon/world/boat.hpp"
 
@@ -85,6 +86,166 @@ void test_player_stepping() {
         level.setBlock(0, -60, 8, falcon::Block::Air);
     }
     falcon::installCollisionShapes(nullptr);
+}
+
+// Other players as the server tells of them (packets fed to the client without a connection): they ease to where the server puts them over three ticks, a position sync resets
+// the base that moves are relative to, the body turns toward the walk but stays within 50 degrees of the look, the entity data (read after a particle list too) sets the pose,
+// the flags and the skin parts, a swing takes six ticks, a hit flashes ten, the wings go toward their gliding angles, and a rider sits where its mount carries it.
+void test_remote_players() {
+    using namespace falcon::net;
+    MultiplayerClient client(falcon::blockRegistry());
+    client.setPlayerEntityType(159);
+    client.setMobTypes({{90, "oak_boat"}, {67, "horse"}});
+    client.setParticleKinds({{5, ParticleData::Int}});
+    RemoteHandler h;
+    const Uuid id1 = {1, 2, 3}, id2 = {9, 9, 9};
+    const auto add = [&](int entity, const Uuid& uuid, int type, double x, double y, double z, int yawByte) {
+        Writer w;
+        w.varint(entity);
+        w.uuid(uuid);
+        w.varint(type);
+        w.f64(x);
+        w.f64(y);
+        w.f64(z);
+        w.u8(0);  // no velocity
+        w.u8(0);
+        w.u8(yawByte);
+        w.u8(yawByte);
+        w.varint(0);
+        client.injectPlayPacket(1, w.data, h);
+    };
+    const auto tick = [&](int n) {
+        for (int i = 0; i < n; ++i) client.tickPlayers();
+    };
+    add(5, id1, 159, 10.0, 64.0, 10.0, 0);
+    {  // a move of one block east: the entity gets there in three steps (a third, then half of what is left, then the rest)
+        Writer w;
+        w.varint(5);
+        w.i16(4096);
+        w.i16(0);
+        w.i16(0);
+        w.u8(1);
+        client.injectPlayPacket(54, w.data, h);
+        client.tickPlayers();
+        CHECK(closeTo(client.players().at(5).x, 10.0 + 1.0 / 3.0, 1e-6));
+        client.tickPlayers();
+        CHECK(closeTo(client.players().at(5).x, 10.0 + 2.0 / 3.0, 1e-6));
+        client.tickPlayers();
+        CHECK(closeTo(client.players().at(5).x, 11.0, 1e-9) && closeTo(client.players().at(5).xo, 10.0 + 2.0 / 3.0, 1e-6));
+    }
+    {  // a position sync moves the base: the next relative move adds to the new place, not the old one
+        Writer w;
+        w.varint(5);
+        for (const double v : {20.0, 64.0, 20.0, 0.0, 0.0, 0.0}) w.f64(v);
+        w.f32(0.0f);
+        w.f32(0.0f);
+        w.u8(1);
+        client.injectPlayPacket(35, w.data, h);
+        Writer m;
+        m.varint(5);
+        m.i16(4096);
+        m.i16(0);
+        m.i16(0);
+        m.u8(1);
+        client.injectPlayPacket(54, m.data, h);
+        tick(6);
+        CHECK(closeTo(client.players().at(5).x, 21.0, 1e-6) && closeTo(client.players().at(5).z, 20.0, 1e-6));
+    }
+    // walking east while looking south: the body turns toward the walk, but never more than 50 degrees from the look
+    tick(1);
+    for (int i = 0; i < 40; ++i) {
+        Writer m;
+        m.varint(5);
+        m.i16(1024);  // a quarter of a block a tick
+        m.i16(0);
+        m.i16(0);
+        m.u8(1);
+        client.injectPlayPacket(54, m.data, h);
+        client.tickPlayers();
+        client.tickPlayers();
+        client.tickPlayers();
+    }
+    {
+        const RemotePlayer& p = client.players().at(5);
+        float diff = std::fmod(p.yaw - p.bodyYaw, 360.0f);
+        if (diff > 180.0f) diff -= 360.0f;
+        if (diff < -180.0f) diff += 360.0f;
+        CHECK(closeTo(diff, 50.0, 0.5) && p.walkSpeed > 0.3f);
+    }
+    {  // entity data: the pose, the flags (crouching and gliding), a list of particles (one of an int-carrying kind), and then the skin parts and the main arm: none lost after the list
+        Writer w;
+        w.varint(5);
+        w.u8(0); w.varint(0); w.u8(0x82);          // flags: crouching and gliding
+        w.u8(6); w.varint(20); w.varint(3);        // the pose: swimming
+        w.u8(10); w.varint(17); w.varint(2);       // two particles
+        w.varint(5); w.i32(0x00FF8800);            // of the kind that carries a colour
+        w.varint(9);                                // and one that carries nothing
+        w.u8(15); w.varint(42); w.varint(0);       // the main arm: the left
+        w.u8(16); w.varint(0); w.u8(0x7B);         // skin parts
+        w.u8(0xFF);
+        client.injectPlayPacket(101, w.data, h);
+        const RemotePlayer& p = client.players().at(5);
+        CHECK(p.pose == 3 && p.entityFlags == 0x82 && p.sneaking && p.mainArmLeft && p.skinParts == 0x7B);
+    }
+    {  // a swing takes six ticks (the first only starts it), and a hit flashes for ten
+        Writer w;
+        w.varint(5);
+        w.u8(0);
+        client.injectPlayPacket(2, w.data, h);
+        tick(1);
+        CHECK(client.players().at(5).swinging && client.players().at(5).swing == 0.0f);
+        tick(3);
+        CHECK(closeTo(client.players().at(5).swing, 3.0 / 6.0, 1e-6));
+        tick(3);
+        CHECK(!client.players().at(5).swinging && client.players().at(5).swing == 0.0f);
+        Writer e;
+        e.i32(5);
+        e.u8(2);
+        client.injectPlayPacket(34, e.data, h);
+        CHECK(client.players().at(5).hurtTime == 10);
+        tick(10);
+        CHECK(client.players().at(5).hurtTime == 0);
+    }
+    {  // gliding: the wings go toward the spread angles (a dive's) by three tenths a tick
+        tick(30);
+        const RemotePlayer& p = client.players().at(5);
+        CHECK(p.elytraZ < -1.4f && p.elytraX > 0.3f);
+    }
+    {  // equipment: what is worn and held
+        Writer w;
+        w.varint(5);
+        w.u8(0x80 | 4); w.varint(1); w.varint(974); w.varint(0); w.varint(0);  // chest: one of item 974
+        w.u8(0);        w.varint(1); w.varint(1050); w.varint(0); w.varint(0);  // main hand
+        client.injectPlayPacket(104, w.data, h);
+        const RemotePlayer& p = client.players().at(5);
+        CHECK(static_cast<int>(p.equipment[4].item) == 974 && static_cast<int>(p.equipment[0].item) == 1050);
+    }
+    {  // a boat with a rider: the rider (with no word of its own about where it is) sits where the boat carries it, and a horse's rider where a horse does
+        add(9, {7, 7, 7}, 90, 30.0, 64.2, 30.0, 64);  // yaw byte 64 = 90 degrees
+        add(6, id2, 159, 0.0, 0.0, 0.0, 0);
+        Writer w;
+        w.varint(9);
+        w.varint(1);
+        w.varint(6);
+        client.injectPlayPacket(109, w.data, h);
+        tick(1);
+        const RemotePlayer& rider = client.players().at(6);
+        CHECK(rider.vehicle == 9 && closeTo(rider.x, 30.0, 1e-3) && closeTo(rider.y, 64.2 + 0.5625 / 3.0 - 0.6, 1e-4) && closeTo(rider.z, 30.0, 1e-3));
+        add(7, {8, 8, 8}, 67, 40.0, 64.0, 40.0, 0);
+        Writer p;
+        p.varint(7);
+        p.varint(1);
+        p.varint(6);
+        client.injectPlayPacket(109, p.data, h);
+        tick(1);
+        CHECK(client.players().at(6).vehicle == 7 && closeTo(client.players().at(6).y, 64.0 + 1.44375 - 0.6, 1e-4) && closeTo(client.players().at(6).x, 40.0, 1e-3));
+        Writer gone;  // and off again
+        gone.varint(7);
+        gone.varint(0);
+        client.injectPlayPacket(109, gone.data, h);
+        tick(1);
+        CHECK(client.players().at(6).vehicle == -1);
+    }
 }
 
 // The editing keys of a text box (EditBox.keyPressed): select all, copy, cut, paste, words by Ctrl, selecting by Shift, what the box lets in and its length. The clipboard is a stand-in.
@@ -602,6 +763,7 @@ void test_player_physics() {
     test_player_fluids();
     test_boat();
     test_text_edit();
+    test_remote_players();
     test_player_current();
     test_player_real_blocks();
 }

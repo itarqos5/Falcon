@@ -267,6 +267,7 @@ void test_player_stepping();
 void test_player_fluids();
 void test_boat();
 void test_text_edit();
+void test_remote_players();
 void test_player_current();
 void test_player_real_blocks();
 void test_player_physics();

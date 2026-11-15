@@ -74,7 +74,31 @@ struct RemotePlayer {
     std::array<ItemStack, 6> equipment;
     bool onGround = true;
     bool sneaking = false;
-    float swing = 0.0f;       // 0..1 through an arm swing, 0 = none
+    // The swing of an arm (LivingEntity.swing / updateSwingTime): six ticks, started by the animate packet; `swing` is how far it is (0..1), `swingO` how far it was a tick ago.
+    float swing = 0.0f, swingO = 0.0f;
+    bool swinging = false, swingOffHand = false;
+    int swingTicks = 0;
+    // What the entity data says of a player (and of other living things): its pose (Entity.Pose by number: 1 gliding, 2 sleeping, 3 swimming, 5 crouching), the flags of entity data 0
+    // (on fire 1, crouching 2, sprinting 8, swimming 16, invisible 32, glowing 64, gliding 128), of 8 (using an item 1, in the off hand 2), the parts of the skin that are shown (16)
+    // and the arm that is the main one (15).
+    int pose = 0;
+    int entityFlags = 0;
+    int livingFlags = 0;
+    int skinParts = 0x7F;
+    bool mainArmLeft = false;
+    // Worked out each tick like the game does: how far into the swimming pose (Player.swimAmount), how long it has glided, how the elytra's wings are held (ElytraAnimationState),
+    // the red flash of a hit and how long it has been dying.
+    float swimAmount = 0.0f, swimAmountO = 0.0f;
+    int fallFlyingTicks = 0;
+    float elytraX = 0.2617994f, elytraY = 0.0f, elytraZ = -0.2617994f;
+    float elytraXO = 0.2617994f, elytraYO = 0.0f, elytraZO = -0.2617994f;
+    double deltaX = 0.0, deltaY = 0.0, deltaZ = 0.0;  // how far it moved in the last tick (what the game uses as its motion for the wings and the body's lean)
+    double deltaXO = 0.0, deltaYO = 0.0, deltaZO = 0.0;
+    int hurtTime = 0;
+    bool dying = false;
+    int deathTime = 0;
+    int vehicle = -1;       // the entity it sits on (from set_passengers), -1 for none
+    int seatIndex = 0;      // and which place on it
     float walkPosition = 0.0f, walkSpeed = 0.0f, walkSpeedO = 0.0f;
 };
 
@@ -177,6 +201,7 @@ public:
     void setAccount(const Account& account) { account_ = account; }  // before start()
     [[nodiscard]] bool encrypted() const { return connection_.encrypted(); }
     [[nodiscard]] bool chatSigned() const { return chatSessionSent_; }  // the chat is signed with the account's key (what a server that enforces secure profiles wants)
+    void setParticleKinds(std::unordered_map<int, ParticleData> kinds) { particleKinds_ = std::move(kinds); }  // what each particle type carries (see particleDataOf)
     void setSoundNames(std::vector<std::string> names) { soundNames_ = std::move(names); }  // by the number the game gives each sound event
     [[nodiscard]] Phase phase() const { return phase_; }
     [[nodiscard]] bool inPlay() const { return phase_ == Phase::Play; }
@@ -216,6 +241,8 @@ public:
     [[nodiscard]] bool nameTagVisible(const Uuid& id) const;
     // One game tick of the other players: they glide to where they were told to be and their limbs swing.
     void tickPlayers();
+    // For tests: deals with a packet of the play phase as if the server had sent it (without a connection).
+    void injectPlayPacket(int id, const Bytes& body, RemoteHandler& h);
 
     // Outgoing, from the local player.
     void sendMovement(const MoveState& s);        // every tick: the packet the game would send (position, rotation, both or neither)
@@ -305,6 +332,8 @@ private:
     std::map<int, RemotePlayer> players_;
     std::map<Uuid, TabEntry> tab_;
     std::map<std::string, TeamInfo> teams_;
+    std::unordered_map<int, ParticleData> particleKinds_;
+    bool skipDataValue(int serializer, Reader& r);  // skipEntityDataValue and the kinds that need the tables of this connection
     mutable std::unordered_map<std::string, const TeamInfo*> memberIndex_;
     mutable bool memberIndexDirty_ = true;
     StyledText tabHeader_, tabFooter_;

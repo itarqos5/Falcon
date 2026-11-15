@@ -79,6 +79,10 @@ enum class ComponentKind : std::uint8_t {
 };
 [[nodiscard]] ComponentKind componentKindOf(const std::string& name);  // "minecraft:lore" or "lore"
 
+// What a particle carries after the number of its type (the data of ParticleOptions): nothing for most.
+enum class ParticleData : std::uint8_t { None, BlockState, Int, IntFloat, Float, TwoIntsFloat, VarInt, Trail, Item, Vibration };
+[[nodiscard]] ParticleData particleDataOf(const std::string& name);  // "minecraft:dust" or "dust"
+
 struct ComponentIds {
     int damage = -1, repairCost = -1, maxStackSize = -1, maxDamage = -1, unbreakable = -1, customName = -1, itemName = -1, enchantments = -1, glintOverride = -1,
         tooltipDisplay = -1, customData = -1;
@@ -88,6 +92,9 @@ struct ComponentIds {
 // An item stack as the network writes it (ItemStack.OPTIONAL_STREAM_CODEC): the count, the item's number, then the components that differ from the item's own.
 // `known` turns false when a component that cannot be read was met: the stack is then what was read of it, and the reader is not after it.
 [[nodiscard]] ItemStack readItemStack(Reader& r, const ComponentIds& ids, bool& known);
+// Steps over one particle (its type's number, then its data) and over a resolvable profile (a player head's, or the skin of a mannequin).
+[[nodiscard]] bool skipParticle(Reader& r, const std::unordered_map<int, ParticleData>& kinds, const ComponentIds& ids);
+[[nodiscard]] bool skipResolvableProfile(Reader& r);
 // An LpVec3, the low-precision vector the game sends for velocities and for the point of a click on an entity: read, and written the way the game writes it.
 void readLpVec3(Reader& r, double& x, double& y, double& z);
 void writeLpVec3(Writer& w, double x, double y, double z);

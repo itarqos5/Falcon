@@ -69,7 +69,15 @@ std::unique_ptr<PlayerBodyRenderer> PlayerBodyRenderer::create(const ResourceMan
             }
         }
     }
+    {  // the wings, when the game has them
+        std::string wingError;
+        if (auto wings = loadEntityModel(dir, "minecraft:elytra#main", wingError)) {
+            out->elytraModel_ = std::move(*wings);
+            out->haveElytra_ = true;
+        }
+    }
     out->shader_ = ShaderProgram("player_body", kVertex, kFragment);
+    out->uHurt_ = out->shader_.uniform("uHurt");
     out->uProj_ = out->shader_.uniform("uProj");
     out->uLight_ = out->shader_.uniform("uLight");
     out->uSkin_ = out->shader_.uniform("uSkin");
@@ -110,6 +118,18 @@ const Texture2D& PlayerBodyRenderer::skinTexture(int index) {
     return it->second ? *it->second : skin_;
 }
 
+// The picture of the elytra (textures/entity/equipment/wings/elytra.png); null when the game has none.
+const Texture2D* PlayerBodyRenderer::elytraTexture() {
+    if (!elytraTextureTried_) {
+        elytraTextureTried_ = true;
+        if (resources_ != nullptr) {
+            const auto bytes = resources_->readBytes(ResourceLocation("minecraft", "textures/entity/equipment/wings/elytra.png"));
+            if (const auto image = bytes ? decodePng(*bytes) : std::nullopt) elytraTexture_ = std::make_unique<Texture2D>(*image, FilterMode::Nearest);
+        }
+    }
+    return elytraTexture_.get();
+}
+
 // The picture of an armor layer ("humanoid" or "humanoid_leggings") for a material ("iron"); null when the game has none.
 const Texture2D* PlayerBodyRenderer::armorTexture(const std::string& layer, const std::string& material) {
     const std::string key = layer + "/" + material;
@@ -138,10 +158,11 @@ void PlayerBodyRenderer::render(const Matrix4f& viewProj, const std::array<doubl
     if (head != nullptr) {
         head->rotation[1] = pose.headYaw * kDegrees;
         head->rotation[0] = pose.headPitch * kDegrees;
-        if (pose.swimAmount > 0.0f && pose.visuallySwimming) head->rotation[0] = rotlerp(pose.swimAmount, head->rotation[0], -kPi / 4.0f);  // looks along the swim
+        if (pose.fallFlying) head->rotation[0] = -kPi / 4.0f;  // looks along the flight
+        else if (pose.swimAmount > 0.0f && pose.visuallySwimming) head->rotation[0] = rotlerp(pose.swimAmount, head->rotation[0], -kPi / 4.0f);  // looks along the swim
     }
     if (rightArm != nullptr && leftArm != nullptr && rightLeg != nullptr && leftLeg != nullptr && body != nullptr) {
-        const float p = pose.walkPosition * 0.6662f, s = pose.walkSpeed;
+        const float p = pose.walkPosition * 0.6662f, s = pose.walkSpeed / std::max(pose.limbScale, 1.0f);
         rightArm->rotation[0] = std::cos(p + kPi) * 2.0f * s * 0.5f;
         leftArm->rotation[0] = std::cos(p) * 2.0f * s * 0.5f;
         rightLeg->rotation[0] = std::cos(p) * 1.4f * s;
@@ -151,19 +172,68 @@ void PlayerBodyRenderer::render(const Matrix4f& viewProj, const std::array<doubl
         rightLeg->rotation[1] = leftLeg->rotation[1] = 0.0f;
         rightLeg->rotation[2] = leftLeg->rotation[2] = 0.0f;
         body->rotation[0] = body->rotation[1] = body->rotation[2] = 0.0f;
-        // HumanoidModel.poseRightArm / poseLeftArm with an item in the hand: the arm swings half as far and is held a little forward.
-        if (pose.rightArmItem) {
-            rightArm->rotation[0] = rightArm->rotation[0] * 0.5f - 0.31415927f;
-            rightArm->rotation[1] = 0.0f;
+        if (pose.riding) {  // sitting: the arms a little forward, the legs out in front, a little apart
+            rightArm->rotation[0] += -kPi / 5.0f;
+            leftArm->rotation[0] += -kPi / 5.0f;
+            rightLeg->rotation[0] = -1.4137167f;
+            rightLeg->rotation[1] = kPi / 10.0f;
+            rightLeg->rotation[2] = 0.07853982f;
+            leftLeg->rotation[0] = -1.4137167f;
+            leftLeg->rotation[1] = -kPi / 10.0f;
+            leftLeg->rotation[2] = -0.07853982f;
         }
-        if (pose.leftArmItem) {
-            leftArm->rotation[0] = leftArm->rotation[0] * 0.5f - 0.31415927f;
-            leftArm->rotation[1] = 0.0f;
+        // HumanoidModel.poseRightArm / poseLeftArm: how each arm is held by what is in the hand and what it is doing
+        const float headY = head != nullptr ? head->rotation[1] : 0.0f, headX = head != nullptr ? head->rotation[0] : 0.0f;
+        const auto poseArm = [&](bool left) {
+            EntityPart* arm = left ? leftArm : rightArm;
+            const ArmPose armPose = left ? pose.leftArmPose : pose.rightArmPose;
+            switch (armPose) {
+                case ArmPose::Empty: arm->rotation[1] = 0.0f; break;
+                case ArmPose::Item:
+                    arm->rotation[0] = arm->rotation[0] * 0.5f - 0.31415927f;
+                    arm->rotation[1] = 0.0f;
+                    break;
+                case ArmPose::Block:
+                    arm->rotation[0] = arm->rotation[0] * 0.5f - 0.9424779f;
+                    arm->rotation[1] = left ? kPi / 6.0f : -kPi / 6.0f;
+                    break;
+                case ArmPose::ThrowTrident:
+                    arm->rotation[0] = arm->rotation[0] * 0.5f - kPi;
+                    arm->rotation[1] = 0.0f;
+                    break;
+                case ArmPose::BowAndArrow:  // both arms up along the look, the string hand a little in
+                    rightArm->rotation[1] = (left ? -0.1f - 0.4f : -0.1f) + headY;
+                    leftArm->rotation[1] = (left ? 0.1f : 0.1f + 0.4f) + headY;
+                    rightArm->rotation[0] = -kPi / 2.0f + headX;
+                    leftArm->rotation[0] = -kPi / 2.0f + headX;
+                    break;
+                case ArmPose::Spyglass:
+                    arm->rotation[0] = std::clamp(headX - 1.9198622f - (pose.crouching ? 0.2617994f : 0.0f), -2.4f, 3.3f);
+                    arm->rotation[1] = headY + (left ? 0.2617994f : -0.2617994f);
+                    break;
+                case ArmPose::TootHorn:
+                    arm->rotation[0] = std::clamp(headX, -1.2f, 1.2f) - 1.4835298f;
+                    arm->rotation[1] = headY + (left ? kPi / 6.0f : -kPi / 6.0f);
+                    break;
+                case ArmPose::Brush:
+                    arm->rotation[0] = arm->rotation[0] * 0.5f - kPi / 5.0f;
+                    arm->rotation[1] = 0.0f;
+                    break;
+            }
+        };
+        if (pose.leftArmPose == ArmPose::BowAndArrow) {  // (the arm that draws the bow is posed last: it sets both)
+            poseArm(false);
+            poseArm(true);
+        } else {
+            poseArm(true);
+            poseArm(false);
         }
-        // setupAttackAnim: the body turns a little and the right arm swings across.
+        // setupAttackAnim: the body turns a little and the swinging arm (the main one, or the other for the off hand) swings across.
         const float t = pose.attackProgress;
+        const bool swingLeft = pose.leftHanded != pose.swingOffHand;
+        EntityPart* swingArm = swingLeft ? leftArm : rightArm;
         if (t > 0.0f) {
-            body->rotation[1] = std::sin(std::sqrt(t) * kPi * 2.0f) * 0.2f;
+            body->rotation[1] = std::sin(std::sqrt(t) * kPi * 2.0f) * (swingLeft ? -0.2f : 0.2f);
             const float by = body->rotation[1];
             rightArm->offset[2] = std::sin(by) * 5.0f;
             rightArm->offset[0] = -std::cos(by) * 5.0f;
@@ -176,9 +246,9 @@ void PlayerBodyRenderer::render(const Matrix4f& viewProj, const std::array<doubl
             f = 1.0f - f * f * f * f;
             const float g = std::sin(f * kPi);
             const float h = std::sin(t * kPi) * -(head != nullptr ? head->rotation[0] - 0.7f : -0.7f) * 0.75f;
-            rightArm->rotation[0] -= g * 1.2f + h;
-            rightArm->rotation[1] += by * 2.0f;
-            rightArm->rotation[2] += std::sin(t * kPi) * -0.4f;
+            swingArm->rotation[0] -= g * 1.2f + h;
+            swingArm->rotation[1] += by * 2.0f;
+            swingArm->rotation[2] += std::sin(t * kPi) * -0.4f;
         } else {
             rightArm->offset[0] = -5.0f;
             leftArm->offset[0] = 5.0f;
@@ -238,13 +308,16 @@ void PlayerBodyRenderer::render(const Matrix4f& viewProj, const std::array<doubl
     // shrunk to 0.9375 and dropped by 1.501.
     const double crouchDrop = pose.crouching ? -2.0 / 16.0 : 0.0;
     Xf entity = mul(scaling({-0.9375, -0.9375, 0.9375}), translation({0.0, -1.501, 0.0}));
-    if (pose.swimAmount > 0.0f) {  // PlayerRenderer.setupRotations: lying down by the pitch of the view (straight down out of the water), and lower and forward
+    if (pose.fallFlying) {  // AvatarRenderer.setupRotations: leaning into the flight, and turned toward where it is going
+        entity = mul(mul(rotX(static_cast<double>(pose.glideLean) * static_cast<double>(kDegrees)), rotY(static_cast<double>(pose.glideTurn))), entity);
+    } else if (pose.swimAmount > 0.0f) {  // PlayerRenderer.setupRotations: lying down by the pitch of the view (straight down out of the water), and lower and forward
         const float target = pose.inWater ? -90.0f - pose.headPitch : -90.0f;
         const float lie = target * pose.swimAmount;
         Xf lay = rotX(static_cast<double>(lie) * static_cast<double>(kDegrees));
         if (pose.visuallySwimming) lay = mul(lay, translation({0.0, -1.0, 0.3}));
         entity = mul(lay, entity);
     }
+    if (pose.deathAngle > 0.0f) entity = mul(rotZ(static_cast<double>(pose.deathAngle) * static_cast<double>(kDegrees)), entity);  // (a dying body falls over on its side)
     entity = mul(rotY((180.0 - static_cast<double>(pose.bodyYaw)) * static_cast<double>(kDegrees)), entity);
     entity = mul(translation({pose.position[0] - cam[0], pose.position[1] - cam[1] + crouchDrop, pose.position[2] - cam[2]}), entity);
     if (hands != nullptr && rightArm != nullptr && leftArm != nullptr) {  // the arms as they are posed: what an item in the hand is placed from
@@ -275,6 +348,7 @@ void PlayerBodyRenderer::render(const Matrix4f& viewProj, const std::array<doubl
     gl::UniformMatrix4fv(uProj_, 1, 0, viewProj.m.data());
     gl::Uniform3f(uLight_, pose.light[0], pose.light[1], pose.light[2]);
     gl::Uniform1i(uSkin_, 0);
+    gl::Uniform1f(uHurt_, pose.hurt);
     gl::BindVertexArray(vao_);
     gl::BindBuffer(gl::ARRAY_BUFFER, vbo_);
     const auto draw = [&](const std::vector<Vertex>& list, const Texture2D& texture, float r, float g, float b) {
@@ -304,6 +378,23 @@ void PlayerBodyRenderer::render(const Matrix4f& viewProj, const std::array<doubl
         draw(list, *texture, leather ? 0.627f : 1.0f, leather ? 0.396f : 1.0f, leather ? 0.251f : 1.0f);  // (0xA06540: the colour of undyed leather)
         if (leather) {
             if (const Texture2D* overlay = armorTexture(slot == 2 ? "humanoid_leggings" : "humanoid", "leather_overlay")) draw(list, *overlay, 1.0f, 1.0f, 1.0f);
+        }
+    }
+    if (pose.elytra && haveElytra_) {  // WingsLayer: the wings, two sixteenths behind the body, held as ElytraAnimationState says (lifted three when crouching)
+        if (const Texture2D* wingTexture = elytraTexture()) {
+            EntityPart wings = elytraModel_;
+            EntityPart* leftWing = wings.find("left_wing");
+            EntityPart* rightWing = wings.find("right_wing");
+            if (leftWing != nullptr && rightWing != nullptr) {
+                const float lift = pose.crouching ? 3.0f : 0.0f;
+                leftWing->offset = {5.0f, lift, 0.0f};
+                leftWing->rotation = {pose.elytraX, pose.elytraY, pose.elytraZ};
+                rightWing->offset = {-5.0f, lift, 0.0f};
+                rightWing->rotation = {pose.elytraX, -pose.elytraY, -pose.elytraZ};
+                std::vector<Vertex> list;
+                collect(wings, Xf{}, mul(entity, translation({0.0, 0.0, 0.125})), pose.parts, list);
+                draw(list, *wingTexture, 1.0f, 1.0f, 1.0f);
+            }
         }
     }
     gl::BindVertexArray(0);

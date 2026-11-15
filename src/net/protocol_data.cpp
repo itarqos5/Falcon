@@ -713,6 +713,66 @@ bool readComponentValueDepth(Reader& r, int type, const ComponentIds& ids, ItemS
 
 }  // namespace
 
+ParticleData particleDataOf(const std::string& rawName) {
+    static const std::unordered_map<std::string, ParticleData> kTable = {
+        {"block", ParticleData::BlockState}, {"block_marker", ParticleData::BlockState}, {"falling_dust", ParticleData::BlockState}, {"dust_pillar", ParticleData::BlockState},
+        {"block_crumble", ParticleData::BlockState}, {"geyser", ParticleData::Int}, {"geyser_plume", ParticleData::Int}, {"geyser_base", ParticleData::IntFloat},
+        {"geyser_poof", ParticleData::IntFloat}, {"dragon_breath", ParticleData::Float}, {"dust", ParticleData::IntFloat}, {"dust_color_transition", ParticleData::TwoIntsFloat},
+        {"effect", ParticleData::IntFloat}, {"instant_effect", ParticleData::IntFloat}, {"entity_effect", ParticleData::Int}, {"tinted_leaves", ParticleData::Int},
+        {"flash", ParticleData::Int}, {"sculk_charge", ParticleData::Float}, {"shriek", ParticleData::VarInt}, {"trail", ParticleData::Trail}, {"item", ParticleData::Item},
+        {"vibration", ParticleData::Vibration},
+    };
+    std::string name = rawName;
+    if (name.compare(0, 10, "minecraft:") == 0) name.erase(0, 10);
+    const auto it = kTable.find(name);
+    return it == kTable.end() ? ParticleData::None : it->second;
+}
+
+bool skipParticle(Reader& r, const std::unordered_map<int, ParticleData>& kinds, const ComponentIds& ids) {
+    const int type = r.varint();
+    const auto it = kinds.find(type);
+    switch (it == kinds.end() ? ParticleData::None : it->second) {
+        case ParticleData::None: break;
+        case ParticleData::BlockState:
+        case ParticleData::VarInt: r.varint(); break;
+        case ParticleData::Int: r.i32(); break;
+        case ParticleData::IntFloat:
+            r.i32();
+            r.f32();
+            break;
+        case ParticleData::Float: r.f32(); break;
+        case ParticleData::TwoIntsFloat:
+            r.i32();
+            r.i32();
+            r.f32();
+            break;
+        case ParticleData::Trail:
+            r.f64();
+            r.f64();
+            r.f64();
+            r.i32();
+            r.varint();
+            break;
+        case ParticleData::Item: return readItemTemplate(r, ids, 0);
+        case ParticleData::Vibration: {
+            const int source = r.varint();  // where it goes: to a block, or to an entity
+            if (source == 0) {
+                r.i64();
+            } else if (source == 1) {
+                r.varint();
+                r.f32();
+            } else {
+                return false;
+            }
+            r.varint();
+            break;
+        }
+    }
+    return r.ok;
+}
+
+bool skipResolvableProfile(Reader& r) { return readComponentKind(r, ComponentKind::Profile, ComponentIds{}, nullptr, 0); }
+
 // The value of a component of this type (the type's number has been read): kept in the stack where the stack has a place for it (the damage, a name, a colour), stepped over otherwise.
 // False for a type whose layout is not known here: nothing more of the stack (or of the list it is in) can be read.
 bool readComponentValue(Reader& r, int type, const ComponentIds& ids, ItemStack* stack) { return readComponentValueDepth(r, type, ids, stack, 0); }

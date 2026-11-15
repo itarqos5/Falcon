@@ -158,6 +158,25 @@ std::vector<std::string> soundEventNames(const std::filesystem::path& dataRoot) 
     return names;
 }
 
+// What each particle type of the game's registry carries after its number (needed to step over the particles in entity data).
+std::unordered_map<int, net::ParticleData> particleKinds(const std::filesystem::path& dataRoot) {
+    std::unordered_map<int, net::ParticleData> kinds;
+    std::ifstream in(dataRoot / "registries.json", std::ios::binary);
+    if (!in) return kinds;
+    const nlohmann::json doc = nlohmann::json::parse(in, nullptr, false);
+    if (!doc.is_object()) return kinds;
+    const auto registry = doc.find("minecraft:particle_type");
+    if (registry == doc.end()) return kinds;
+    const auto entries = registry->find("entries");
+    if (entries == registry->end()) return kinds;
+    for (const auto& [name, entry] : entries->items()) {
+        const int number = entry.value("protocol_id", -1);
+        const net::ParticleData kind = net::particleDataOf(name);
+        if (number >= 0 && kind != net::ParticleData::None) kinds[number] = kind;
+    }
+    return kinds;
+}
+
 // The numbers of the item components that can be read (the game's data component type registry).
 net::ComponentIds componentIds(const std::filesystem::path& dataRoot) {
     net::ComponentIds ids;
@@ -238,6 +257,7 @@ bool GameSession::connectRemote(const std::string& host, int port, const std::st
         if (const auto item = itemRegistry().find(kThrownItems[i]); type >= 0 && item) thrownItems_[type] = *item;
     }
     remote_->setComponentIds(componentIds(dataRoot_));
+    remote_->setParticleKinds(particleKinds(dataRoot_));
     remote_->setSoundNames(soundEventNames(dataRoot_));
     menuTypeNames_ = menuTypeNameList(dataRoot_);
     physics_.reset();  // the server runs the world: no falling blocks, fire, redstone or random ticks of ours on its chunks
@@ -875,16 +895,45 @@ void GameSession::renderRemotePlayers(const std::array<double, 3>& camPos) {
             mobs_->render(renderer_.viewProjection(), camPos, *type, mob);
             continue;
         }
+        // Who is not seen: the invisible (the flag of entity data 0) and, unless this player is one too, spectators.
+        if ((p.entityFlags & 32) != 0) continue;
+        if (const net::TabEntry* listed = remote_->tabEntry(p.id); listed != nullptr && listed->gameMode == 3 && info_.gameType != 3) continue;
         BodyPose pose;
         pose.position = {p.xo + (p.x - p.xo) * partialTick_, p.yo + (p.y - p.yo) * partialTick_, p.zo + (p.z - p.zo) * partialTick_};
-        const float bodyYaw = p.bodyYawO + wrap(p.bodyYaw - p.bodyYawO) * t;  // (the body follows the walk; the head turns on it)
+        const float headYaw = p.headYawO + wrap(p.headYaw - p.headYawO) * t;
+        const float lookPitch = p.pitchO + (p.pitch - p.pitchO) * t;
+        const float lookYaw = p.yawO + wrap(p.yaw - p.yawO) * t;
+        float bodyYaw = p.bodyYawO + wrap(p.bodyYaw - p.bodyYawO) * t;  // (the body follows the walk; the head turns on it)
+        const net::RemotePlayer* mount = p.vehicle >= 0 ? [&]() -> const net::RemotePlayer* {
+            const auto it = remote_->players().find(p.vehicle);
+            return it == remote_->players().end() ? nullptr : &it->second;
+        }() : nullptr;
+        pose.riding = mount != nullptr;
+        if (mount != nullptr) {  // LivingEntityRenderer: on a mount the body goes where the mount does (a boat or a minecart turns it altogether, a living mount holds it within 85 degrees of the head)
+            const float mountYaw = mount->yawO + wrap(mount->yaw - mount->yawO) * t;
+            const std::string* mountType = remote_->mobName(mount->type);
+            const bool vehicle = mountType != nullptr && (mountType->find("boat") != std::string::npos || mountType->find("raft") != std::string::npos || mountType->find("minecart") != std::string::npos);
+            if (vehicle) {
+                bodyYaw = mountYaw;
+            } else {
+                float diff = std::clamp(wrap(headYaw - mountYaw), -85.0f, 85.0f);
+                bodyYaw = headYaw - diff;
+                if (std::abs(diff) > 50.0f) bodyYaw += diff * 0.2f;
+            }
+        }
         pose.bodyYaw = bodyYaw;
-        pose.headYaw = wrap((p.headYawO + wrap(p.headYaw - p.headYawO) * t) - bodyYaw);
-        pose.headPitch = p.pitchO + (p.pitch - p.pitchO) * t;
+        pose.headYaw = wrap(headYaw - bodyYaw);
+        pose.headPitch = lookPitch;
         pose.walkPosition = p.walkPosition - p.walkSpeed * (1.0f - t);
-        pose.walkSpeed = std::min(1.0f, p.walkSpeedO + (p.walkSpeed - p.walkSpeedO) * t);
-        pose.attackProgress = p.swing;
-        pose.crouching = p.sneaking;
+        pose.walkSpeed = pose.riding ? 0.0f : std::min(1.0f, p.walkSpeedO + (p.walkSpeed - p.walkSpeedO) * t);
+        {  // LivingEntity.getAttackAnim: the swing between two ticks (a swing that has just started over again wraps)
+            float step = p.swing - p.swingO;
+            if (step < 0.0f) step += 1.0f;
+            pose.attackProgress = p.swing == 0.0f && p.swingO == 0.0f ? 0.0f : p.swingO + step * t;
+        }
+        pose.leftHanded = p.mainArmLeft;
+        pose.swingOffHand = p.swingOffHand;
+        pose.crouching = p.sneaking && !pose.riding;
         pose.skin = net::defaultSkinOf(p.id);
         if (const net::SkinInfo* own = remote_->skinOf(p.id)) {  // a skin of their own, once it has come
             if (const auto texture = skinTextures_.find(own->hash); texture != skinTextures_.end()) {
@@ -892,6 +941,7 @@ void GameSession::renderRemotePlayers(const std::array<double, 3>& camPos) {
                 pose.customSlim = own->slim;
             }
         }
+        for (std::size_t part = 0; part < pose.parts.size(); ++part) pose.parts[part] = (p.skinParts >> part & 1) != 0;  // the Skin Customization they chose
         pose.ageTicks = playerAgeTicks_ + partialTick_;
         int sky = 15, block = 0;
         renderer_.lightAtWithCarried(static_cast<int>(std::floor(pose.position[0])), static_cast<int>(std::floor(pose.position[1] + 1.0)), static_cast<int>(std::floor(pose.position[2])), sky, block);
@@ -900,13 +950,65 @@ void GameSession::renderRemotePlayers(const std::array<double, 3>& camPos) {
             const ItemStack& worn = p.equipment[5 - i];
             if (!worn.isEmpty() && worn.type().armorSlot != EquipSlot::None) pose.armor[i] = worn.type().name;
         }
-        pose.rightArmItem = !p.equipment[0].isEmpty();
-        pose.leftArmItem = !p.equipment[1].isEmpty();
+        pose.elytra = !p.equipment[4].isEmpty() && p.equipment[4].type().name == "elytra";
+        pose.elytraX = p.elytraXO + (p.elytraX - p.elytraXO) * t;
+        pose.elytraY = p.elytraYO + (p.elytraY - p.elytraYO) * t;
+        pose.elytraZ = p.elytraZO + (p.elytraZ - p.elytraZO) * t;
+        // Swimming (Player.getSwimAmount) and what the game needs for it: whether the water is round them (the body then follows the view's pitch)
+        pose.swimAmount = p.swimAmountO + (p.swimAmount - p.swimAmountO) * t;
+        pose.visuallySwimming = p.pose == 3;
+        {
+            const BlockRegistry& registry = blockRegistry();
+            const Block at = renderer_.level().block(static_cast<int>(std::floor(pose.position[0])), static_cast<int>(std::floor(pose.position[1] + 0.4)), static_cast<int>(std::floor(pose.position[2])));
+            pose.inWater = registry.state(at).has(kStateWater);
+        }
+        // Gliding (AvatarRenderer.setupRotations): the body leans over as it picks up speed, and turns toward where it is going when that is not where it looks
+        if ((p.entityFlags & 0x80) != 0) {
+            pose.fallFlying = true;
+            const float flown = static_cast<float>(p.fallFlyingTicks) + t;
+            pose.glideLean = std::clamp(flown * flown / 100.0f, 0.0f, 1.0f) * (-90.0f - lookPitch);
+            const double deltaX = p.deltaXO + (p.deltaX - p.deltaXO) * partialTick_, deltaY = p.deltaYO + (p.deltaY - p.deltaYO) * partialTick_, deltaZ = p.deltaZO + (p.deltaZ - p.deltaZO) * partialTick_;
+            const double yawRad = static_cast<double>(lookYaw) * 0.017453292519943295, pitchRad = static_cast<double>(lookPitch) * 0.017453292519943295;
+            const double viewX = -std::sin(yawRad) * std::cos(pitchRad), viewZ = std::cos(yawRad) * std::cos(pitchRad);
+            const double moving = deltaX * deltaX + deltaZ * deltaZ, looking = viewX * viewX + viewZ * viewZ;
+            if (moving > 1.0E-5 && looking > 1.0E-5) {
+                const double dot = std::clamp((deltaX * viewX + deltaZ * viewZ) / std::sqrt(moving * looking), -1.0, 1.0);
+                const double cross = deltaX * viewZ - deltaZ * viewX;
+                pose.glideTurn = static_cast<float>((cross > 0.0 ? 1.0 : cross < 0.0 ? -1.0 : 0.0) * std::acos(dot));
+            }
+            double k = (deltaX * deltaX + deltaY * deltaY + deltaZ * deltaZ) / 0.2;  // (HumanoidModel: the limbs hardly swing at speed)
+            k = k * k * k;
+            pose.limbScale = static_cast<float>(std::max(1.0, k));
+        }
+        pose.hurt = p.hurtTime > 0 || p.deathTime > 0 ? 1.0f : 0.0f;
+        if (p.deathTime > 0) {
+            const float fallen = std::sqrt(std::max(0.0f, (static_cast<float>(p.deathTime) + t - 1.0f) / 20.0f * 1.6f));
+            pose.deathAngle = std::min(fallen, 1.0f) * 90.0f;
+        }
+        // The arms (AvatarRenderer.getArmPose): an item in the hand is held forward, a shield blocks, a bow is drawn, a spyglass is held to the eye ... when it is being used
+        const bool using_ = (p.livingFlags & 1) != 0;
+        const bool usingOffHand = (p.livingFlags & 2) != 0;
+        const auto armPoseOf = [&](const ItemStack& stack, bool beingUsed) {
+            if (stack.isEmpty()) return ArmPose::Empty;
+            if (beingUsed) {
+                const std::string& name = stack.type().name;
+                if (name == "shield") return ArmPose::Block;
+                if (name == "bow") return ArmPose::BowAndArrow;
+                if (name == "trident" || (name.size() > 6 && name.compare(name.size() - 6, 6, "_spear") == 0)) return ArmPose::ThrowTrident;
+                if (name == "spyglass") return ArmPose::Spyglass;
+                if (name == "goat_horn") return ArmPose::TootHorn;
+                if (name == "brush") return ArmPose::Brush;
+            }
+            return ArmPose::Item;
+        };
+        const ArmPose mainPose = armPoseOf(p.equipment[0], using_ && !usingOffHand), offPose = armPoseOf(p.equipment[1], using_ && usingOffHand);
+        pose.rightArmPose = p.mainArmLeft ? offPose : mainPose;
+        pose.leftArmPose = p.mainArmLeft ? mainPose : offPose;
         BodyHands hands;
         body_->render(renderer_.viewProjection(), camPos, pose, &hands);
-        if (hands.valid) {  // what is held, in the main hand (the right one) and the off hand
-            hand_.renderItemInHand(renderer_, renderer_.viewProjection(), p.equipment[0], hands.right, false, sky, block);
-            hand_.renderItemInHand(renderer_, renderer_.viewProjection(), p.equipment[1], hands.left, true, sky, block);
+        if (hands.valid) {  // what is held: the main hand's item in the main arm, the other in the other
+            hand_.renderItemInHand(renderer_, renderer_.viewProjection(), p.equipment[0], p.mainArmLeft ? hands.left : hands.right, p.mainArmLeft, sky, block);
+            hand_.renderItemInHand(renderer_, renderer_.viewProjection(), p.equipment[1], p.mainArmLeft ? hands.right : hands.left, !p.mainArmLeft, sky, block);
         }
     }
 }

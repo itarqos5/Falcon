@@ -34,11 +34,14 @@ in float vShade;
 uniform sampler2D uSkin;
 uniform vec3 uLight;
 uniform vec3 uTint;
+uniform float uHurt;  // 1 while the red flash of a hit shows (the game mixes 30% red into what is lit, before the light map)
 out vec4 frag;
 void main() {
     vec4 c = texture(uSkin, vUv);
     if (c.a < 0.1) discard;
-    frag = vec4(c.rgb * uTint * vShade * uLight, 1.0);
+    vec3 lit = c.rgb * uTint * vShade;
+    lit = mix(vec3(1.0, 0.0, 0.0), lit, 1.0 - 0.3 * uHurt);
+    frag = vec4(lit * uLight, 1.0);
 }
 )";
 

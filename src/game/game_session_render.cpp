@@ -94,8 +94,8 @@ void GameSession::renderWorld(int framebufferWidth, int framebufferHeight) {
             int sky = 15, block = 0;
             renderer_.lightAtWithCarried(static_cast<int>(std::floor(pose.position[0])), static_cast<int>(std::floor(pose.position[1] + 1.0)), static_cast<int>(std::floor(pose.position[2])), sky, block);
             pose.light = entityLightColor(sky, block, static_cast<float>(services_.options.gamma));
-            pose.rightArmItem = !inventory_.selectedItem().isEmpty();
-            pose.leftArmItem = !inventory_.offhand().isEmpty();
+            pose.rightArmPose = inventory_.selectedItem().isEmpty() ? ArmPose::Empty : ArmPose::Item;
+            pose.leftArmPose = inventory_.offhand().isEmpty() ? ArmPose::Empty : ArmPose::Item;
             BodyHands hands;
             body_->render(renderer_.viewProjection(), camPos, pose, &hands);
             if (hands.valid) {
