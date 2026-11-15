@@ -314,6 +314,15 @@ void test_item_registry_and_recipes_real(const std::filesystem::path& dataDir) {
         CHECK(fuelBurnTicks(S("coal"), StorageKind::Furnace) == 1600 && fuelBurnTicks(S("coal"), StorageKind::BlastFurnace) == 800 && fuelBurnTicks(S("lava_bucket"), StorageKind::Furnace) == 20000 &&
               fuelBurnTicks(S("stone"), StorageKind::Furnace) == 0);
     }
+    {  // what can be eaten or drunk: the time, the animation, the sound and the bottle that is left
+        const ItemType& apple = itemRegistry().item(itemNamed("apple"));
+        CHECK(apple.consumable && std::abs(apple.consumeSeconds - 1.6f) < 1e-6f && apple.consumeAnimation == "eat" && apple.consumeSound == "entity.generic.eat" && apple.consumeParticles);
+        const ItemType& potion = itemRegistry().item(itemNamed("potion"));
+        CHECK(potion.consumable && potion.consumeAnimation == "drink" && potion.consumeSound == "entity.generic.drink" && !potion.consumeParticles && potion.useRemainder == "glass_bottle");
+        const ItemType& honey = itemRegistry().item(itemNamed("honey_bottle"));
+        CHECK(honey.consumable && std::abs(honey.consumeSeconds - 2.0f) < 1e-6f && honey.consumeSound == "item.honey_bottle.drink" && honey.food && honey.food->canAlwaysEat);
+        CHECK(std::abs(itemRegistry().item(itemNamed("dried_kelp")).consumeSeconds - 0.8f) < 1e-6f && !itemRegistry().item(itemNamed("stone")).consumable);
+    }
     // The inventory menu crafts from the real recipes too.
     installRecipeManager(recipes);
     {

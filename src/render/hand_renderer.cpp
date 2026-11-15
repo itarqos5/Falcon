@@ -473,6 +473,17 @@ void HandRenderer::render(WorldRenderer& world, const HandFrame& frame) {
     const double g1 = std::sin(sq * kPi);
     M4 pose = rotX(swayX * 0.1) * rotY(swayY * 0.1) * translate(s * a, b, c) * translate(s * 0.56, -0.52 + static_cast<double>(equip) * -0.6, -0.72) *
               rotY(s * (45.0 + f1 * -20.0)) * rotZ(s * g1 * -20.0) * rotX(g1 * -80.0) * rotY(s * -45.0);
+    if (frame.useDuration > 0) {
+        // FirstPersonHandsAndItemsRenderer.applyEatTransform, then applyItemArmTransform (no attack swing while something is eaten): the item bobs while it is chewed and is
+        // brought to the middle, turned toward the mouth, as the use runs out.
+        const double remaining = static_cast<double>(frame.useRemaining);
+        const double fraction = remaining / static_cast<double>(frame.useDuration);
+        M4 eat = translate(0.0, 0.0, 0.0);
+        if (fraction < 0.8) eat = eat * translate(0.0, std::abs(std::cos(remaining / 4.0 * kPi) * 0.1), 0.0);
+        const double power = 1.0 - std::pow(fraction, 27.0);
+        eat = eat * translate(power * 0.6 * s, power * -0.5, 0.0) * rotY(s * power * 90.0) * rotX(power * 10.0) * rotZ(s * power * 30.0);
+        pose = rotX(swayX * 0.1) * rotY(swayY * 0.1) * eat * translate(s * 0.56, -0.52 + static_cast<double>(equip) * -0.6, -0.72);
+    }
     pose = pose * applyTransform(frame.rightHanded ? model.firstRight : model.firstLeft, !frame.rightHanded) * translate(-0.5, -0.5, -0.5);
 
     const float aspect = static_cast<float>(frame.width) / static_cast<float>(std::max(1, frame.height));

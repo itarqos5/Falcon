@@ -70,6 +70,13 @@ struct ItemType {
     EquipSlot armorSlot = EquipSlot::None;      // the slot the armor attributes apply to
     EquipSlot equipSlot = EquipSlot::None;      // equippable.slot
     int fuelBurnTicks = 0;                      // cooking_fuel burn time: 0 = not a fuel
+    // The "consumable" component: food, potions, milk and the like are used up over consumeSeconds, with the animation "eat" or "drink" and a sound (a sound id such as
+    // "entity.generic.eat"); crumbs fly while eating if consumeParticles.
+    bool consumable = false;
+    float consumeSeconds = 1.6f;
+    std::string consumeAnimation = "eat";
+    std::string consumeSound = "entity.generic.eat";
+    bool consumeParticles = true;
     int blockIndex = -1;                        // the block this item places (index into BlockRegistry::blocks()), or -1
     std::string useRemainder;                   // item left after using it ("bowl" for stews), empty if none
 

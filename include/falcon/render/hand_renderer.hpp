@@ -36,6 +36,10 @@ struct HandFrame {
     int block = 0;
     float brightness = 0.5f;  // the Brightness option
     Matrix4f bob = Matrix4f::identity();  // view bobbing (identity when off)
+    // An item being eaten or drunk (ItemUseAnimation EAT / DRINK): the hand brings it to the mouth. useDuration is the whole use in ticks (0: not being used) and useRemaining
+    // the ticks left, counted as the game does: ticks left - the part of this tick + 1.
+    int useDuration = 0;
+    float useRemaining = 0.0f;
 };
 
 // The player's hand in first person: the bare arm (from the skin) or the held item at the bottom right (or left) of the

@@ -358,6 +358,18 @@ private:
     // ElytraAnimationState: where the wings of the player's own elytra are held (X, Y, Z angles) and where they were a tick ago.
     float elytraX_ = 0.2617994f, elytraY_ = 0.0f, elytraZ_ = -0.2617994f, elytraXO_ = 0.2617994f, elytraYO_ = 0.0f, elytraZO_ = -0.2617994f;
     void wearTestItem();                       // FALCON_TEST_WEAR=item: puts it on once the world is ready (a test aid, for looking at armor and elytra)
+    // ---- eating and drinking (game_session_use.cpp): LivingEntity.startUsingItem / updatingUsingItem / completeUsingItem and Consumable ----
+    bool usingItem_ = false;
+    int useTicksLeft_ = 0;       // ticks of the use that are left
+    int useDuration_ = 0;        // the whole use
+    int usedSlot_ = -1;          // the hotbar slot of the item that is used
+    bool useHeld_ = false;       // the use key is down (set every frame)
+    [[nodiscard]] bool canConsume(const ItemStack& stack) const;  // Consumable.canConsume: food only when hungry (or always eatable, or in creative); anything else always
+    void startUsingItem();
+    void stopUsingItem();
+    void tickUsingItem();
+    void completeUsingItem();
+    void emitUseEffects(const ItemType& type);                    // Consumable.emitParticlesAndSounds: the sound of a bite or a sip
     void tickGlide();                          // what the glide of the player asks of the game (wear on the elytra, a crash, a server told)
     [[nodiscard]] bool gliderUsable();   // elytra are worn and can take one more point of wear (LivingEntity.canGlideUsing)
     float swimAmount_ = 0.0f, swimAmountOld_ = 0.0f;                        // Player.swimAmount: how far into the swimming pose (0 to 1)

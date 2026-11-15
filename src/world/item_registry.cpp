@@ -83,7 +83,7 @@ private:
 // ---------------------------------------------------------------------------------------------------------------
 // The binary cache: the parsed items (without block links, which come from the block registry) in one small file.
 
-constexpr char kCacheMagic[4] = {'F', 'I', 'R', '1'};
+constexpr char kCacheMagic[4] = {'F', 'I', 'R', '2'};
 
 struct Fingerprint {
     std::uint64_t size[2] = {};
@@ -175,6 +175,11 @@ public:
             put(out, static_cast<std::uint8_t>(t.armorSlot));
             put(out, static_cast<std::uint8_t>(t.equipSlot));
             put(out, t.fuelBurnTicks);
+            put(out, static_cast<std::uint8_t>(t.consumable));
+            put(out, t.consumeSeconds);
+            putString(out, t.consumeAnimation);
+            putString(out, t.consumeSound);
+            put(out, static_cast<std::uint8_t>(t.consumeParticles));
         }
         out.close();
         if (out) {
@@ -207,7 +212,11 @@ public:
             }
             ok = get(in, t.attackDamageBonus) && get(in, t.attackSpeedBonus) && get(in, hasAttack) && get(in, t.armor) && get(in, t.armorToughness) &&
                  get(in, armorSlot) && get(in, equipSlot) && get(in, t.fuelBurnTicks);
+            std::uint8_t consumable = 0, consumeParticles = 0;
+            ok = ok && get(in, consumable) && get(in, t.consumeSeconds) && getString(in, t.consumeAnimation) && getString(in, t.consumeSound) && get(in, consumeParticles);
             if (!ok) return false;
+            t.consumable = consumable != 0;
+            t.consumeParticles = consumeParticles != 0;
             t.rarity = static_cast<Rarity>(rarity);
             t.glint = glint != 0;
             if (hasFood != 0) t.food = food;
@@ -344,6 +353,13 @@ std::shared_ptr<const ItemRegistry> ItemRegistry::loadFromGameData(const fs::pat
                         const json& bt = (*fuel)["burn_time"];
                         t.fuelBurnTicks = bt.is_number() ? bt.get<int>() : bt.is_string() ? providers.resolve(bt.get<std::string>()) : 0;
                     }
+                }
+                if (const auto cons = c.find("minecraft:consumable"); cons != c.end() && cons->is_object()) {
+                    t.consumable = true;
+                    t.consumeSeconds = cons->value("consume_seconds", 1.6f);
+                    t.consumeAnimation = cons->value("animation", std::string("eat"));
+                    if (const auto sound = cons->find("sound"); sound != cons->end() && sound->is_string()) t.consumeSound = std::string(stripNamespace(sound->get<std::string>()));
+                    t.consumeParticles = cons->value("has_consume_particles", true);
                 }
                 if (const auto r = c.find("minecraft:use_remainder"); r != c.end() && r->is_object()) {
                     t.useRemainder = std::string(stripNamespace(r->value("id", std::string())));

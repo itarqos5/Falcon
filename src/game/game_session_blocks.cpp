@@ -221,6 +221,7 @@ void GameSession::interact(double dt, bool active) {
     placeCooldown_ = std::max(0.0, placeCooldown_ - dt);
     if (!active) {  // a screen open lets go of a toggled key
         attackLatched_ = useLatched_ = attackRawO_ = useRawO_ = false;
+        useHeld_ = false;
         return;
     }
     // Spectators do nothing; adventure players cannot break or place blocks (on a server they can still hit).
@@ -234,6 +235,7 @@ void GameSession::interact(double dt, bool active) {
     useRawO_ = useRaw;
     bool attack = services_.options.toggleAttack ? attackLatched_ : attackRaw;
     const bool use = services_.options.toggleUse ? useLatched_ : useRaw;
+    useHeld_ = use;
     const bool pressed = attack;
     const bool freshPress = pressed && !digHeld_;
     if (remote_ && attack) {  // a player or mob under the crosshair, nearer than what is behind it, is hit (not dug at): the server is told, the arm swings, the attack timer starts over
@@ -286,12 +288,14 @@ void GameSession::interact(double dt, bool active) {
             remote_->sendUseItem(player_.yaw, player_.pitch);
             usingRemote_ = true;
             placeCooldown_ = kRepeatDelay;
+            if (!usingItem_ && held.type().consumable && canConsume(held)) startUsingItem();  // (the bites are heard and the hand brings it up while the server counts)
         }
         if (!use && usingRemote_) {
             remote_->sendAction(5);  // RELEASE_USE_ITEM
             usingRemote_ = false;
         }
     }
+    if (usingItem_) return;  // (LocalPlayer.isHandsBusy: nothing is dug, hit or put down while something is eaten)
     if (attack && !target_ && breakCooldown_ <= 0.0) {  // a swing at the air: the attack cooldown starts over
         breakCooldown_ = kRepeatDelay;
         swingArm();
@@ -299,6 +303,12 @@ void GameSession::interact(double dt, bool active) {
     }
     if (attack && !creative()) digSurvival(dt, freshPress);
     if (use && placeCooldown_ <= 0.0 && !remote_ && !inventory_.selectedItem().isEmpty()) {  // (on a server the click goes to it)
+        // Food, a potion, milk ...: using it starts (a block item, a carrot say, is put down first when there is a place for it).
+        if (!usingItem_ && inventory_.selectedItem().type().consumable && (!target_ || inventory_.selectedItem().type().blockIndex < 0) && canConsume(inventory_.selectedItem())) {
+            startUsingItem();
+            placeCooldown_ = kRepeatDelay;
+            return;
+        }
         // Equippable.swapWithEquipmentSlot: armor used in the hand (aimed at a block or at the air) goes on, and what was worn there comes into the hand.
         const EquipSlot armorSlot = inventory_.selectedItem().type().armorSlot;
         if (armorSlot == EquipSlot::Head || armorSlot == EquipSlot::Chest || armorSlot == EquipSlot::Legs || armorSlot == EquipSlot::Feet) {

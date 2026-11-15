@@ -63,6 +63,8 @@ void GameSession::tickPlayer(double seconds, bool steering) {
                 tickRiding(input);
             } else {
                 if (ridingEntity_ >= 0 || boat_) leaveVehicle();
+                tickUsingItem();
+                player_.usingItem = usingItem_;
                 player_.gliderEquipped = gliderUsable();
                 player_.tick(input, renderer_.level());
                 tickGlide();

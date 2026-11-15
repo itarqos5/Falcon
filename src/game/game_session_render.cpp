@@ -124,6 +124,10 @@ void GameSession::renderWorld(int framebufferWidth, int framebufferHeight) {
         if (cam.bobX != 0.0f || cam.bobY != 0.0f || cam.bobRollDegrees != 0.0f || cam.bobPitchDegrees != 0.0f) {
             frame.bob = bobTransform(cam.bobX, cam.bobY, cam.bobRollDegrees, cam.bobPitchDegrees);
         }
+        if (usingItem_ && useDuration_ > 0) {
+            frame.useDuration = useDuration_;
+            frame.useRemaining = static_cast<float>(useTicksLeft_) - static_cast<float>(partialTick_) + 1.0f;
+        }
         hand_.render(renderer_, frame);
     }
     renderer_.endFrame();
