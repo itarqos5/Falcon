@@ -8,6 +8,11 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
+#else
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <unistd.h>
 #endif
 
 namespace falcon {
@@ -36,6 +41,22 @@ std::shared_ptr<const MappedFile> MappedFile::open(const std::filesystem::path& 
             return result;
         }
     }
+#else
+    const int descriptor = ::open(file.c_str(), O_RDONLY | O_CLOEXEC);
+    if (descriptor < 0) return nullptr;
+    struct stat info{};
+    if (fstat(descriptor, &info) != 0 || !S_ISREG(info.st_mode) || info.st_size <= 0) {
+        ::close(descriptor);
+        return nullptr;
+    }
+    void* view = mmap(nullptr, static_cast<std::size_t>(info.st_size), PROT_READ, MAP_PRIVATE, descriptor, 0);
+    ::close(descriptor);  // the mapping keeps the file
+    if (view != MAP_FAILED) {
+        result->data_ = static_cast<const unsigned char*>(view);
+        result->size_ = static_cast<std::size_t>(info.st_size);
+        result->mapped_ = true;
+        return result;
+    }
 #endif
 
     std::ifstream in(file, std::ios::binary);
@@ -48,8 +69,11 @@ std::shared_ptr<const MappedFile> MappedFile::open(const std::filesystem::path& 
 }
 
 MappedFile::~MappedFile() {
+    if (!mapped_) return;
 #ifdef _WIN32
-    if (mapped_) UnmapViewOfFile(data_);
+    UnmapViewOfFile(data_);
+#else
+    munmap(const_cast<unsigned char*>(data_), size_);
 #endif
 }
 

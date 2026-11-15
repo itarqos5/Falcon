@@ -1,5 +1,7 @@
 #include "falcon/platform/clipboard.hpp"
 
+#ifdef _WIN32
+
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
@@ -41,3 +43,22 @@ void setClipboardText(const std::string& utf8) {
 }
 
 }  // namespace falcon
+
+#else
+
+// X11 and Wayland both: GLFW owns the selection. It is read and written on the thread that made the window (the game's own), which is where the text boxes call this from.
+#define GLFW_INCLUDE_NONE
+#include <GLFW/glfw3.h>
+
+namespace falcon {
+
+std::string clipboardText() {
+    const char* text = glfwGetClipboardString(nullptr);
+    return text != nullptr ? std::string(text) : std::string();
+}
+
+void setClipboardText(const std::string& utf8) { glfwSetClipboardString(nullptr, utf8.c_str()); }
+
+}  // namespace falcon
+
+#endif

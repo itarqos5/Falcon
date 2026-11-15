@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
+#include <fstream>
 #include <thread>
 
 #ifdef _WIN32
@@ -18,7 +19,7 @@ namespace falcon {
 
 namespace {
 
-std::string lower(std::string s) {
+[[maybe_unused]] std::string lower(std::string s) {  // (the video memory lookup and the ARM CPU name use it; neither exists on every system)
     for (char& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
     return s;
 }
@@ -38,6 +39,15 @@ std::string cpuBrand() {
     }
     return text;
 #else
+    // (not x86: the kernel's list has the name, on ARM as "Model name" or "Hardware")
+    std::ifstream in("/proc/cpuinfo");
+    std::string line;
+    while (std::getline(in, line)) {
+        const std::size_t colon = line.find(':');
+        if (colon == std::string::npos) continue;
+        const std::string key = lower(line.substr(0, colon));
+        if (key.rfind("model name", 0) == 0 || key.rfind("hardware", 0) == 0) return line.substr(colon + 1);
+    }
     return {};
 #endif
 }
@@ -58,7 +68,18 @@ std::string operatingSystem() {
     }
     return "Windows";
 #else
-    return "unknown";
+    // /etc/os-release: PRETTY_NAME="Ubuntu 24.04.1 LTS"
+    for (const char* file : {"/etc/os-release", "/usr/lib/os-release"}) {
+        std::ifstream in(file);
+        std::string line;
+        while (std::getline(in, line)) {
+            if (line.rfind("PRETTY_NAME=", 0) != 0) continue;
+            std::string name = line.substr(12);
+            if (name.size() >= 2 && (name.front() == '"' || name.front() == '\'') && name.back() == name.front()) name = name.substr(1, name.size() - 2);
+            if (!name.empty()) return name;
+        }
+    }
+    return "Linux";
 #endif
 }
 
@@ -128,6 +149,17 @@ SystemMemory systemMemory() {
     if (GlobalMemoryStatusEx(&status) != 0) {
         m.total = status.ullTotalPhys;
         m.available = status.ullAvailPhys;
+    }
+#else
+    // /proc/meminfo, in kibibytes: "MemTotal:  16314424 kB"
+    std::ifstream in("/proc/meminfo");
+    std::string name;
+    unsigned long long kib = 0;
+    std::string unit;
+    while (in >> name >> kib) {
+        std::getline(in, unit);  // (the rest of the line: " kB")
+        if (name == "MemTotal:") m.total = kib * 1024ull;
+        else if (name == "MemAvailable:") m.available = kib * 1024ull;
     }
 #endif
     return m;

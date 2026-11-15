@@ -11,6 +11,10 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+#else
+#include <sys/resource.h>
+#include <sys/syscall.h>
+#include <unistd.h>
 #endif
 
 namespace falcon {
@@ -516,6 +520,8 @@ ItemIcons::~ItemIcons() {
 void ItemIcons::workerLoop() {
 #ifdef _WIN32
     SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);  // pictures can wait; a game running beside this one cannot
+#else
+    setpriority(PRIO_PROCESS, static_cast<id_t>(syscall(SYS_gettid)), 5);  // (on Linux a "nice" value belongs to a thread: this one only)
 #endif
     for (;;) {
         ItemStack stack;
