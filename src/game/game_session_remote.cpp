@@ -947,59 +947,106 @@ void GameSession::drawNameTags(GuiGraphics& g, int guiWidth, int guiHeight, cons
     }
 }
 
-// PlayerTabOverlay: the header, the columns of names (twenty to a column) with the head and the ping, the footer; shown while the player list key is held.
+// PlayerTabOverlay.extractRenderState, shown while the player list key is held: the header, then the players (the first 80, in the order of the game's comparator) in columns of
+// up to twenty, each with the head from their own skin (when the connection is encrypted, as the game does), the name (italic for a spectator, dimmed) and the ping bars, then the footer.
+// The score column of a list objective (hearts, numbers) is not drawn: the scoreboard is not followed.
+// (FALCON_TEST_TAB=1: shows the list with made-up players, with no server, for a look at the layout; a test aid.)
 void GameSession::drawPlayerList(GuiGraphics& g, int guiWidth) {
-    if (!remote_ || !isDown("key.playerlist")) return;
-    const std::vector<net::TabEntry> entries = remote_->tabList();
-    const int count = static_cast<int>(std::min<std::size_t>(entries.size(), 80));
-    int widest = 0;
-    for (int i = 0; i < count; ++i) {
-        const net::TabEntry& e = entries[static_cast<std::size_t>(i)];
-        const StyledText name = remote_->decoratedName(e.id);
-        widest = std::max(widest, styledWidth(g, name));
+    static const bool testTab = std::getenv("FALCON_TEST_TAB") != nullptr;
+    if (!testTab && (!remote_ || !isDown("key.playerlist"))) return;
+    std::vector<net::TabEntry> list;
+    StyledText header, footer;
+    bool showHeads = true;
+    if (remote_ != nullptr) {
+        list = remote_->tabList(80);
+        header = remote_->tabHeader();
+        footer = remote_->tabFooter();
+        showHeads = remote_->encrypted();
+    } else {
+        static const char* const kNames[] = {"Steve_the_Builder", "Alex", "xX_Miner_Xx", "Notch", "jeb_", "Dinnerbone", "Herobrine", "CreeperSlayer", "Zuri", "kai"};
+        for (int i = 0; i < 45; ++i) {
+            net::TabEntry e;
+            e.id[0] = static_cast<std::uint8_t>(i * 37 + 5);
+            e.id[7] = static_cast<std::uint8_t>(i);
+            e.name = std::string(kNames[i % 10]) + (i >= 10 ? std::to_string(i) : std::string());
+            e.gameMode = i % 11 == 10 ? 3 : 0;
+            e.latency = i == 4 ? -1 : (i * 53) % 1200;
+            list.push_back(e);
+        }
+        header = {TextSpan{"Falcon test server", 0xFFAA00, true}, TextSpan{"\n"}, TextSpan{"play.example.net", 0x55FFFF, true}};
+        footer = {TextSpan{"A footer line that is long enough to need wrapping when the window is narrow, with a second part", 0xAAAAAA, true}};
     }
-    int rows = count, columns = 1;
+    std::vector<StyledText> names;
+    names.reserve(list.size());
+    int maxNameWidth = g.textWidth(" ");
+    for (const net::TabEntry& e : list) {
+        StyledText name = remote_ != nullptr ? remote_->decoratedName(e.id) : StyledText{TextSpan{e.name}};
+        if (e.gameMode == 3) {
+            for (TextSpan& span : name) span.italic = true;  // (PlayerTabOverlay.decorateName)
+        }
+        maxNameWidth = std::max(maxNameWidth, styledWidth(g, name));
+        names.push_back(std::move(name));
+    }
+    const int playerCount = static_cast<int>(list.size());
+    int rows = playerCount, columns = 1;
     while (rows > 20) {
         ++columns;
-        rows = (count + columns - 1) / columns;
+        rows = (playerCount + columns - 1) / columns;
     }
-    const int columnWidth = std::min(columns * (9 + widest + 13), guiWidth - 50) / columns;
-    const int total = columnWidth * columns + (columns - 1) * 5;
-    int left = guiWidth / 2 - total / 2, y = 10;
-    const auto block = [&](const StyledText& text) {  // a header or footer: lines on boxes
-        if (text.empty()) return;
-        std::string joined;
-        for (const TextSpan& span : text) joined += span.text;
-        std::size_t start = 0;
-        while (start <= joined.size()) {
-            std::size_t end = joined.find('\n', start);
-            if (end == std::string::npos) end = joined.size();
-            const std::string line = joined.substr(start, end - start);
-            const int w = g.textWidth(line);
-            g.fill(guiWidth / 2 - w / 2 - 1, y - 1, guiWidth / 2 + w / 2 + 1, y + 9, 0x80000000u);
-            g.text(line, static_cast<float>(guiWidth / 2 - w / 2), static_cast<float>(y), 0xFFFFFFFFu);
+    columns = std::max(columns, 1);
+    const int columnWidth = std::min(columns * ((showHeads ? 9 : 0) + maxNameWidth + 13), guiWidth - 50) / columns;
+    const int left = guiWidth / 2 - (columnWidth * columns + (columns - 1) * 5) / 2;
+    int totalWidth = columnWidth * columns + (columns - 1) * 5;
+    std::vector<StyledText> headerLines, footerLines;
+    if (!header.empty()) headerLines = wrapStyledText(g.font(), header, guiWidth - 50, 1000);
+    if (!footer.empty()) footerLines = wrapStyledText(g.font(), footer, guiWidth - 50, 1000);
+    for (const StyledText& line : headerLines) totalWidth = std::max(totalWidth, styledWidth(g, line));
+    for (const StyledText& line : footerLines) totalWidth = std::max(totalWidth, styledWidth(g, line));
+    constexpr std::uint32_t kPanel = 0x80000000u;  // Integer.MIN_VALUE
+    int y = 10;
+    if (!headerLines.empty()) {
+        g.fill(guiWidth / 2 - totalWidth / 2 - 1, y - 1, guiWidth / 2 + totalWidth / 2 + 1, y + static_cast<int>(headerLines.size()) * 9, kPanel);
+        for (const StyledText& line : headerLines) {
+            drawStyled(g, line, static_cast<float>(guiWidth / 2 - styledWidth(g, line) / 2), static_cast<float>(y), 0xFFFFFF, true);
             y += 9;
-            start = end + 1;
         }
-        y += 1;
-    };
-    block(remote_->tabHeader());
-    g.fill(guiWidth / 2 - total / 2 - 1, y - 1, guiWidth / 2 + total / 2 + 1, y + rows * 9, 0x80000000u);
-    const Texture2D& skin = g.textures().get("entity/player/wide/steve.png");
-    for (int i = 0; i < count; ++i) {
-        const net::TabEntry& e = entries[static_cast<std::size_t>(i)];
-        const int column = i / rows, row = i % rows;
-        const int x = left + column * (columnWidth + 5), ey = y + row * 9;
-        g.fill(x, ey, x + columnWidth, ey + 8, 0x20FFFFFFu);
-        g.blit(skin, x, ey, 8.0f, 8.0f, 8, 8, 64, 64);
-        g.blit(skin, x, ey, 40.0f, 8.0f, 8, 8, 64, 64);  // the hat layer
-        const std::uint32_t alpha = e.gameMode == 3 ? 0x91000000u : 0xFF000000u;
-        drawStyled(g, remote_->decoratedName(e.id), static_cast<float>(x + 9), static_cast<float>(ey), 0xFFFFFF, true, alpha);
-        const char* ping = e.latency < 0 ? "icon/ping_unknown" : e.latency < 150 ? "icon/ping_5" : e.latency < 300 ? "icon/ping_4" : e.latency < 600 ? "icon/ping_3" : e.latency < 1000 ? "icon/ping_2" : "icon/ping_1";
-        g.blitSprite(ping, x + columnWidth - 11, ey, 10, 8);
+        ++y;
     }
-    y += rows * 9 + 1;
-    block(remote_->tabFooter());
+    g.fill(guiWidth / 2 - totalWidth / 2 - 1, y - 1, guiWidth / 2 + totalWidth / 2 + 1, y + rows * 9, kPanel);
+    static constexpr const char* kDefaultSkins[9] = {"alex", "ari", "efe", "kai", "makena", "noor", "steve", "sunny", "zuri"};
+    for (int i = 0; i < playerCount; ++i) {
+        const net::TabEntry& e = list[static_cast<std::size_t>(i)];
+        const int column = i / rows, row = i % rows;
+        int x = left + column * columnWidth + column * 5;
+        const int ey = y + row * 9;
+        g.fill(x, ey, x + columnWidth, ey + 8, 0x20FFFFFFu);
+        const int columnLeft = x;
+        if (showHeads) {  // PlayerFaceRenderer.draw: the face, then the hat layer over it
+            const Texture2D* skin = nullptr;
+            if (const net::SkinInfo* own = remote_ != nullptr ? remote_->skinOf(e.id) : nullptr) {
+                if (const auto texture = skinTextures_.find(own->hash); texture != skinTextures_.end()) skin = texture->second.get();
+            }
+            if (skin == nullptr) {
+                const int index = net::defaultSkinOf(e.id);
+                skin = &g.textures().get(std::string("entity/player/") + (index < 9 ? "slim/" : "wide/") + kDefaultSkins[index % 9] + ".png");
+            }
+            g.blit(*skin, x, ey, 8.0f, 8.0f, 8, 8, 64, 64);
+            if (e.hat) g.blit(*skin, x, ey, 40.0f, 8.0f, 8, 8, 64, 64);
+            x += 9;
+        }
+        const std::uint32_t alpha = e.gameMode == 3 ? 0x91000000u : 0xFF000000u;  // (a spectator's name is dimmed: -1862270977)
+        drawStyled(g, names[static_cast<std::size_t>(i)], static_cast<float>(x), static_cast<float>(ey), 0xFFFFFF, true, alpha);
+        const char* ping = e.latency < 0 ? "icon/ping_unknown" : e.latency < 150 ? "icon/ping_5" : e.latency < 300 ? "icon/ping_4" : e.latency < 600 ? "icon/ping_3" : e.latency < 1000 ? "icon/ping_2" : "icon/ping_1";
+        g.blitSprite(ping, columnLeft + columnWidth - 11, ey, 10, 8);
+    }
+    if (!footerLines.empty()) {
+        y += rows * 9 + 1;
+        g.fill(guiWidth / 2 - totalWidth / 2 - 1, y - 1, guiWidth / 2 + totalWidth / 2 + 1, y + static_cast<int>(footerLines.size()) * 9, kPanel);
+        for (const StyledText& line : footerLines) {
+            drawStyled(g, line, static_cast<float>(guiWidth / 2 - styledWidth(g, line) / 2), static_cast<float>(y), 0xFFFFFF, true);
+            y += 9;
+        }
+    }
 }
 
 }  // namespace falcon

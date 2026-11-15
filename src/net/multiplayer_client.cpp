@@ -352,32 +352,47 @@ void MultiplayerClient::handleConfiguration(const Packet& p, RemoteHandler& h) {
     }
 }
 
-std::vector<TabEntry> MultiplayerClient::tabList() const {
-    std::vector<const TabEntry*> list;
-    for (const auto& [id, entry] : tab_) {
-        if (entry.listed) list.push_back(&entry);
-    }
-    const auto teamOf = [this](const TabEntry& e) -> std::string {
-        for (const auto& [name, team] : teams_) {
-            if (team.members.count(e.name) != 0) return name;
+const TeamInfo* MultiplayerClient::teamOfPlayer(const std::string& name) const {
+    if (memberIndexDirty_) {
+        memberIndex_.clear();
+        for (const auto& [teamName, team] : teams_) {
+            for (const std::string& member : team.members) memberIndex_[member] = &team;
         }
-        return {};
+        memberIndexDirty_ = false;
+    }
+    const auto it = memberIndex_.find(name);
+    return it == memberIndex_.end() ? nullptr : it->second;
+}
+
+// PlayerTabOverlay.getPlayerInfos: the list order (higher first), spectators last, then by team name, then by name ignoring case; the first `limit`.
+std::vector<TabEntry> MultiplayerClient::tabList(std::size_t limit) const {
+    struct Key {
+        const TabEntry* entry;
+        int order;
+        int spectator;
+        std::string team;
+        std::string name;
     };
-    const auto lower = [](std::string s) {
-        for (char& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-        return s;
+    std::vector<Key> keys;
+    keys.reserve(tab_.size());
+    for (const auto& [id, entry] : tab_) {
+        if (!entry.listed) continue;
+        const TeamInfo* team = teamOfPlayer(entry.name);
+        std::string lowered = entry.name;
+        for (char& c : lowered) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        keys.push_back({&entry, entry.order, entry.gameMode == 3 ? 1 : 0, team != nullptr ? team->name : std::string(), std::move(lowered)});
+    }
+    const auto before = [](const Key& a, const Key& b) {
+        if (a.order != b.order) return a.order > b.order;
+        if (a.spectator != b.spectator) return a.spectator < b.spectator;
+        if (a.team != b.team) return a.team < b.team;
+        return a.name < b.name;
     };
-    // PlayerTabOverlay: the list order (higher first), spectators last, then by team, then by name.
-    std::stable_sort(list.begin(), list.end(), [&](const TabEntry* a, const TabEntry* b) {
-        if (a->order != b->order) return a->order > b->order;
-        const int sa = a->gameMode == 3 ? 1 : 0, sb = b->gameMode == 3 ? 1 : 0;
-        if (sa != sb) return sa < sb;
-        const std::string ta = teamOf(*a), tb = teamOf(*b);
-        if (ta != tb) return ta < tb;
-        return lower(a->name) < lower(b->name);
-    });
+    const std::size_t shown = std::min(limit, keys.size());
+    std::partial_sort(keys.begin(), keys.begin() + static_cast<std::ptrdiff_t>(shown), keys.end(), before);
     std::vector<TabEntry> out;
-    for (const TabEntry* e : list) out.push_back(*e);
+    out.reserve(shown);
+    for (std::size_t i = 0; i < shown; ++i) out.push_back(*keys[i].entry);
     return out;
 }
 
@@ -389,10 +404,7 @@ const TabEntry* MultiplayerClient::tabEntry(const Uuid& id) const {
 StyledText MultiplayerClient::decoratedName(const Uuid& id) const {
     const TabEntry* e = tabEntry(id);
     if (e == nullptr) return {};
-    const TeamInfo* team = nullptr;
-    for (const auto& [name, t] : teams_) {
-        if (t.members.count(e->name) != 0) team = &t;
-    }
+    const TeamInfo* team = teamOfPlayer(e->name);
     StyledText base = e->display.empty() ? StyledText{TextSpan{e->name}} : e->display;
     if (team == nullptr) return base;
     StyledText out = team->prefix;
@@ -410,13 +422,9 @@ StyledText MultiplayerClient::decoratedName(const Uuid& id) const {
 bool MultiplayerClient::nameTagVisible(const Uuid& id) const {
     const TabEntry* e = tabEntry(id);
     if (e == nullptr) return true;
-    const TeamInfo* team = nullptr;
-    const TeamInfo* own = nullptr;
     const TabEntry* self = tabEntry(selfId_);
-    for (const auto& [name, t] : teams_) {
-        if (t.members.count(e->name) != 0) team = &t;
-        if (self != nullptr && t.members.count(self->name) != 0) own = &t;
-    }
+    const TeamInfo* team = teamOfPlayer(e->name);
+    const TeamInfo* own = self != nullptr ? teamOfPlayer(self->name) : nullptr;
     if (team == nullptr) return true;
     if (team->nameTagVisibility == "never") return false;
     if (team->nameTagVisibility == "hideForOwnTeam") return own != team;
@@ -833,7 +841,7 @@ void MultiplayerClient::handlePlay(const Packet& p, RemoteHandler& h) {
                     e.display = r.boolean() ? readComponent(r) : StyledText{};
                 }
                 if (actions & 64) e.order = r.varint();
-                if (actions & 128) r.boolean();  // the hat
+                if (actions & 128) e.hat = r.boolean();  // the hat
             }
             break;
         }
@@ -848,6 +856,7 @@ void MultiplayerClient::handlePlay(const Packet& p, RemoteHandler& h) {
             break;
         }
         case 111: {  // set_player_team
+            memberIndexDirty_ = true;
             const std::string name = r.string();
             const int method = r.u8();
             TeamInfo& t = teams_[name];

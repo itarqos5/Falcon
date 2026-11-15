@@ -11,6 +11,7 @@
 #include "falcon/world/chunk.hpp"
 #include "falcon/world/item_stack.hpp"
 
+#include <unordered_map>
 #include <array>
 #include <functional>
 #include <future>
@@ -45,6 +46,7 @@ struct TabEntry {
     bool listed = true;
     int latency = 0;     // milliseconds
     int order = 0;       // the list order: higher is further up
+    bool hat = true;     // the hat layer of the skin is shown
 };
 
 // Another player that the server tells us about.
@@ -202,7 +204,10 @@ public:
         return it == skinInfos_.end() ? nullptr : &it->second;
     }
     [[nodiscard]] std::vector<SkinFetcher::Done> takeSkins() { return skins_.takeFinished(); }
-    [[nodiscard]] std::vector<TabEntry> tabList() const;  // listed entries, in the order the game shows them
+    // The listed entries in the order the game shows them (list order, spectators last, team, name), the first `limit` of them (the game shows 80).
+    [[nodiscard]] std::vector<TabEntry> tabList(std::size_t limit = 80) const;
+    // The team a player is in by their name, or null (looked up in an index that is rebuilt when the teams change, so thousands of players cost nothing).
+    [[nodiscard]] const TeamInfo* teamOfPlayer(const std::string& name) const;
     [[nodiscard]] const StyledText& tabHeader() const { return tabHeader_; }
     [[nodiscard]] const StyledText& tabFooter() const { return tabFooter_; }
     // The name of a player as it hangs over the head or stands in the list: the team's prefix and suffix round it, in the team's colour.
@@ -300,6 +305,8 @@ private:
     std::map<int, RemotePlayer> players_;
     std::map<Uuid, TabEntry> tab_;
     std::map<std::string, TeamInfo> teams_;
+    mutable std::unordered_map<std::string, const TeamInfo*> memberIndex_;
+    mutable bool memberIndexDirty_ = true;
     StyledText tabHeader_, tabFooter_;
     bool chunkBatchOpen_ = false;
 };
