@@ -2,8 +2,12 @@
 
 #include "util.hpp"
 
+#ifdef _WIN32
 #include <windows.h>
 #include <bcrypt.h>
+#else
+#include <openssl/evp.h>
+#endif
 
 #include <fstream>
 #include <vector>
@@ -11,6 +15,39 @@
 namespace launcher {
 
 namespace {
+
+#ifndef _WIN32
+
+// Incremental SHA-1 or SHA-256 on OpenSSL.
+class Digest {
+public:
+    explicit Digest(bool sha256 = false) : size_(sha256 ? 32 : 20), context_(EVP_MD_CTX_new()) {
+        if (context_ != nullptr && EVP_DigestInit_ex(context_, sha256 ? EVP_sha256() : EVP_sha1(), nullptr) != 1) {
+            EVP_MD_CTX_free(context_);
+            context_ = nullptr;
+        }
+    }
+    ~Digest() {
+        if (context_ != nullptr) EVP_MD_CTX_free(context_);
+    }
+    Digest(const Digest&) = delete;
+    Digest& operator=(const Digest&) = delete;
+    void add(const void* data, std::size_t size) {
+        if (context_ != nullptr && size > 0) EVP_DigestUpdate(context_, data, size);
+    }
+    std::string finish() {
+        unsigned char digest[EVP_MAX_MD_SIZE] = {};
+        unsigned int length = 0;
+        if (context_ == nullptr || EVP_DigestFinal_ex(context_, digest, &length) != 1 || length != size_) return {};
+        return toHex(digest, size_);
+    }
+
+private:
+    std::size_t size_;
+    EVP_MD_CTX* context_ = nullptr;
+};
+
+#else
 
 // Incremental SHA-1 or SHA-256 on CNG.
 class Digest {
@@ -37,6 +74,8 @@ private:
     BCRYPT_ALG_HANDLE alg_ = nullptr;
     BCRYPT_HASH_HANDLE hash_ = nullptr;
 };
+
+#endif
 
 std::string fileDigest(const std::filesystem::path& file, bool sha256) {
     std::ifstream in(file, std::ios::binary);

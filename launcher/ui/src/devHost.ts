@@ -20,7 +20,7 @@ function devAvatar(): string {
 
 const base = (): LauncherState => ({
   phase: 'home',
-  app: { version: '1.2.0', mock: true, gameVersion: '26.3', clientBundled: true, gameDir: 'C:/Users/you/AppData/Local/Falcon/game/26.3' },
+  app: { version: '1.2.1', mock: true, gameVersion: '26.3', clientBundled: true, gameDir: 'C:/Users/you/AppData/Local/Falcon/game/26.3', platform: 'windows' },
   setup: { steps: [], error: null },
   auth: { configured: true, status: 'signedIn', message: '', error: null },
   account: { name: 'FalconPlayer', uuid: '069a79f444e94726a5befca90e38aaf5', owns: true, hasProfile: true, avatar: devAvatar() },

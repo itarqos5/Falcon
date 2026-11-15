@@ -13,7 +13,13 @@
 #include <stb_image.h>
 #include <stb_image_write.h>
 
+#ifdef _WIN32
 #include <windows.h>
+#else
+#include <stdlib.h>
+#include <sys/stat.h>
+#define _putenv_s(name, value) setenv((name), (value), 1)  // (the Windows name for it, which the tests use)
+#endif
 
 #include <atomic>
 #include <chrono>
@@ -222,11 +228,22 @@ void test_secure_store() {
     const fs::path file = freshFolder("store") / "account.bin";
     CHECK(protectToFile(file, "refresh-token-123"));
     std::string raw;
+#ifdef _WIN32
     CHECK(readFile(file, raw) && raw.find("refresh-token-123") == std::string::npos);  // not readable on disk
     CHECK(unprotectFromFile(file) == std::optional<std::string>("refresh-token-123"));
     raw[raw.size() / 2] = static_cast<char>(raw[raw.size() / 2] ^ 0x55);  // damaged: refused, not trusted
     writeFileAtomic(file, raw);
     CHECK(!unprotectFromFile(file).has_value() && !unprotectFromFile(file.parent_path() / "missing").has_value());
+#else
+    // Linux keeps it in a file only this user can read (there is no per-user encryption to call): the contents are as they were given, the mode is 0600, nothing else is left behind.
+    CHECK(readFile(file, raw) && raw == "refresh-token-123");
+    CHECK(unprotectFromFile(file) == std::optional<std::string>("refresh-token-123"));
+    struct stat info{};
+    CHECK(stat(file.c_str(), &info) == 0 && (info.st_mode & 0777) == 0600);
+    CHECK(!fs::exists(fs::path(file.string() + ".tmp")));
+    CHECK(protectToFile(file, "replaced") && unprotectFromFile(file) == std::optional<std::string>("replaced"));
+    CHECK(!unprotectFromFile(file.parent_path() / "missing").has_value());
+#endif
 }
 
 void test_browser_sign_in() {
@@ -631,6 +648,12 @@ void test_game_data_dir() {
     CHECK(sha256Hex("abc") == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad" && sha256Hex("").size() == 64);
 }
 
+#ifdef _WIN32
+constexpr const char* kClientName = "Falcon.exe";
+#else
+constexpr const char* kClientName = "Falcon";
+#endif
+
 void test_bundled_client() {
     const fs::path root = freshFolder("client");
     const std::string exe = "MZ-not-really-an-exe";
@@ -639,7 +662,7 @@ void test_bundled_client() {
     fs::path where;
     CHECK(!bundledClientInstalled(root, blob, &where));
     const auto installed = installBundledClient(root, blob);
-    CHECK(installed.ok() && fs::exists(*installed) && installed->filename() == "Falcon.exe");
+    CHECK(installed.ok() && fs::exists(*installed) && installed->filename() == kClientName);
     std::string back;
     CHECK(readFile(*installed, back) && back == exe && bundledClientInstalled(root, blob, &where) && where == *installed);
     // a damaged copy is put right; an older launcher's client folder is removed
@@ -647,7 +670,7 @@ void test_bundled_client() {
     CHECK(!bundledClientInstalled(root, blob));
     CHECK(installBundledClient(root, blob).ok() && bundledClientInstalled(root, blob));
     fs::create_directories(root / "client" / "oldversion");
-    writeFileAtomic(root / "client" / "oldversion" / "Falcon.exe", "old");
+    writeFileAtomic(root / "client" / "oldversion" / kClientName, "old");
     writeFileAtomic(*installed, "damaged again");
     CHECK(installBundledClient(root, blob).ok() && !fs::exists(root / "client" / "oldversion"));
 }
@@ -921,7 +944,11 @@ void test_real_flow() {
     CHECK(s["account"]["avatar"].get<std::string>().rfind("data:image/png;base64,", 0) == 0);  // the active skin was fetched and cut into a head
     CHECK(http.count("GET", "https://textures.minecraft.net/texture/abc123") == 1 && http.count("GET", "https://textures.minecraft.net/texture/old") == 0);
     std::string saved;
+#ifdef _WIN32
     CHECK(readFile(home / "account.bin", saved) && saved.find("ms-refresh-SECRET") == std::string::npos);  // the token is not on disk in the clear
+#else
+    CHECK(readFile(home / "account.bin", saved) && saved == "ms-refresh-SECRET");  // (Linux: in a file only this user can read, see secure_store.cpp)
+#endif
 
     // launch: the game's files come from Mojang, then the start fails (a fake exe) with a clear error and the state is sane again
     CHECK(parse(app.handleMessage(R"({"id":3,"method":"launch"})"))["ok"].get<bool>());

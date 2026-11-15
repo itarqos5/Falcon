@@ -3,10 +3,16 @@
 #include "sha1.hpp"
 #include "util.hpp"
 
+#ifdef _WIN32
 #include <windows.h>
 #include <objbase.h>
 #include <shlobj.h>
 #include <shobjidl.h>
+#else
+#include <limits.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
 
 #include <algorithm>
 #include <fstream>
@@ -14,6 +20,8 @@
 namespace launcher {
 
 namespace fs = std::filesystem;
+
+#ifdef _WIN32
 
 Blob embeddedResource(const wchar_t* name) {
     HRSRC found = FindResourceW(nullptr, name, RT_RCDATA);
@@ -23,7 +31,43 @@ Blob embeddedResource(const wchar_t* name) {
     return Blob{static_cast<const unsigned char*>(LockResource(loaded)), static_cast<std::size_t>(SizeofResource(nullptr, found))};
 }
 
+#else
+
+// On Linux the pieces are put into the program by the linker (an assembler file with .incbin, see launcher/CMakeLists.txt), each between two symbols. A program built without
+// them (the tests) finds the symbols missing, which is what "weak" is for: their address is then null, and the blob is empty.
+extern "C" {
+extern const unsigned char falcon_client_start[] __attribute__((weak));
+extern const unsigned char falcon_client_end[] __attribute__((weak));
+extern const unsigned char falcon_ui_start[] __attribute__((weak));
+extern const unsigned char falcon_ui_end[] __attribute__((weak));
+extern const unsigned char falcon_icon_start[] __attribute__((weak));
+extern const unsigned char falcon_icon_end[] __attribute__((weak));
+}
+
 namespace {
+Blob blobBetween(const unsigned char* begin, const unsigned char* end) {
+    if (begin == nullptr || end == nullptr || end <= begin) return {};
+    return Blob{begin, static_cast<std::size_t>(end - begin)};
+}
+}  // namespace
+
+Blob embeddedResource(const wchar_t* name) {
+    const std::string which = narrow(name);
+    if (which == "FALCON_CLIENT") return blobBetween(falcon_client_start, falcon_client_end);
+    if (which == "LAUNCHER_UI") return blobBetween(falcon_ui_start, falcon_ui_end);
+    if (which == "FALCON_ICON") return blobBetween(falcon_icon_start, falcon_icon_end);
+    return {};
+}
+
+#endif
+
+namespace {
+
+#ifdef _WIN32
+constexpr const char* kClientFileName = "Falcon.exe";
+#else
+constexpr const char* kClientFileName = "Falcon";
+#endif
 
 fs::path clientFolder(const fs::path& dataRoot, const Blob& client) {
     const std::string hash = sha1Hex(std::string_view(reinterpret_cast<const char*>(client.data), client.size));
@@ -34,7 +78,7 @@ fs::path clientFolder(const fs::path& dataRoot, const Blob& client) {
 
 bool bundledClientInstalled(const fs::path& dataRoot, const Blob& client, fs::path* exe) {
     if (client.empty()) return false;
-    const fs::path file = clientFolder(dataRoot, client) / "Falcon.exe";
+    const fs::path file = clientFolder(dataRoot, client) / kClientFileName;
     std::error_code ec;
     if (!fs::exists(file, ec) || fs::file_size(file, ec) != client.size) return false;
     const std::string want = sha1Hex(std::string_view(reinterpret_cast<const char*>(client.data), client.size));
@@ -52,10 +96,13 @@ Result<fs::path> installBundledClient(const fs::path& dataRoot, const Blob& clie
     std::error_code ec;
     fs::create_directories(folder, ec);
     if (ec) return R::fail("disk", "Cannot create " + narrow(folder.wstring()) + ".");
-    const fs::path file = folder / "Falcon.exe";
+    const fs::path file = folder / kClientFileName;
     if (!writeFileAtomic(file, std::string_view(reinterpret_cast<const char*>(client.data), client.size))) {
         return R::fail("disk", "Cannot write " + narrow(file.wstring()) + " (is it running? is the disk full?).");
     }
+#ifndef _WIN32
+    fs::permissions(file, fs::perms::owner_all | fs::perms::group_read | fs::perms::group_exec | fs::perms::others_read | fs::perms::others_exec, ec);  // (a program that can be run)
+#endif
     if (!bundledClientInstalled(dataRoot, client, &exe)) return R::fail("corrupt", "The game client was written but did not read back correctly.");
     // An older launcher's client is not needed any more.
     for (const auto& entry : fs::directory_iterator(dataRoot / "client", ec)) {
@@ -63,6 +110,8 @@ Result<fs::path> installBundledClient(const fs::path& dataRoot, const Blob& clie
     }
     return R::success(exe);
 }
+
+#ifdef _WIN32
 
 bool createStartMenuShortcut() {
     wchar_t self[MAX_PATH * 2];
@@ -127,5 +176,40 @@ Result<bool> installWebView2Runtime(HttpClient& http) {
     if (waited != WAIT_OBJECT_0 || !webView2RuntimeInstalled()) return R::fail("install", "The WebView2 runtime did not install (exit code " + std::to_string(code) + ").");
     return R::success(true);
 }
+
+#else
+
+// An entry in the application menu (a .desktop file in the user's own folder, with the icon next to it): "Falcon Launcher", for the program that is running.
+bool createStartMenuShortcut() {
+    char self[PATH_MAX] = {};
+    const ssize_t length = readlink("/proc/self/exe", self, sizeof(self) - 1);
+    if (length <= 0) return false;
+    const fs::path data = dataRoot().parent_path();  // (~/.local/share, where dataRoot() is ~/.local/share/Falcon)
+    std::string exec;  // the Exec line of the desktop file needs its quotes, backslashes, backticks and dollar signs escaped
+    for (const char* c = self; *c != '\0'; ++c) {
+        if (*c == '"' || *c == '\\' || *c == '`' || *c == '$') exec.push_back('\\');
+        exec.push_back(*c);
+    }
+    const Blob icon = embeddedResource(L"FALCON_ICON");
+    if (!icon.empty()) writeFileAtomic(data / "icons" / "hicolor" / "256x256" / "apps" / "falcon-launcher.png", std::string_view(reinterpret_cast<const char*>(icon.data), icon.size));
+    const std::string entry =
+        "[Desktop Entry]\n"
+        "Type=Application\n"
+        "Name=Falcon Launcher\n"
+        "Comment=Launcher for Falcon, a Minecraft: Java Edition client written in C++\n"
+        "Exec=\"" + exec + "\"\n"
+        "Icon=falcon-launcher\n"
+        "Terminal=false\n"
+        "Categories=Game;\n"
+        "StartupWMClass=falcon-launcher\n";
+    return writeFileAtomic(data / "applications" / "falcon-launcher.desktop", entry);
+}
+
+// The web view is a library the program is linked against: if it were missing the program would not have started at all.
+bool webView2RuntimeInstalled() { return true; }
+
+Result<bool> installWebView2Runtime(HttpClient&) { return Result<bool>::fail("unsupported", "There is nothing to install here: the web view is WebKitGTK, a package of the system."); }
+
+#endif
 
 }  // namespace launcher

@@ -25,7 +25,7 @@ export interface Account {
 
 export interface LauncherState {
   phase: Phase;
-  app: { version: string; mock: boolean; gameVersion: string; clientBundled: boolean; gameDir: string };
+  app: { version: string; mock: boolean; gameVersion: string; clientBundled: boolean; gameDir: string; platform: 'windows' | 'linux' };
   setup: { steps: StepState[]; error: ErrorInfo | null };
   auth: {
     configured: boolean;

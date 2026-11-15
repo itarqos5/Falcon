@@ -4,8 +4,21 @@
 #include "secure_store.hpp"
 #include "util.hpp"
 
+#ifdef _WIN32
 #include <windows.h>
 #include <shellapi.h>
+#else
+#include <signal.h>
+#include <spawn.h>
+#include <sys/wait.h>
+#include <unistd.h>
+
+#include <cerrno>
+#include <cstring>
+#include <vector>
+
+extern char** environ;
+#endif
 
 #include <algorithm>
 #include <chrono>
@@ -58,6 +71,7 @@ std::string stringParam(const json& params, const char* key) {
     return {};
 }
 
+#ifdef _WIN32
 // "a" "b c" -> "a" "b c" quoted for CreateProcess.
 std::wstring quoteArg(const std::wstring& arg) {
     std::wstring out = L"\"";
@@ -68,13 +82,24 @@ std::wstring quoteArg(const std::wstring& arg) {
     return out + L"\"";
 }
 
+constexpr const char* kPlatform = "windows";
+constexpr const char* kRuntimeStep = "Checking the web runtime";
+constexpr const char* kShortcutStep = "Adding a Start menu shortcut";
+constexpr const char* kRuntimeDone = "Microsoft Edge WebView2 is installed";
+#else
+constexpr const char* kPlatform = "linux";
+constexpr const char* kRuntimeStep = "Checking the web view";
+constexpr const char* kShortcutStep = "Adding an application menu entry";
+constexpr const char* kRuntimeDone = "WebKitGTK is installed";
+#endif
+
 }  // namespace
 
 App::App(HttpClient& http, AppOptions options, AppHooks hooks, Blob bundledClient)
     : http_(http), options_(std::move(options)), hooks_(std::move(hooks)), client_(bundledClient), auth_(http, options_.clientId), files_(http, dataRoot() / "game", options_.tables) {
     const bool mock = options_.mock || !options_.mockState.empty();
     state_ = json{{"phase", "boot"},
-                  {"app", {{"version", FALCON_LAUNCHER_VERSION}, {"mock", mock}, {"gameVersion", options_.gameVersion}, {"clientBundled", !client_.empty()}, {"gameDir", narrow(files_.versionDir(options_.gameVersion).wstring())}}},
+                  {"app", {{"version", FALCON_LAUNCHER_VERSION}, {"mock", mock}, {"gameVersion", options_.gameVersion}, {"clientBundled", !client_.empty()}, {"gameDir", narrow(files_.versionDir(options_.gameVersion).wstring())}, {"platform", kPlatform}}},
                   {"setup", {{"steps", json::array()}, {"error", nullptr}}},
                   {"auth", {{"configured", auth_.configured() || mock}, {"status", "signedOut"}, {"message", ""}, {"error", nullptr}}},
                   {"account", nullptr},
@@ -260,7 +285,7 @@ std::string App::handleMessage(const std::string& message) {
         else if (which == "game") folder = files_.versionDir(options_.gameVersion);
         std::error_code ec;
         fs::create_directories(folder, ec);
-        ShellExecuteW(nullptr, L"open", folder.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+        openFolder(folder);
         return ok();
     }
     if (method == "setSetting") {
@@ -341,8 +366,8 @@ void App::setupJob() {
     mutate([&](json& s) {
         s["phase"] = "setup";
         s["setup"]["error"] = nullptr;
-        s["setup"]["steps"] = json::array({stepJson("runtime", "Checking the web runtime"), stepJson("folders", "Creating the launcher's folders"),
-                                           stepJson("client", "Installing the Falcon client"), stepJson("shortcut", "Adding a Start menu shortcut"),
+        s["setup"]["steps"] = json::array({stepJson("runtime", kRuntimeStep), stepJson("folders", "Creating the launcher's folders"),
+                                           stepJson("client", "Installing the Falcon client"), stepJson("shortcut", kShortcutStep),
                                            stepJson("finish", "Finishing up")});
     });
     const auto pause = [&] { std::this_thread::sleep_for(std::chrono::milliseconds(140)); };  // (so each step can be read)
@@ -359,7 +384,7 @@ void App::setupJob() {
         mutate([&](json& s) { s["setup"]["error"] = errorJson({"webview", "The Microsoft Edge WebView2 runtime is missing."}); });
         return;
     }
-    setStep("runtime", "done", "Microsoft Edge WebView2 is installed");
+    setStep("runtime", "done", kRuntimeDone);
 
     setStep("folders", "active");
     pause();
@@ -600,6 +625,7 @@ void App::launchJob() {
     setGameProgress("working", {"start", "Starting Falcon", 0, 0});
     // (Falcon's data tables were downloaded into the game folder with the game's files, which is where the client looks.)
     const std::optional<fs::path> exportedData = files_.findGameData(options_.gameVersion);
+#ifdef _WIN32
     std::wstring command = quoteArg(exe->wstring()) + L" --assets " + quoteArg(files_.assetsDir(options_.gameVersion).wstring()) + L" --username " + quoteArg(widen(account->name)) + L" --uuid " +
                            quoteArg(widen(account->uuid));
     if (exportedData && *exportedData != files_.versionDir(options_.gameVersion)) command += L" --data " + quoteArg(exportedData->wstring());
@@ -631,6 +657,54 @@ void App::launchJob() {
         if (stopping_.load()) break;  // (the launcher is closing: the game is left running)
     }
     CloseHandle(pi.hProcess);
+#else
+    std::vector<std::string> arguments = {exe->string(), "--assets", files_.assetsDir(options_.gameVersion).string(), "--username", account->name, "--uuid", account->uuid};
+    if (exportedData && *exportedData != files_.versionDir(options_.gameVersion)) {
+        arguments.push_back("--data");
+        arguments.push_back(exportedData->string());
+    }
+    arguments.push_back("--size");
+    arguments.push_back("1280x720");  // (an ordinary window with its system title bar, of a good size)
+    logLine("starting the client; game data: " + (exportedData ? exportedData->string() : std::string("none found")));
+    mutate([&](json& s) { s["game"]["data"] = exportedData.has_value(); });
+    // The client asks Mojang itself whether this account owns the game, with the account's Minecraft access token: the child gets it in its own environment for this one start
+    // (the launcher's own environment is never changed, and the child wipes it from its memory as soon as it has read it).
+    std::vector<std::string> environment;
+    for (char** entry = environ; entry != nullptr && *entry != nullptr; ++entry) {
+        if (std::strncmp(*entry, "FALCON_MC_TOKEN=", 16) != 0) environment.emplace_back(*entry);
+    }
+    environment.push_back("FALCON_MC_TOKEN=" + account->accessToken);
+    std::vector<char*> argv, envp;
+    for (std::string& a : arguments) argv.push_back(a.data());
+    argv.push_back(nullptr);
+    for (std::string& e : environment) envp.push_back(e.data());
+    envp.push_back(nullptr);
+    posix_spawn_file_actions_t actions;
+    posix_spawn_file_actions_init(&actions);
+    const std::string workingDirectory = exe->parent_path().string();
+    posix_spawn_file_actions_addchdir_np(&actions, workingDirectory.c_str());
+    pid_t child = 0;
+    const int startError = posix_spawn(&child, exe->c_str(), &actions, nullptr, argv.data(), envp.data());
+    posix_spawn_file_actions_destroy(&actions);
+    std::fill(environment.back().begin(), environment.back().end(), '\0');  // (the copy of the token in this process)
+    if (startError != 0) {
+        return setGameError({"spawn", "The game could not be started (error " + std::to_string(startError) + ": " + std::strerror(startError) + ")."});
+    }
+    logLine("started the client, process " + std::to_string(child));
+    mutate([&](json& s) {
+        s["game"]["status"] = "running";
+        s["game"]["label"] = "Falcon is running";
+        s["game"]["error"] = nullptr;
+    });
+    if (hooks_.gameRunning) hooks_.gameRunning(true);
+    for (;;) {
+        int status = 0;
+        const pid_t done = waitpid(child, &status, WNOHANG);
+        if (done == child || (done < 0 && errno != EINTR)) break;
+        if (stopping_.load()) break;  // (the launcher is closing: the game is left running)
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    }
+#endif
     if (hooks_.gameRunning) hooks_.gameRunning(false);
     mutate([&](json& s) { s["game"]["status"] = gameIdleStatus(); });
 }
@@ -650,8 +724,8 @@ void App::mockJob(const std::string& which) {
         mutate([&](json& s) {
             s["phase"] = "setup";
             s["setup"]["error"] = nullptr;
-            s["setup"]["steps"] = json::array({stepJson("runtime", "Checking the web runtime"), stepJson("folders", "Creating the launcher's folders"),
-                                               stepJson("client", "Installing the Falcon client"), stepJson("shortcut", "Adding a Start menu shortcut"),
+            s["setup"]["steps"] = json::array({stepJson("runtime", kRuntimeStep), stepJson("folders", "Creating the launcher's folders"),
+                                               stepJson("client", "Installing the Falcon client"), stepJson("shortcut", kShortcutStep),
                                                stepJson("finish", "Finishing up")});
         });
         for (const char* id : {"runtime", "folders", "client", "shortcut", "finish"}) {

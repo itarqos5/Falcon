@@ -35,7 +35,7 @@ export function SignIn({ state }: { state: LauncherState }) {
               </button>
               {!busy && auth.message && <div className="auth-note">{auth.message}</div>}
               <div className="auth-fine">
-                <Lock size={13} /> Your sign-in is stored encrypted for your Windows user only.
+                <Lock size={13} /> {state.app.platform === 'linux' ? 'Your sign-in is kept in a file that only your user can read.' : 'Your sign-in is stored encrypted for your Windows user only.'}
               </div>
             </>
           )}

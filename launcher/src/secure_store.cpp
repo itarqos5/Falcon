@@ -2,6 +2,8 @@
 
 #include "util.hpp"
 
+#ifdef _WIN32
+
 #include <windows.h>
 #include <wincrypt.h>
 
@@ -39,3 +41,51 @@ std::optional<std::string> unprotectFromFile(const std::filesystem::path& file) 
 }
 
 }  // namespace launcher
+
+#else
+
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
+#include <cstring>
+#include <system_error>
+
+namespace launcher {
+
+// Linux has no per-user encryption for a program to call without a keyring service running (and none is there on every desktop): the sign-in is kept in a file that only this user
+// can read (mode 0600, in a folder of mode 0700), the way the official Minecraft launcher and most others keep theirs. It is the refresh token, which is revocable by signing out.
+bool protectToFile(const std::filesystem::path& file, const std::string& secret) {
+    std::error_code ec;
+    std::filesystem::create_directories(file.parent_path(), ec);
+    ::chmod(file.parent_path().c_str(), 0700);
+    std::filesystem::path temp = file;
+    temp += ".tmp";
+    const int descriptor = ::open(temp.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);  // (never readable by anybody else, not even for a moment)
+    if (descriptor < 0) return false;
+    std::size_t written = 0;
+    bool ok = true;
+    while (ok && written < secret.size()) {
+        const ssize_t n = ::write(descriptor, secret.data() + written, secret.size() - written);
+        if (n <= 0) ok = false;
+        else written += static_cast<std::size_t>(n);
+    }
+    ok = ok && ::fsync(descriptor) == 0;
+    ::close(descriptor);
+    if (ok) std::filesystem::rename(temp, file, ec);
+    if (!ok || ec) {
+        std::filesystem::remove(temp, ec);
+        return false;
+    }
+    return true;
+}
+
+std::optional<std::string> unprotectFromFile(const std::filesystem::path& file) {
+    std::string bytes;
+    if (!readFile(file, bytes) || bytes.empty()) return std::nullopt;
+    return bytes;
+}
+
+}  // namespace launcher
+
+#endif

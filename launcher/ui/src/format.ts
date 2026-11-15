@@ -85,7 +85,7 @@ export function describeError(code?: string, rawMessage?: string): ErrorMeta {
     case 'disk':
       return { category: 'Disk', title: 'Could not write to disk', description: rawMessage || 'Check that the drive has room and that nothing is blocking the folder.' };
     case 'spawn':
-      return { category: 'Launch', title: 'Falcon could not start', description: rawMessage || 'Windows would not start the game. Antivirus software sometimes blocks new programs.' };
+      return { category: 'Launch', title: 'Falcon could not start', description: rawMessage || 'The system would not start the game. Security software sometimes blocks new programs.' };
     default:
       return { category: 'Error', title: 'Something went wrong', description: rawMessage || 'An unexpected error occurred.' };
   }

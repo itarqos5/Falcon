@@ -36,6 +36,8 @@ public:
 
 // WinHTTP: part of Windows, system proxy and certificates, TLS 1.2+, no library to ship.
 [[nodiscard]] std::unique_ptr<HttpClient> makeWinHttpClient(const std::string& userAgent);
+// The client of the system the launcher runs on: WinHTTP on Windows, HTTP/1.1 over OpenSSL on Linux (http_posix.cpp).
+[[nodiscard]] std::unique_ptr<HttpClient> makeSystemHttpClient(const std::string& userAgent);
 
 // "a=b&c=d" with the values percent-encoded.
 [[nodiscard]] std::string formEncode(const std::vector<std::pair<std::string, std::string>>& fields);

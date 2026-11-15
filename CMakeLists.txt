@@ -530,10 +530,15 @@ if(FALCON_BUILD_TESTS)
 endif()
 
 # ---------------------------------------------------------------------------
-# The launcher (Windows): a native window with a React UI in the system's WebView2. Not part of the ordinary build (it needs Node, and builds
+# The launcher: a native window with a React UI in the system's web view (WebView2 on Windows, WebKitGTK on Linux). Not part of the ordinary build (it needs Node, and builds
 # the game first): cmake --build --preset launcher. See launcher/README.md.
 # ---------------------------------------------------------------------------
-option(FALCON_BUILD_LAUNCHER "Make the launcher target available (cmake --build --preset launcher)" ON)
-if(WIN32 AND FALCON_BUILD_LAUNCHER)
+if(WIN32)
+    set(_falcon_launcher_default ON)
+else()
+    set(_falcon_launcher_default OFF)  # (on Linux it needs GTK and WebKitGTK to be installed, which the game does not: ask for it with -DFALCON_BUILD_LAUNCHER=ON)
+endif()
+option(FALCON_BUILD_LAUNCHER "Make the launcher target available (cmake --build --preset launcher)" ${_falcon_launcher_default})
+if(FALCON_BUILD_LAUNCHER)
     add_subdirectory(launcher)
 endif()

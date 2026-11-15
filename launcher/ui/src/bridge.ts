@@ -1,6 +1,6 @@
 import type { LauncherState } from './types';
 
-// The way to the native side. In the launcher the page is shown by WebView2: window.chrome.webview.postMessage(string) sends a JSON message
+// The way to the native side. In the launcher the page is shown by WebView2 (Windows) or WebKitGTK (Linux, where the host defines the same two names): window.chrome.webview.postMessage(string) sends a JSON message
 // {id, method, params} to C++, which answers {id, ok, result | error}, and sends {event: "state", state} whenever its state changes.
 // Opened in an ordinary browser (npm run dev) there is no host: devHost.ts plays a fake one so the pages can be worked on (development only).
 

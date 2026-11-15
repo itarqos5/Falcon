@@ -5,15 +5,27 @@
 //                                  --screenshot <file.png> [--wait <ms>]   draw the UI off-screen, save it, write <file>.txt with the timings, exit
 //                                  --selftest-signin      open the Microsoft sign-in window invisibly, check that it hands back the redirect and that it can be cancelled (no network), exit code 0 when it does
 //                                  --selftest-tables <dir>   download Falcon's data tables into <dir>/26.3 like the installation does (real network), check them, write <dir>/selftest-tables.txt, exit code 0 when they are good
+//                                  --selftest-install <dir>  download the game's files and Falcon's data tables into <dir>/26.3 like the installation does (real network, a few hundred MB), write <dir>/selftest-install.txt, exit code 0 when it worked
 //                                  --devtools             F12 and the page's context menu
+//
+// One program for Windows (WebView2) and Linux (WebKitGTK): the few places where they differ are marked.
 #include "app.hpp"
 #include "http.hpp"
 #include "setup.hpp"
 #include "util.hpp"
+
+#ifdef _WIN32
 #include "webview_host.hpp"
 
 #include <windows.h>
 #include <shellapi.h>
+#else
+#include "webview_host_gtk.hpp"
+
+#include <fcntl.h>
+#include <sys/file.h>
+#include <unistd.h>
+#endif
 
 #include <fstream>
 #include <memory>
@@ -30,11 +42,13 @@ struct Args {
     int waitMs = 1500;
     bool devtools = false;
     bool selfTestSignIn = false;
-    std::wstring selfTestTables;  // --selftest-tables <dir>
+    std::wstring selfTestTables;   // --selftest-tables <dir>
+    std::wstring selfTestInstall;  // --selftest-install <dir>
     std::string page;  // --page settings|logs: open the page there (for screenshots)
 };
 
-Args parseArgs() {
+#ifdef _WIN32
+Args parseArgs(int, char**) {
     Args args;
     int argc = 0;
     LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
@@ -51,6 +65,8 @@ Args parseArgs() {
             args.page = narrow(argv[++i]);
         } else if (a == L"--selftest-tables" && i + 1 < argc) {
             args.selfTestTables = argv[++i];
+        } else if (a == L"--selftest-install" && i + 1 < argc) {
+            args.selfTestInstall = argv[++i];
         } else if (a == L"--selftest-signin") {
             args.selfTestSignIn = true;
         } else if (a == L"--devtools") {
@@ -60,6 +76,33 @@ Args parseArgs() {
     if (argv != nullptr) LocalFree(argv);
     return args;
 }
+#else
+Args parseArgs(int argc, char** argv) {
+    Args args;
+    for (int i = 1; i < argc; ++i) {
+        const std::string a = argv[i];
+        if (a == "--mock") {
+            args.mock = true;
+            if (i + 1 < argc && argv[i + 1][0] != '-') args.mockState = argv[++i];
+        } else if (a == "--screenshot" && i + 1 < argc) {
+            args.screenshot = widen(argv[++i]);
+        } else if (a == "--wait" && i + 1 < argc) {
+            args.waitMs = std::atoi(argv[++i]);
+        } else if (a == "--page" && i + 1 < argc) {
+            args.page = argv[++i];
+        } else if (a == "--selftest-tables" && i + 1 < argc) {
+            args.selfTestTables = widen(argv[++i]);
+        } else if (a == "--selftest-install" && i + 1 < argc) {
+            args.selfTestInstall = widen(argv[++i]);
+        } else if (a == "--selftest-signin") {
+            args.selfTestSignIn = true;
+        } else if (a == "--devtools") {
+            args.devtools = true;
+        }
+    }
+    return args;
+}
+#endif
 
 // The Microsoft application id: the environment, then launcher.json ("msClientId"), then build-time override,
 // and defaults to the official Minecraft public client id (00000000402b5328) for zero-config sign-in.
@@ -76,7 +119,7 @@ std::string clientIdFromSettings() {
 
 // --selftest-tables: the installation's download of the data tables, with the real network and the real address and checksum this launcher carries, into a folder of its own.
 int selfTestTables(const std::wstring& dir) {
-    const std::unique_ptr<HttpClient> http = makeWinHttpClient(std::string("FalconLauncher/") + FALCON_LAUNCHER_VERSION);
+    const std::unique_ptr<HttpClient> http = makeSystemHttpClient(std::string("FalconLauncher/") + FALCON_LAUNCHER_VERSION);
     GameFiles files(*http, std::filesystem::path(dir));
     const std::atomic<bool> cancel{false};
     std::string said;
@@ -91,15 +134,43 @@ int selfTestTables(const std::wstring& dir) {
     return good ? 0 : 1;
 }
 
-}  // namespace
+// --selftest-install: everything Play downloads before it starts the game (the client jar's assets and data, the sounds and languages, the data tables), into a folder of its own.
+// What the Linux build's tests run on: the game's own data is where the checks of the world generator get theirs.
+int selfTestInstall(const std::wstring& dir) {
+    const std::unique_ptr<HttpClient> http = makeSystemHttpClient(std::string("FalconLauncher/") + FALCON_LAUNCHER_VERSION);
+    GameFiles files(*http, std::filesystem::path(dir));
+    const std::atomic<bool> cancel{false};
+    std::string said;
+    int lastPercent = -1;
+    const auto result = files.install("26.3", [&](const InstallProgress& p) {
+        said = p.label;
+        if (p.total > 0) {
+            const int percent = static_cast<int>(p.done * 100 / p.total);
+            if (percent / 10 != lastPercent / 10) logLine("install: " + p.label + " " + std::to_string(percent) + "%");
+            lastPercent = percent;
+        }
+    }, cancel);
+    const bool good = result.ok() && files.isInstalled("26.3");
+    const std::string text = good ? std::string("ok: ") + said : std::string("failed: ") + (result.ok() ? std::string("the files are not complete") : result.error.message);
+    writeFileAtomic(std::filesystem::path(dir) / "selftest-install.txt", text);
+    return good ? 0 : 1;
+}
 
-int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int) {
-    const Args args = parseArgs();
+#ifdef _WIN32
+using Instance = HINSTANCE;
+#else
+using Instance = void*;
+#endif
+
+int launcherMain(Instance instance, const Args& args) {
+    [[maybe_unused]] const Instance unusedOnLinux = instance;
     const bool testRun = args.mock || args.selfTestSignIn || !args.screenshot.empty();
     logLine(std::string("Falcon Launcher ") + FALCON_LAUNCHER_VERSION + " starting");
     if (!args.selfTestTables.empty()) return selfTestTables(args.selfTestTables);
+    if (!args.selfTestInstall.empty()) return selfTestInstall(args.selfTestInstall);
 
-    // One launcher at a time: a second start just brings the first to the front.
+    // One launcher at a time: a second start just brings the first to the front (Windows) or leaves it be (Linux, where a program cannot raise another's window).
+#ifdef _WIN32
     HANDLE single = CreateMutexW(nullptr, TRUE, L"Local\\FalconLauncherSingleInstance");
     if (!testRun && GetLastError() == ERROR_ALREADY_EXISTS) {
         if (HWND other = FindWindowW(L"FalconLauncherWindow", nullptr)) {
@@ -108,9 +179,22 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int) {
         }
         return 0;
     }
+#else
+    int single = -1;
+    if (!testRun) {
+        std::error_code ec;
+        fs::create_directories(dataRoot(), ec);
+        single = ::open((dataRoot() / "launcher.lock").c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0600);  // (the lock goes with the process, however it ends)
+        if (single >= 0 && ::flock(single, LOCK_EX | LOCK_NB) != 0) {
+            logLine("another launcher is already running");
+            return 0;
+        }
+    }
+#endif
 
-    std::unique_ptr<HttpClient> http = makeWinHttpClient(std::string("FalconLauncher/") + FALCON_LAUNCHER_VERSION);
+    std::unique_ptr<HttpClient> http = makeSystemHttpClient(std::string("FalconLauncher/") + FALCON_LAUNCHER_VERSION);
 
+#ifdef _WIN32
     // The web view needs the WebView2 runtime. Nearly every PC has it; if this one does not, the player is asked and it is installed first.
     if (!webView2RuntimeInstalled()) {
         const int answer = MessageBoxW(nullptr,
@@ -125,6 +209,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int) {
             return 1;
         }
     }
+#endif
 
     AppOptions options;
     options.clientId = clientIdFromSettings();
@@ -165,7 +250,11 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int) {
     hostOptions.offscreen = !args.screenshot.empty() || args.selfTestSignIn;
     WebHost::Callbacks callbacks;
     callbacks.onMessage = [&appPointer](const std::string& message) { return appPointer != nullptr ? appPointer->handleMessage(message) : std::string(); };
+#ifdef _WIN32
     WebHost host(instance, hostOptions, callbacks, embeddedResource(L"LAUNCHER_UI"), embeddedResource(L"WEBVIEW2_LOADER"));
+#else
+    WebHost host(hostOptions, callbacks, embeddedResource(L"LAUNCHER_UI"));
+#endif
     hostPointer = &host;
 
     if (!host.create()) {
@@ -192,7 +281,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int) {
                 host->after(static_cast<unsigned>(wait), [h = host, f = file] {
                     h->capture(f, [h, f](bool ok) {
                         fs::path infoPath = f;
-                        infoPath += L".txt";
+                        infoPath += ".txt";
                         std::ofstream info(infoPath);
                         info << "{\"captured\": " << (ok ? "true" : "false") << ", \"startedMs\": " << static_cast<int>(millisSinceStart()) << ", \"browserPid\": " << h->browserProcessId() << "}\n";
                         h->close();
@@ -246,8 +335,20 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int) {
     hostPointer = nullptr;
     app.shutdown();
     appPointer = nullptr;
+#ifdef _WIN32
     if (single != nullptr) CloseHandle(single);
+#else
+    if (single >= 0) ::close(single);
+#endif
     logLine("Falcon Launcher closed");
     if (args.selfTestSignIn) code = redirectOk && cancelOk ? 0 : 3;
     return code;
 }
+
+}  // namespace
+
+#ifdef _WIN32
+int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int) { return launcherMain(instance, parseArgs(0, nullptr)); }
+#else
+int main(int argc, char** argv) { return launcherMain(nullptr, parseArgs(argc, argv)); }
+#endif

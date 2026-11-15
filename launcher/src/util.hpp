@@ -36,5 +36,7 @@ bool writeFileAtomic(const std::filesystem::path& path, std::string_view content
 [[nodiscard]] bool isSafeWebUrl(std::string_view url);
 // Opens a web page in the user's default browser.
 void openInBrowser(const std::string& url);
+// Shows a folder in the file manager.
+void openFolder(const std::filesystem::path& folder);
 
 }  // namespace launcher
