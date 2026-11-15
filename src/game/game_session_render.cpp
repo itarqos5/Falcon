@@ -174,6 +174,10 @@ std::vector<std::string> GameSession::debugLines() const {
     lines.push_back(format("Water: %zu waiting (tick %lld)", fluids_.pending(), fluids_.gameTime()));
     lines.push_back(format("RAM: %.0f MB  block data %.1f MB", megabytes(processWorkingSetBytes()), megabytes(s.levelBytes)));
     lines.push_back(format("GPU: meshes %.1f MB, textures %.2f MB", megabytes(s.meshBytes), megabytes(s.textureBytes)));
+    if (services_.options.lodsEnabled && renderer_.lodStats().tilesLoaded + renderer_.lodStats().tilesBuilding > 0) {
+        const LodStats lod = renderer_.lodStats();
+        lines.push_back(format("LODs: %d tiles drawn of %d (%d building), %d levels, %.1f MB", lod.tilesDrawn, lod.tilesLoaded, lod.tilesBuilding, lod.levels, lod.megabytes));
+    }
     lines.push_back(format("Chunk cache: %zu chunks, %.1f MB", s.cachedChunks, megabytes(s.cacheBytes)));
     (void)eye;
     return lines;

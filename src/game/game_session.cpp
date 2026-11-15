@@ -497,6 +497,7 @@ void GameSession::update(double dt, bool active, int framebufferWidth, int frame
     renderer_.setGpuTiming(showDebug_ || benchmark_.running);
     renderer_.setSmoothLighting(services_.options.ambientOcclusion);
     renderer_.setCutoutLeaves(services_.options.cutoutLeaves);
+    renderer_.setLods({services_.options.lodsEnabled, services_.options.lodChunkRadius, services_.options.lodDetail});
     renderer_.update(player_.x, player_.z, distance, ready_ ? 1.5 : 6.0);
     // (The old idle call to trimWorkingSet() was removed: SetProcessWorkingSetSize(-1,-1) empties every page out of RAM, so the
     // next frame faults them all back in - a ~0.7 s stall that showed up as a stutter whenever the world went quiet. The memory it
@@ -548,6 +549,11 @@ void GameSession::update(double dt, bool active, int framebufferWidth, int frame
             const auto stage = [](const char* name, const RenderStats::StageTime& t) {
                 return t.jobs > 0 ? format("%s %ld x %.2f ms = %.0f ms", name, t.jobs, t.milliseconds / static_cast<double>(t.jobs), t.milliseconds) : std::string(name) + " none";
             };
+            if (services_.options.lodsEnabled) {
+                const LodStats lod = renderer_.lodStats();
+                benchmark_.finalStats += format("; LODs: %d tiles drawn of %d (%d building), %ld triangles, %d levels, %.1f MB", lod.tilesDrawn, lod.tilesLoaded, lod.tilesBuilding,
+                                                lod.trianglesDrawn, lod.levels, lod.megabytes);
+            }
             benchmark_.workerStats = stage("terrain", s.terrainTime) + "; " + stage("decorate", s.decorateTime) + "; " + stage("light", s.lightTime) + "; " + stage("mesh", s.meshTime) + "; " +
                                      stage("pack", s.packTime);
         }

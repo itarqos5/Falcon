@@ -137,6 +137,10 @@ struct GameOptions {
     TextureFiltering textureFiltering = TextureFiltering::None;
     int maxAnisotropyBit = 2;             // 2^n x, n = 1..3
     int weatherRadius = 10;
+    // Levels of detail beyond the loaded chunks (render/lod_renderer.hpp). The detail is "LOD View Strength": 0 Low Detail, 1 Medium Detail, 2 Full Detail.
+    bool lodsEnabled = true;              // (the Fancy preset, which is the default, has them)
+    int lodChunkRadius = 128;             // 64..8192 chunks
+    int lodDetail = 1;
 
     // ---- video: preferences ----
     bool showAutosaveIndicator = true;

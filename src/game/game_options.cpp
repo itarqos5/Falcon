@@ -110,6 +110,9 @@ void GameOptions::save(OptionsFile& f) const {
     f.set("textureFiltering", static_cast<int>(textureFiltering));
     f.set("maxAnisotropyBit", maxAnisotropyBit);
     f.set("weatherRadius", weatherRadius);
+    f.set("lodsEnabled", lodsEnabled);
+    f.set("lodChunkRadius", lodChunkRadius);
+    f.set("lodDetail", lodDetail);
     f.set("showAutosaveIndicator", showAutosaveIndicator);
     f.set("vignette", vignette);
     f.set("attackIndicator", static_cast<int>(attackIndicator));
@@ -237,6 +240,9 @@ void GameOptions::load(const OptionsFile& f) {
     textureFiltering = readEnum(f, "textureFiltering", textureFiltering, 3);
     maxAnisotropyBit = std::clamp(f.getInt("maxAnisotropyBit", maxAnisotropyBit), 1, 3);
     weatherRadius = std::clamp(f.getInt("weatherRadius", weatherRadius), 3, 10);
+    lodsEnabled = f.getBool("lodsEnabled", lodsEnabled);
+    lodChunkRadius = std::clamp(f.getInt("lodChunkRadius", lodChunkRadius), 64, 8192);
+    lodDetail = std::clamp(f.getInt("lodDetail", lodDetail), 0, 2);
     showAutosaveIndicator = f.getBool("showAutosaveIndicator", showAutosaveIndicator);
     vignette = f.getBool("vignette", vignette);
     attackIndicator = readEnum(f, "attackIndicator", attackIndicator, 3);
