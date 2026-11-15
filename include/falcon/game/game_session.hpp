@@ -160,7 +160,11 @@ public:
     // ---- health ----
     // LivingEntity.hurt for the player: false if it counted for nothing (creative, spectator, dead, or a hit weaker than the one just taken).
     // Within the half second after a hit only a stronger one counts, and only for the difference; `bypassCooldown` is for the void.
-    bool hurt(float amount, bool bypassCooldown = false);
+    // `bypassArmor`: fall damage and the like ignore what is worn (the damage types that bypass armor); the rest is cut by CombatRules.getDamageAfterAbsorb.
+    bool hurt(float amount, bool bypassCooldown = false, bool bypassArmor = false);
+    // What the armor in the four armor slots adds up to (the armor bar) and its toughness.
+    [[nodiscard]] float armorPoints();
+    [[nodiscard]] float armorToughness();
     [[nodiscard]] bool dead() const { return dead_; }
     // True once after the player died: the game shows the death screen.
     [[nodiscard]] bool consumeDeathRequest() {
@@ -295,11 +299,11 @@ private:
     int perspective_ = 0;
     std::unique_ptr<PlayerBodyRenderer> body_;
     float walkPosition_ = 0.0f, walkSpeed_ = 0.0f, walkSpeedOld_ = 0.0f;  // WalkAnimationState
+    float swimAmount_ = 0.0f, swimAmountOld_ = 0.0f;                        // Player.swimAmount: how far into the swimming pose (0 to 1)
     float bodyYaw_ = 0.0f, bodyYawOld_ = 0.0f;
     double hudTickAccumulator_ = 0.0;
     int framebufferWidth_ = 0, framebufferHeight_ = 0;
     // The right-hand side of the debug screen: the graphics lines never change (read once), the memory of the PC is read once a second.
-    float swimAmount_ = 0.0f, swimAmountOld_ = 0.0f;                        // Player.swimAmount: how far into the swimming pose (0 to 1)
     std::vector<std::string> gpuLines_;
     SystemMemory systemMemory_;
     double systemMemoryAge_ = 1.0e9;

@@ -762,14 +762,40 @@ void GameSession::fallDamage(int damage) {
         const BlockType& type = registry_->type(under);
         playBlockSound(under, "fall", fallMix(type.soundVolume, type.soundPitch), SoundSource::Players);
     }
-    hurt(static_cast<float>(damage));
+    hurt(static_cast<float>(damage), false, true);
 }
 
 // ---------------------------------------------------------------------------------------------------------------
 // Health
 
-bool GameSession::hurt(float amount, bool bypassCooldown) {
+float GameSession::armorPoints() {
+    float total = 0.0f;
+    for (const int slot : {Inventory::kFeet, Inventory::kLegs, Inventory::kChest, Inventory::kHead}) {
+        const ItemStack& stack = inventory_.item(slot);
+        if (!stack.isEmpty() && stack.type().armorSlot != EquipSlot::None) total += stack.type().armor;
+    }
+    return total;
+}
+
+float GameSession::armorToughness() {
+    float total = 0.0f;
+    for (const int slot : {Inventory::kFeet, Inventory::kLegs, Inventory::kChest, Inventory::kHead}) {
+        const ItemStack& stack = inventory_.item(slot);
+        if (!stack.isEmpty() && stack.type().armorSlot != EquipSlot::None) total += stack.type().armorToughness;
+    }
+    return total;
+}
+
+bool GameSession::hurt(float amount, bool bypassCooldown, bool bypassArmor) {
     if (!survivalBars() || dead_ || amount <= 0.0f) return false;  // creative and spectator players cannot be hurt
+    if (!bypassArmor) {  // CombatRules.getDamageAfterAbsorb: armor takes up to four fifths of a hit (more of a small one), toughness helps against big ones
+        const float armor = armorPoints();
+        if (armor > 0.0f) {
+            const float f = 2.0f + armorToughness() / 4.0f;
+            const float g = std::clamp(armor - amount / f, armor * 0.2f, 20.0f);
+            amount *= 1.0f - g / 25.0f;
+        }
+    }
     float applied = amount;
     if (!bypassCooldown && invulnerableTime_ > 10) {  // LivingEntity.hurtServer: in the half second after a hit only a stronger one counts, for the difference
         if (amount <= lastHurt_) return false;
@@ -888,6 +914,8 @@ void GameSession::pickUpItems() {
 // The walk cycle and where the body faces (LivingEntity.tick and tickHeadTurn): the body turns towards where the player is going, never more than
 // 75 degrees away from where the head looks.
 void GameSession::tickBody() {
+    swimAmountOld_ = swimAmount_;  // Player.updateSwimAmount
+    swimAmount_ = player_.isVisuallySwimming() ? std::min(1.0f, swimAmount_ + 0.09f) : std::max(0.0f, swimAmount_ - 0.09f);
     const double dx = player_.x - player_.xo, dz = player_.z - player_.zo;
     walkSpeedOld_ = walkSpeed_;
     walkSpeed_ += (std::min(static_cast<float>(std::sqrt(dx * dx + dz * dz)) * 4.0f, 1.0f) - walkSpeed_) * 0.4f;
@@ -914,8 +942,6 @@ void GameSession::tickBody() {
 
 bool GameSession::giveItem(const std::string& spec) {
     // "item", "item:count" or "item:count:wear".
-    swimAmountOld_ = swimAmount_;  // Player.updateSwimAmount
-    swimAmount_ = player_.isVisuallySwimming() ? std::min(1.0f, swimAmount_ + 0.09f) : std::max(0.0f, swimAmount_ - 0.09f);
     std::vector<std::string> parts;
     for (std::size_t from = 0;;) {
         const std::size_t colon = spec.find(':', from);
@@ -967,6 +993,18 @@ void GameSession::interact(double dt, bool active) {
         hand_.resetAttackStrength();
     }
     if (attack && !creative()) digSurvival(dt, freshPress);
+    if (use && placeCooldown_ <= 0.0 && !inventory_.selectedItem().isEmpty()) {
+        // Equippable.swapWithEquipmentSlot: armor used in the hand (aimed at a block or at the air) goes on, and what was worn there comes into the hand.
+        const EquipSlot armorSlot = inventory_.selectedItem().type().armorSlot;
+        if (armorSlot == EquipSlot::Head || armorSlot == EquipSlot::Chest || armorSlot == EquipSlot::Legs || armorSlot == EquipSlot::Feet) {
+            const int slot = armorSlot == EquipSlot::Head ? Inventory::kHead : armorSlot == EquipSlot::Chest ? Inventory::kChest : armorSlot == EquipSlot::Legs ? Inventory::kLegs : Inventory::kFeet;
+            std::swap(inventory_.selectedItem(), inventory_.item(slot));
+            placeCooldown_ = kRepeatDelay * 2.0;
+            playWorldSound("item.armor.equip_generic", SoundSource::Players, 1.0f, 1.0f);
+            hand_.swing();
+            return;
+        }
+    }
     if (!target_) return;
 
     if (attack && creative() && breakCooldown_ <= 0.0) {  // creative: every block goes at once, five ticks apart
@@ -1299,6 +1337,14 @@ void GameSession::renderWorld(int framebufferWidth, int framebufferHeight) {
             pose.crouching = player_.sneaking;
             pose.ageTicks = playerAgeTicks_ + partialTick_;
             pose.parts = services_.options.modelParts;
+            pose.swimAmount = swimAmountOld_ + (swimAmount_ - swimAmountOld_) * t;
+            pose.visuallySwimming = player_.isVisuallySwimming();
+            pose.inWater = player_.inWater;
+            for (std::size_t i = 0; i < 4; ++i) {  // head, chest, legs, feet
+                static constexpr int kSlots[4] = {Inventory::kHead, Inventory::kChest, Inventory::kLegs, Inventory::kFeet};
+                const ItemStack& worn = inventory_.item(kSlots[i]);
+                if (!worn.isEmpty() && worn.type().armorSlot != EquipSlot::None) pose.armor[i] = worn.type().name;
+            }
             int sky = 15, block = 0;
             renderer_.lightAtWithCarried(static_cast<int>(std::floor(pose.position[0])), static_cast<int>(std::floor(pose.position[1] + 1.0)), static_cast<int>(std::floor(pose.position[2])), sky, block);
             pose.light = entityLightColor(sky, block, static_cast<float>(services_.options.gamma));
@@ -1337,14 +1383,6 @@ std::vector<std::string> GameSession::debugLines() const {
     const int by = static_cast<int>(std::floor(player_.y));
     const int bz = static_cast<int>(std::floor(player_.z));
     lines.push_back(format("Block: %d %d %d   Chunk: %d %d in %d %d", bx, by, bz, bx & 15, bz & 15, chunkOf(bx), chunkOf(bz)));
-            pose.swimAmount = swimAmountOld_ + (swimAmount_ - swimAmountOld_) * t;
-            pose.visuallySwimming = player_.isVisuallySwimming();
-            pose.inWater = player_.inWater;
-            for (std::size_t i = 0; i < 4; ++i) {  // head, chest, legs, feet
-                static constexpr int kSlots[4] = {Inventory::kHead, Inventory::kChest, Inventory::kLegs, Inventory::kFeet};
-                const ItemStack& worn = inventory_.item(kSlots[i]);
-                if (!worn.isEmpty() && worn.type().armorSlot != EquipSlot::None) pose.armor[i] = worn.type().name;
-            }
     lines.push_back(format("Facing: %s (%.1f / %.1f)", facing(player_.yaw), static_cast<double>(player_.yaw), static_cast<double>(player_.pitch)));
     if (overworld_) {
         const std::string_view biome = overworld_->biomeNameAt(static_cast<int>(std::floor(player_.x)), static_cast<int>(std::floor(player_.y)), static_cast<int>(std::floor(player_.z)));
@@ -1562,6 +1600,16 @@ void GameSession::drawSurvivalBars(GuiGraphics& g, int guiWidth, int guiHeight) 
     const auto heartSprite = [hardcore](const char* kind, bool blinking) {
         return std::string("hud/heart/") + (hardcore ? "hardcore_" : "") + kind + (blinking ? "_blinking" : "");
     };
+    // The armor bar above the hearts (Hud.extractArmor): ten icons, each two points, only while something is worn.
+    if (const int armor = static_cast<int>(armorPoints()); armor > 0) {
+        const int rows = static_cast<int>(std::ceil(vitals_.maxHealth / 2.0f / 10.0f));
+        const int armorY = l.rowY - (rows - 1) * l.rowHeight - 10;
+        for (int i = 0; i < 10; ++i) {
+            const int x = l.left + i * 8;
+            const int k = i * 2 + 1;
+            g.blitSprite(k < armor ? "hud/armor_full" : k == armor ? "hud/armor_half" : "hud/armor_empty", x, armorY, 9, 9);
+        }
+    }
     for (int heart = maxHearts - 1; heart >= 0; --heart) {
         int y = l.heartY(heart);
         if (heartsShake(vitals_.health)) y += tickJitter(tick, heart, 2);
