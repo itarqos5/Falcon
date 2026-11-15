@@ -537,6 +537,67 @@ void HandRenderer::renderGroundItems(WorldRenderer& world, const Matrix4f& viewP
     }
 }
 
+void HandRenderer::renderBlockEntities(WorldRenderer& world, const Matrix4f& viewProj, const std::vector<FallingBlock>& falling, const std::vector<PrimedTnt>& tnt,
+                                       const std::array<double, 3>& cam, double partialTick) {
+    if (falling.empty() && tnt.empty()) return;
+    gl::Enable(gl::DEPTH_TEST);
+    gl::Enable(gl::CULL_FACE);
+    gl::CullFace(gl::BACK);
+    gl::FrontFace(gl::CCW);
+    gl::Disable(gl::BLEND);
+    const BlockRegistry& registry = blockRegistry();
+    const auto lit = [&](std::vector<MeshVertex> vertices, double x, double y, double z) {
+        int sky = 15, block = 0;
+        world.lightAtWithCarried(static_cast<int>(std::floor(x)), static_cast<int>(std::floor(y + 0.5)), static_cast<int>(std::floor(z)), sky, block);
+        for (MeshVertex& v : vertices) {
+            v.sky = static_cast<std::uint8_t>(sky * 17);
+            v.block = static_cast<std::uint8_t>(block * 17);
+        }
+        return vertices;
+    };
+    for (const FallingBlock& e : falling) {
+        if (e.id < 0) continue;
+        const Item item = itemRegistry().itemOfBlock(registry.state(e.block).block);
+        if (item == Item::Air) continue;
+        const double px = e.xo + (e.x - e.xo) * partialTick, py = e.yo + (e.y - e.yo) * partialTick, pz = e.zo + (e.z - e.zo) * partialTick;
+        if ((px - cam[0]) * (px - cam[0]) + (py - cam[1]) * (py - cam[1]) + (pz - cam[2]) * (pz - cam[2]) > 96.0 * 96.0) continue;
+        const HeldModel& model = modelFor(ItemStack(item, 1));
+        if (model.empty) continue;
+        const M4 pose = translate(px - 0.5 - cam[0], py - cam[1], pz - 0.5 - cam[2]);
+        world.drawHeld(viewProj * pose.toFloat(), lit(model.vertices, px, py, pz));
+    }
+    static const auto tntItem = itemRegistry().find("tnt");
+    if (!tnt.empty() && tntItem) {
+        const HeldModel& model = modelFor(ItemStack(*tntItem, 1));
+        const std::uint16_t whiteLayer = models_.layerFor("minecraft:block/white_concrete");
+        for (const PrimedTnt& e : tnt) {
+            if (e.id < 0 || model.empty) continue;
+            const double px = e.xo + (e.x - e.xo) * partialTick, py = e.yo + (e.y - e.yo) * partialTick, pz = e.zo + (e.z - e.zo) * partialTick;
+            if ((px - cam[0]) * (px - cam[0]) + (py - cam[1]) * (py - cam[1]) + (pz - cam[2]) * (pz - cam[2]) > 96.0 * 96.0) continue;
+            // PrimedTntRenderer: it swells in the last half second, and every five ticks it is a white block.
+            const double left = static_cast<double>(e.fuse) - partialTick + 1.0;
+            double scale = 1.0;
+            if (left < 10.0) {
+                double g = std::clamp(1.0 - left / 10.0, 0.0, 1.0);
+                g = g * g;
+                g = g * g;
+                scale = 1.0 + g * 0.3;
+            }
+            std::vector<MeshVertex> vertices = lit(model.vertices, px, py, pz);
+            if ((e.fuse / 5) % 2 == 0) {
+                for (MeshVertex& v : vertices) {
+                    v.layer = static_cast<std::int16_t>(whiteLayer);
+                    v.r = v.g = v.b = 255;
+                    v.shade = 255;
+                    v.sky = v.block = 255;
+                }
+            }
+            const M4 pose = translate(px - cam[0], py + 0.5 - cam[1], pz - cam[2]) * scaleBy(scale, scale, scale) * translate(-0.5, -0.5, -0.5);
+            world.drawHeld(viewProj * pose.toFloat(), vertices);
+        }
+    }
+}
+
 std::array<float, 3> entityLightColor(int sky, int block, float gamma) { return lightMapColor(sky, block, gamma); }
 
 }  // namespace falcon

@@ -12,6 +12,8 @@
 #include "falcon/render/item_icons.hpp"
 #include "falcon/render/player_preview.hpp"
 #include "falcon/world/block_registry.hpp"
+#include "falcon/world/block_behaviours.hpp"
+#include "falcon/world/block_physics.hpp"
 #include "falcon/world/block_support.hpp"
 #include "falcon/world/block_tags.hpp"
 #include "falcon/world/loot.hpp"
@@ -891,6 +893,125 @@ void test_block_support_real(const std::filesystem::path& dataDir, const BlockRe
     CHECK(support->afterNeighborChange(doorLower, 0, 1, 0, at) == doorLower && support->afterNeighborChange(doorUpper, 0, 2, 0, at) == doorUpper);
 }
 
+// Blocks that fall, burn and explode, with the game's own tables: which blocks do what, and a small world in which they do it.
+void test_block_physics_real(const std::filesystem::path& dataDir, const BlockRegistry& blocks) {
+    std::string error;
+    const auto behaviours = BlockBehaviours::loadFromGameData(dataDir, blocks, error);
+    CHECK(behaviours != nullptr);
+    if (!behaviours) {
+        std::printf("  block behaviours failed: %s\n", error.c_str());
+        return;
+    }
+    const auto index = [&](const char* name) { return blocks.findBlock(name).value_or(-1); };
+    CHECK(behaviours->isFallable(index("sand")) && behaviours->isFallable(index("gravel")) && behaviours->isFallable(index("anvil")) &&
+          behaviours->isFallable(index("white_concrete_powder")) && !behaviours->isFallable(index("stone")));
+    CHECK(behaviours->isAnvil(index("chipped_anvil")) && behaviours->isTnt(index("tnt")) && behaviours->isFire(index("soul_fire")) && behaviours->isSpreadingFire(index("fire")));
+    CHECK(!behaviours->isSpreadingFire(index("soul_fire")) && behaviours->concreteOf(index("white_concrete_powder")) == index("white_concrete"));
+    CHECK(behaviours->igniteOdds(index("oak_planks")) == 5 && behaviours->burnOdds(index("oak_planks")) == 20);
+    CHECK(behaviours->igniteOdds(index("tnt")) == 15 && behaviours->burnOdds(index("tnt")) == 100 && behaviours->burnOdds(index("oak_leaves")) == 60);
+    CHECK(behaviours->igniteOdds(index("stone")) == 0);
+
+    // A small world: one chunk, a stone floor at y = 60.
+    Level level;
+    level.putChunk({0, 0}, std::make_shared<Chunk>());
+    const Block stone = blocks.find("stone").value(), air = Block::Air;
+    for (int x = 0; x < 16; ++x) {
+        for (int z = 0; z < 16; ++z) level.setBlock(x, 60, z, stone);
+    }
+    ItemEntities items;
+    BlockPhysics* self = nullptr;
+    BlockPhysics::Host host;
+    int sounds = 0;
+    host.setBlock = [&](int x, int y, int z, Block b) {  // (what GameSession::setBlock does: the block, then its neighbours are told)
+        if (!level.setBlock(x, y, z, b)) return false;
+        self->blockPlaced(x, y, z);
+        static constexpr int kDir[6][3] = {{0, -1, 0}, {0, 1, 0}, {0, 0, -1}, {0, 0, 1}, {-1, 0, 0}, {1, 0, 0}};
+        const BlockPhysics::Reader at = [&](int bx, int by, int bz) { return level.block(bx, by, bz); };
+        for (const auto& d : kDir) {
+            const Block n = level.block(x + d[0], y + d[1], z + d[2]);
+            const Block now = self->afterNeighborChange(n, x + d[0], y + d[1], z + d[2], at);
+            if (now != n) level.setBlock(x + d[0], y + d[1], z + d[2], now);
+        }
+        return true;
+    };
+    host.sound = [&](const std::string&, float, float, double, double, double) { ++sounds; };
+    host.player = [] { return PhysicsPlayer{Aabb{100, 100, 100, 101, 102, 101}, 101.6, false}; };
+    BlockPhysics physics(level, behaviours, items, host, 1234);
+    self = &physics;
+
+    // Sand over a hole falls and lands on the floor; the block above it follows; gravel on the floor stays.
+    const Block sand = blocks.find("sand").value(), gravel = blocks.find("gravel").value();
+    host.setBlock(4, 70, 4, sand);
+    host.setBlock(4, 71, 4, gravel);
+    host.setBlock(8, 61, 8, gravel);
+    for (int i = 0; i < 120; ++i) physics.tick();
+    CHECK(level.block(4, 61, 4) == sand && level.block(4, 62, 4) == gravel);  // the lower one lands first, the one above follows it down
+    CHECK(level.block(4, 70, 4) == air && level.block(4, 71, 4) == air && level.block(8, 61, 8) == gravel);
+    CHECK(physics.fallingBlocks().empty());
+
+    // Concrete powder that lands in water sets.
+    const Block water = blocks.find("water").value(), powder = blocks.find("white_concrete_powder").value();
+    host.setBlock(10, 61, 10, water);
+    host.setBlock(10, 66, 10, powder);
+    for (int i = 0; i < 80; ++i) physics.tick();
+    CHECK(level.block(10, 61, 10) == blocks.find("white_concrete").value() || level.block(10, 62, 10) == blocks.find("white_concrete").value());
+
+    // TNT: a block of dirt round the middle is gone (stone would swallow the rays), and the TNT beside it is set off.
+    for (int x = 0; x < 16; ++x) {
+        for (int z = 0; z < 16; ++z) {
+            for (int y = 61; y <= 70; ++y) level.setBlock(x, y, z, air);
+        }
+    }
+    const Block dirt = blocks.find("dirt").value();
+    for (int x = 5; x <= 11; ++x) {
+        for (int z = 5; z <= 11; ++z) {
+            for (int y = 61; y <= 66; ++y) level.setBlock(x, y, z, dirt);
+        }
+    }
+    const Block tnt = blocks.find("tnt").value();
+    level.setBlock(13, 61, 8, tnt);
+    physics.explode(8.5, 63.5, 8.5, 4.0f);
+    CHECK(level.block(8, 63, 8) == air && level.block(8, 64, 8) == air);   // the middle
+    CHECK(level.block(8, 60, 8) == stone);  // the floor under it holds (stone: resistance 6, the rays run out)
+    int dirtLeft = 0;
+    for (int x = 5; x <= 11; ++x) {
+        for (int z = 5; z <= 11; ++z) {
+            for (int y = 61; y <= 66; ++y) dirtLeft += level.block(x, y, z) == dirt ? 1 : 0;
+        }
+    }
+    CHECK(dirtLeft > 0 && dirtLeft < 7 * 7 * 6 - 60);  // a crater, not the whole lot
+    CHECK(sounds > 0);
+    // The TNT block was reached by the blast only if the rays got that far; a second explosion right beside it surely does.
+    physics.explode(12.5, 61.5, 8.5, 4.0f);
+    CHECK(level.block(13, 61, 8) == air && physics.primedTnt().size() == 1 && physics.primedTnt()[0].fuse >= 10 && physics.primedTnt()[0].fuse < 30);
+    for (int i = 0; i < 40; ++i) physics.tick();
+    CHECK(physics.primedTnt().empty());  // it went off
+
+    // Fire: a flame next to a plank burns on for a while and, with leaves round it, they go (statistically); it cannot stand on nothing.
+    const Block planks = blocks.find("oak_planks").value();
+    level.setBlock(2, 61, 2, planks);
+    level.setBlock(2, 62, 2, planks);
+    CHECK(physics.canPlaceFireAt(3, 61, 2) && physics.canPlaceFireAt(2, 63, 2) && !physics.canPlaceFireAt(2, 62, 2) && !physics.canPlaceFireAt(14, 80, 14));
+    // On a floor the flames stand on it; hanging off the side of a plank in the air they show on that side.
+    CHECK(blocks.get(physics.fireStateAt(3, 61, 2), "west") == "false");
+    level.setBlock(2, 70, 2, planks);
+    const Block sideFire = physics.fireStateAt(3, 70, 2);
+    CHECK(physics.canPlaceFireAt(3, 70, 2) && blocks.type(sideFire).name == "fire" && blocks.get(sideFire, "west") == "true" && blocks.get(sideFire, "up") == "false");
+    level.setBlock(2, 70, 2, air);
+    host.setBlock(3, 61, 2, physics.fireStateAt(3, 61, 2));
+    for (int i = 0; i < 3000; ++i) physics.tick();  // 2.5 minutes
+    int planksLeft = (level.block(2, 61, 2) == planks ? 1 : 0) + (level.block(2, 62, 2) == planks ? 1 : 0);
+    CHECK(planksLeft < 2);  // wood next to a fire for minutes does not survive
+
+    // A fire with nothing to stand on or burn goes out when its floor goes.
+    level.setBlock(12, 61, 12, stone);
+    host.setBlock(12, 62, 12, physics.fireStateAt(12, 62, 12));
+    CHECK(blocks.type(level.block(12, 62, 12)).name == "fire");
+    host.setBlock(12, 61, 12, air);
+    const BlockPhysics::Reader at = [&](int x, int y, int z) { return level.block(x, y, z); };
+    CHECK(physics.afterNeighborChange(level.block(12, 62, 12), 12, 62, 12, at) == air);
+}
+
 // How long blocks take to dig and what they drop, from the game's tags and loot tables.
 void test_mining_real(const std::filesystem::path& dataDir, const BlockRegistry& blocks, const ItemRegistry& items) {
     const BlockTags tags(dataDir / "data" / "minecraft" / "tags" / "block", blocks);
@@ -1153,6 +1274,7 @@ void test_item_registry_and_recipes_real(const std::filesystem::path& dataDir) {
     test_creative_tabs_real(dataDir, *items);
     test_block_support_real(dataDir, *blocks);
     test_mining_real(dataDir, *blocks, *items);
+    test_block_physics_real(dataDir, *blocks);
     test_player_preview_real(dataDir / "assets");
     test_item_names_real(dataDir / "assets");
     test_item_icons_real(dataDir / "assets", blocks);

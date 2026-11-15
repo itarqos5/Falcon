@@ -6,6 +6,7 @@
 #include "falcon/render/block_models.hpp"
 #include "falcon/render/camera.hpp"
 #include "falcon/render/item_icons.hpp"
+#include "falcon/world/block_physics.hpp"
 #include "falcon/world/item_entity.hpp"
 #include "falcon/world/item_stack.hpp"
 #include "falcon/world/mesher.hpp"
@@ -59,6 +60,10 @@ public:
     // Draws the items lying in the world (ItemEntityRenderer): each bobs and turns slowly, a bigger stack is drawn as a few copies. `viewProj` is the
     // frame's view and projection (the world is drawn relative to the camera, which is at `cam`).
     void renderGroundItems(WorldRenderer& world, const Matrix4f& viewProj, const std::array<double, 3>& cam, const std::vector<ItemEntity>& items, double partialTick);
+
+    // Draws the blocks that fall and the TNT that burns (FallingBlockRenderer, TntRenderer): a whole block, the TNT swelling and flashing white at the end.
+    void renderBlockEntities(WorldRenderer& world, const Matrix4f& viewProj, const std::vector<FallingBlock>& falling, const std::vector<PrimedTnt>& tnt, const std::array<double, 3>& cam,
+                             double partialTick);
 
     // For tests: the progress values the animation has now.
     [[nodiscard]] float swingProgress(double partialTick) const;

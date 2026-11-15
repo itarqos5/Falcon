@@ -25,6 +25,8 @@
 #include "falcon/world/fluids.hpp"
 #include "falcon/world/raycast.hpp"
 #include "falcon/world/water_fog.hpp"
+#include "falcon/world/block_behaviours.hpp"
+#include "falcon/world/block_physics.hpp"
 #include "falcon/world/block_support.hpp"
 #include "falcon/world/block_tags.hpp"
 #include "falcon/world/loot.hpp"
@@ -322,6 +324,8 @@ private:
     double digClock_ = 0.0;
     std::unique_ptr<BlockTags> blockTags_;
     std::unique_ptr<MiningRules> mining_;
+    std::shared_ptr<const BlockBehaviours> behaviours_;  // which blocks fall, burn or explode (null: the game files are missing)
+    std::unique_ptr<BlockPhysics> physics_;              // falling blocks, fire, TNT
     std::unique_ptr<BlockLoot> loot_;
     double placeCooldown_ = 0.0;
     double fps_ = 0.0;

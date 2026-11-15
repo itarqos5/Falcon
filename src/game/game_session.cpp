@@ -191,6 +191,41 @@ GameSession::GameSession(ScreenServices& services, const ResourceManager& resour
     {
         std::string supportError;
         support_ = BlockSupport::loadFromGameData(resources.dataRoot(), *registry_, supportError);
+        {  // blocks that fall, fire and TNT
+            std::string behaviourError;
+            behaviours_ = BlockBehaviours::loadFromGameData(resources.dataRoot(), *registry_, behaviourError);
+            if (!behaviours_) {
+                std::printf("[falcon] block behaviours: %s (sand will not fall, fire and TNT will not work)\n", behaviourError.c_str());
+            } else {
+                BlockPhysics::Host host;
+                host.setBlock = [this](int x, int y, int z, Block b) { return setBlock(x, y, z, b); };
+                host.sound = [this](const std::string& event, float volume, float pitch, double x, double y, double z) {
+                    const std::array<double, 3> at = {x, y, z};
+                    playWorldSound(event, SoundSource::Blocks, volume, pitch, &at);
+                };
+                host.drops = [this](Block b) {
+                    std::mt19937 random(rng_());
+                    return loot_ ? loot_->drops(b, ItemStack(), random) : std::vector<ItemStack>{};
+                };
+                host.player = [this] {
+                    PhysicsPlayer p;
+                    p.box = player_.boundingBox();
+                    p.eyeY = player_.eyeY();
+                    p.hurtable = survivalBars();
+                    return p;
+                };
+                host.hurtPlayer = [this](float amount) { hurt(amount); };
+                host.pushPlayer = [this](double dx, double dy, double dz) {
+                    player_.vx += dx;
+                    player_.vy += dy;
+                    player_.vz += dz;
+                };
+                host.beginBatch = [this] { renderer_.beginBatch(); };
+                host.endBatch = [this] { renderer_.endBatch(); };
+                physics_ = std::make_unique<BlockPhysics>(renderer_.level(), behaviours_, itemEntities_, std::move(host), static_cast<std::uint32_t>(rng_()));
+                if (const char* speed = std::getenv("FALCON_RANDOM_TICK_SPEED")) physics_->setRandomTickSpeed(std::atoi(speed));  // (tests: lava starts fires in seconds)
+            }
+        }
         blockTags_ = std::make_unique<BlockTags>(resources.dataRoot() / "data" / "minecraft" / "tags" / "block", *registry_);
         mining_ = std::make_unique<MiningRules>(*registry_, *blockTags_);
         loot_ = std::make_unique<BlockLoot>(resources.dataRoot(), *registry_);
@@ -391,7 +426,8 @@ PlayerInput GameSession::sampleInput() const {
 bool GameSession::setBlock(int x, int y, int z, Block block) {
     if (!renderer_.setBlock(x, y, z, block)) return false;
     fluids_.blockChanged(renderer_.level(), x, y, z);  // water next to it looks round again (flows into a hole, or loses its source)
-    if (support_) {
+    if (physics_) physics_->blockPlaced(x, y, z);  // sand may fall, fire starts to burn
+    if (support_ || physics_) {
         // The game's neighbour updates (updateShape): every block next to a change checks that it can still stand, and a plant that
         // cannot (its soil gone, the other half of a tall plant gone) disappears, which tells ITS neighbours in turn.
         const BlockSupport::Reader at = [this](int bx, int by, int bz) { return renderer_.level().block(bx, by, bz); };
@@ -444,6 +480,7 @@ void GameSession::tickPlayer(double seconds, bool steering) {
         // The water that flows: its updates that are due this tick.
         fluids_.tick(renderer_.level(), [this](int bx, int by, int bz, Block b) { return renderer_.setBlock(bx, by, bz, b); });
     }
+        if (ready_ && physics_) physics_->tick();
     // Out of the world (below the void line) the void hurts a survival player (4 a tick, through any protection) until they die; anyone else
     // starts again at the spawn.
     if (!pinnedPose_ && player_.y < static_cast<double>(kMinY) - 64.0) {
@@ -502,10 +539,14 @@ void GameSession::breakBlockAt(int x, int y, int z, bool survival) {
     setBlock(x, y, z, Block::Air);
     hand_.swing();
     if (registry_->isAir(broken)) return;
-    {  // the break sound of the block, heard where it was
+    {  // the break sound of the block, heard where it was (a fire put out hisses instead)
         const std::array<double, 3> where = {x + 0.5, y + 0.5, z + 0.5};
         const BlockType& type = registry_->type(broken);
-        playBlockSound(broken, "break", breakOrPlaceMix(type.soundVolume, type.soundPitch), SoundSource::Blocks, &where);
+        if (behaviours_ && behaviours_->isFire(registry_->state(broken).block)) {
+            playWorldSound("block.fire.extinguish", SoundSource::Blocks, 0.5f, 2.6f + (randomFloat() - randomFloat()) * 0.8f, &where);
+        } else {
+            playBlockSound(broken, "break", breakOrPlaceMix(type.soundVolume, type.soundPitch), SoundSource::Blocks, &where);
+        }
     }
     if (!survival) return;
     const ItemStack tool = inventory_.selectedItem();
@@ -1188,6 +1229,7 @@ void GameSession::renderWorld(int framebufferWidth, int framebufferHeight) {
 std::vector<std::string> GameSession::debugLines() const {
     const RenderStats s = renderer_.stats();
     const auto eye = player_.eye();
+        if (physics_) hand_.renderBlockEntities(renderer_, renderer_.viewProjection(), physics_->fallingBlocks(), physics_->primedTnt(), camPos, partialTick_);
     std::vector<std::string> lines;
     lines.push_back(format("Falcon 0.1.0 (Minecraft 26.3) - %s", info_.name.c_str()));
     lines.push_back(format("%.0f fps (%.1f ms)  cpu %.1f  gpu %.1f", fps_, frameMillis_, cpuMillis_, renderer_.gpuMillis()));
