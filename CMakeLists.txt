@@ -277,6 +277,9 @@ add_library(falcon_core
     src/worldgen/overworld_generator.cpp
     src/worldgen/underground.cpp
     src/net/server_pinger.cpp
+    src/net/connection.cpp
+    src/net/protocol_data.cpp
+    src/net/multiplayer_client.cpp
     src/audio/vorbis_impl.c
     src/audio/miniaudio_impl.cpp
     src/audio/ogg.cpp
