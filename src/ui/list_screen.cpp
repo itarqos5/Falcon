@@ -83,7 +83,7 @@ ListScreen::ListScreen(ScreenNavigator& navigator, std::string titleKey)
 
 void ListScreen::init() {
     const std::string title = text(titleKey_);
-    const ListScreenLayout l = computeListScreenLayout(width_, height_, font().width(title));
+    const ListScreenLayout l = computeLayout(font().width(title));
 
     addLabel(title, l.title.x, l.title.y);
     list_ = &addWidget<ScrollList>(l.list.x, l.list.y, l.list.width, l.list.height, metrics::kRowHeight, kBigWidth,
@@ -93,6 +93,10 @@ void ListScreen::init() {
     addFooter(l);
 }
 
+ListScreenLayout ListScreen::computeLayout(int titleWidth) const { return computeListScreenLayout(width_, height_, titleWidth); }
+
+int ListScreen::rowsWidth() const { return list_->x * 2 + list_->width; }
+
 void ListScreen::addFooter(const ListScreenLayout& l) { addButton(text("gui.done"), l.done, [this] { onClose(); }); }
 
 void ListScreen::render(GuiGraphics& graphics, int mouseX, int mouseY, const FrameTime& time) {
@@ -100,16 +104,16 @@ void ListScreen::render(GuiGraphics& graphics, int mouseX, int mouseY, const Fra
     Screen::render(graphics, mouseX, mouseY, time);
 }
 
-void ListScreen::addBig(std::unique_ptr<Widget> widget) { list_->addEntry<ListRow>(width_).add(std::move(widget)); }
+void ListScreen::addBig(std::unique_ptr<Widget> widget) { list_->addEntry<ListRow>(rowsWidth()).add(std::move(widget)); }
 
 void ListScreen::addPair(std::unique_ptr<Widget> left, std::unique_ptr<Widget> right) {
-    auto& row = list_->addEntry<ListRow>(width_);
+    auto& row = list_->addEntry<ListRow>(rowsWidth());
     row.add(std::move(left));
     if (right) row.add(std::move(right));
 }
 
 void ListScreen::addHeader(const std::string& headerText) {
-    list_->addEntry<HeaderRow>(headerText, width_, list_->entryCount() == 0);
+    list_->addEntry<HeaderRow>(headerText, rowsWidth(), list_->entryCount() == 0);
 }
 
 std::string ListScreen::optionLabel(const std::string& captionKey, const std::string& value) const {

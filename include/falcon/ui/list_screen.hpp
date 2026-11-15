@@ -71,6 +71,9 @@ protected:
 
     void init() final;
     virtual void addOptions() = 0;
+    // Where the title, the list and the Done button go (a screen with something beside the list moves the list over).
+    [[nodiscard]] virtual ListScreenLayout computeLayout(int titleWidth) const;
+    [[nodiscard]] ScrollList& list() { return *list_; }
     // The Done button by default (200 wide, centred); a screen may put its own buttons there.
     virtual void addFooter(const ListScreenLayout& layout);
 
@@ -79,6 +82,8 @@ protected:
     void addPair(std::unique_ptr<Widget> left, std::unique_ptr<Widget> right = nullptr);
     // A bold, underlined section title row.
     void addHeader(const std::string& headerText);
+    // Twice the x of the list's middle: what a row centres its widgets in (the screen's width unless the list was moved).
+    [[nodiscard]] int rowsWidth() const;
 
     // "Caption: value" (options.generic_value) with the caption looked up from its key.
     [[nodiscard]] std::string optionLabel(const std::string& captionKey, const std::string& value) const;
