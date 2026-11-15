@@ -342,9 +342,10 @@ void JoinMultiplayerScreen::updateButtons() {
 }
 
 void JoinMultiplayerScreen::join(const std::shared_ptr<ServerEntry>& server) {
-    // There is no game to join a server with yet.
-    std::printf("[falcon] join server '%s' (%s) pressed (not implemented yet)\n", server->name.c_str(), server->ip.c_str());
+    if (!services_.joinServer) return;
+    std::printf("[falcon] joining %s (%s)\n", server->name.c_str(), server->ip.c_str());
     std::fflush(stdout);
+    services_.joinServer(server->ip);
 }
 
 void JoinMultiplayerScreen::joinSelected() {

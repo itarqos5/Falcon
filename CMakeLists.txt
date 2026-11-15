@@ -331,6 +331,7 @@ add_library(falcon_core
     src/game/join_multiplayer_screen.cpp
     src/game/server_screens.cpp
     src/game/safety_screen.cpp
+    src/game/disconnected_screen.cpp
     src/game/sound_options_screen.cpp
     src/game/pack_selection_screen.cpp
 )

@@ -24,6 +24,8 @@
 #include "falcon/game/game_session.hpp"
 #include "falcon/game/game_ui.hpp"
 #include "falcon/game/death_screen.hpp"
+#include "falcon/game/disconnected_screen.hpp"
+#include "falcon/game/join_multiplayer_screen.hpp"
 #include "falcon/gfx/frame_queue.hpp"
 #include "falcon/game/in_game_screen.hpp"
 #include "falcon/game/lighting_audit.hpp"
@@ -373,9 +375,9 @@ int Client::run() {
                             loadLanguageList(resources), nullptr, {}, {}, "Player", {}, {}, {}};
     if (options_.username && !options_.username->empty()) services.playerName = *options_.username;
     if (options_.uuid) services.playerUuid = *options_.uuid;
+    services.accessToken = options_.accessToken;
     services.maxGuiScale = [&] { return calculateGuiScale(framebufferNowW, framebufferNowH, /*requested=*/0, false); };
     services.videoModes = [&window] { return window.videoModes(); };
-    services.accessToken = options_.accessToken;
     GameUiContext gameUi(services);  // what the UI library needs from the game
     navigator.setUi(gameUi);
     services.packsChanged = [&] { reloader.request(gameOptions.resourcePacks, gameOptions.language); };
@@ -394,6 +396,8 @@ int Client::run() {
     bool leftWorld = false;  // a world was played and then quit (a --capture run then no longer waits for one)
     services.startWorld = [&worldToStart](const std::string& folder) { worldToStart = folder; };
     services.quitWorld = [&quitWorldRequested] { quitWorldRequested = true; };
+    services.joinServer = [&serverToJoin](const std::string& address) { serverToJoin = address; };
+    std::optional<std::pair<std::string, std::string>> disconnected;  // a server session that ended: the title (a language key) and the reason, shown once the world is gone
     std::vector<std::unique_ptr<Screen>> screens;  // [0] is the main menu; others open on top
     screens.push_back(std::make_unique<TitleScreen>(navigator, services, titleOptions));
 
@@ -571,9 +575,15 @@ int Client::run() {
             music.setSituation(MusicManager::Situation::Menu);
             window.setCursorCaptured(false);
             trimWorkingSet();
+            if (disconnected) {  // back to the server list, with the reason on top
+                screens.push_back(std::make_unique<JoinMultiplayerScreen>(navigator, services));
+                screens.back()->resize(guiWidth, guiHeight);
+                screens.push_back(std::make_unique<DisconnectedScreen>(navigator, services, disconnected->first, disconnected->second));
+                disconnected.reset();
+            }
             screens.back()->resize(guiWidth, guiHeight);
         }
-        // --connect: a session that plays on a server.
+        // Joining a server (--connect, or Join Server in the list): a session that plays on a server.
         if (serverToJoin && session == nullptr) {
             std::string address = *serverToJoin;
             serverToJoin.reset();
@@ -592,6 +602,9 @@ int Client::run() {
                 if (!session->connectRemote(address, port, options_.username.value_or(services.playerName), error)) {
                     std::printf("[falcon] cannot join %s:%d: %s\n", address.c_str(), port, error.c_str());
                     session.reset();
+                    leftWorld = true;  // (a --capture run does not wait for a world that is not coming)
+                    screens.push_back(std::make_unique<DisconnectedScreen>(navigator, services, "connect.failed", error));
+                    screens.back()->resize(guiWidth, guiHeight);
                 } else {
                     services.session = session.get();
                     session->setSavingEnabled(false);
@@ -722,6 +735,10 @@ int Client::run() {
             const bool keepTicking = !steering && screens.back()->keepsWorldTicking();
             session->update(static_cast<double>(deltaTicks) * 0.05, steering, fbW, fbH, keepTicking);
             if (session->consumeDeathRequest()) navigator.push(std::make_unique<DeathScreen>(navigator, services));  // "You Died!"
+            if (session->isRemote() && !session->remoteLost().empty() && !quitWorldRequested) {  // the server is gone (or never let the player in)
+                disconnected = std::make_pair(std::string(session->ready() ? "disconnect.lost" : "connect.failed"), session->remoteLost());
+                quitWorldRequested = true;
+            }
         }
         if (session != nullptr && session->ready() && !pendingGives.empty()) {  // --give
             for (const std::string& spec : pendingGives) {
