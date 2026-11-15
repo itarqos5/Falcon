@@ -81,7 +81,11 @@ int selfTestTables(const std::wstring& dir) {
     const std::atomic<bool> cancel{false};
     std::string said;
     const auto result = files.installTables("26.3", [&](const InstallProgress& p) { said = p.label; }, cancel);
-    const bool good = result.ok() && files.hasTables("26.3");
+    bool good = result.ok();  // (the tables only: the game's own data/ folder is not part of this check)
+    for (const std::string& name : GameFiles::dataTableFiles()) {
+        std::error_code ec;
+        good = good && std::filesystem::is_regular_file(std::filesystem::path(dir) / "26.3" / std::filesystem::path(widen(name)), ec);
+    }
     std::string text = good ? std::string("ok: ") + said : std::string("failed: ") + (result.ok() ? std::string("the tables are not complete") : result.error.message);
     writeFileAtomic(std::filesystem::path(dir) / "selftest-tables.txt", text);
     return good ? 0 : 1;
