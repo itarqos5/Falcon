@@ -305,6 +305,7 @@ private:
         std::size_t peakRss = 0;
         std::size_t endRss = 0;
         std::string finalStats;
+        std::string workerStats;  // where the worker threads spent their time (terrain, decoration, light, mesh)
     };
 
     ScreenServices& services_;

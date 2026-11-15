@@ -544,6 +544,11 @@ void GameSession::update(double dt, bool active, int framebufferWidth, int frame
                                            s.chunksLoaded, s.sectionsDrawn, s.sectionsLoaded, s.quadsDrawn, s.quadsTotal, megabytes(s.levelBytes),
                                            megabytes(s.meshBytes), s.drawCalls, s.drawCommands, s.multiDraw ? "multi-draw" : "one call per run",
                                            s.occlusionCulling ? "occlusion culling" : "frustum culling only");
+            const auto stage = [](const char* name, const RenderStats::StageTime& t) {
+                return t.jobs > 0 ? format("%s %ld x %.2f ms = %.0f ms", name, t.jobs, t.milliseconds / static_cast<double>(t.jobs), t.milliseconds) : std::string(name) + " none";
+            };
+            benchmark_.workerStats = stage("terrain", s.terrainTime) + "; " + stage("decorate", s.decorateTime) + "; " + stage("light", s.lightTime) + "; " + stage("mesh", s.meshTime) + "; " +
+                                     stage("pack", s.packTime);
         }
     }
 
@@ -758,6 +763,7 @@ std::vector<std::string> GameSession::benchmarkReport() const {
     if (busy > 0.0) lines.push_back(format("  headroom: the slower of CPU and GPU averages %.2f ms, so roughly %.0f fps if nothing else limited it", busy, 1000.0 / busy));
     lines.push_back(format("  RAM (working set): start %.0f MB, end %.0f MB, peak %.0f MB", megabytes(b.startRss), megabytes(b.endRss), megabytes(b.peakRss)));
     lines.push_back("  " + b.finalStats);
+    if (!b.workerStats.empty()) lines.push_back("  worker time (jobs x average = total, summed over the threads): " + b.workerStats);
     return lines;
 }
 

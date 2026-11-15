@@ -491,8 +491,12 @@ void WorldRenderer::requestChunk(ChunkPos pos, float priority) {
                 chunk = std::move(cached);  // it was here before: its blocks (and anything the player changed) come back from the small copy
             } else if (overworld_) {
                 worldgen::ChunkExtras extras;
+                auto started = std::chrono::steady_clock::now();
                 chunk = overworld_->generate(pos.x, pos.z, extras);
+                addStageTime(kStageTerrain, started);
+                started = std::chrono::steady_clock::now();
                 if (decorator_) decorator_->decorate(*chunk, pos.x, pos.z, extras);
+                addStageTime(kStageDecorate, started);
                 auto grid = std::make_shared<BiomeGrid>();
                 std::copy(extras.biomes.ids.begin(), extras.biomes.ids.end(), grid->ids.begin());
                 chunk->biomes = std::move(grid);
@@ -532,7 +536,9 @@ void WorldRenderer::requestLight(ChunkPos pos, bool force) {
     const float priority = static_cast<float>(dx * dx + dz * dz) - (force ? 1.0e6f : 0.5f);  // edits first; light before the meshes at its distance
     ++lighting_;
     pool_.submit(priority, [this, pos, stamp, input = snapshotLightInput(level_, pos.x, pos.z)] {
+        const auto started = std::chrono::steady_clock::now();
         LightResult result{pos, stamp, computeChunkLight(input)};
+        addStageTime(kStageLight, started);
         {
             std::lock_guard<std::mutex> lock(resultsMutex_);
             lightResults_.push_back(std::move(result));
@@ -619,11 +625,15 @@ void WorldRenderer::requestSectionMesh(const SectionKey& key, float priority) {
         const int far = wantedRadius_.load() + 3;
         if (ddx * ddx + ddz * ddz <= far * far) {
             const bool lod = leafLodFor(key);
+            auto started = std::chrono::steady_clock::now();
             SectionMesh mesh = meshSection(around, models_, key.x * 16, kMinY + key.y * 16, key.z * 16, smoothLighting_, cutoutLeaves_, lod);
+            addStageTime(kStageMesh, started);
             result.leafInterior = mesh.leafInterior;
             result.visibility = mesh.visibility;
             result.lodFar = lod;
+            started = std::chrono::steady_clock::now();
             packMesh(result, std::move(mesh));
+            addStageTime(kStagePack, started);
         }
         {
             std::lock_guard<std::mutex> lock(resultsMutex_);
@@ -890,6 +900,12 @@ void WorldRenderer::update(double playerX, double playerZ, int renderDistance, d
     stats_.textureBytes = models_.gpuBytes();
     stats_.jobsWaiting = static_cast<int>(pool_.waiting());
     stats_.jobsInFlight = generating_.load() + meshing_.load() + lighting_.load();
+    const auto stage = [this](Stage s) { return RenderStats::StageTime{static_cast<double>(stageNanos_[s].load()) / 1.0e6, stageJobs_[s].load()}; };
+    stats_.terrainTime = stage(kStageTerrain);
+    stats_.decorateTime = stage(kStageDecorate);
+    stats_.lightTime = stage(kStageLight);
+    stats_.meshTime = stage(kStageMesh);
+    stats_.packTime = stage(kStagePack);
     stats_.uploadsThisFrame = uploads;
 }
 

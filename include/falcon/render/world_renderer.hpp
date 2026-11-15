@@ -13,7 +13,9 @@
 #include "falcon/world/decoration.hpp"
 #include "falcon/worldgen/overworld_generator.hpp"
 
+#include <array>
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <deque>
 #include <memory>
@@ -57,6 +59,12 @@ struct RenderStats {
     std::size_t cachedChunks = 0;  // chunks that left the loaded area and are kept as small compressed copies
     std::size_t cacheBytes = 0;    // what those copies take
     std::size_t textureBytes = 0;
+    // What the worker threads spent so far, summed over every job (where the time of loading chunks goes). Wall-clock time of one job on one thread.
+    struct StageTime {
+        double milliseconds = 0.0;
+        long jobs = 0;
+    };
+    StageTime terrainTime, decorateTime, lightTime, meshTime, packTime;
     int jobsWaiting = 0;
     int jobsInFlight = 0;       // chunks being made or meshed (running or waiting)
     int uploadsThisFrame = 0;
@@ -329,6 +337,13 @@ private:
     std::atomic<int> generating_{0};   // chunk jobs not finished
     std::atomic<int> meshing_{0};      // mesh jobs not finished
     std::atomic<int> lighting_{0};     // light jobs not finished
+    enum Stage { kStageTerrain, kStageDecorate, kStageLight, kStageMesh, kStagePack, kStageCount };
+    std::array<std::atomic<std::int64_t>, kStageCount> stageNanos_{};  // time the workers spent in each stage, and how many times
+    std::array<std::atomic<long>, kStageCount> stageJobs_{};
+    void addStageTime(Stage stage, std::chrono::steady_clock::time_point since) {
+        stageNanos_[stage] += std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - since).count();
+        ++stageJobs_[stage];
+    }
     float brightness_ = 0.5f;
     bool smoothLighting_ = true;
     bool cutoutLeaves_ = true;

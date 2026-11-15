@@ -4,7 +4,10 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 
 namespace falcon::worldgen {
@@ -12,6 +15,32 @@ namespace falcon::worldgen {
 namespace {
 
 std::atomic<std::uint64_t> g_nextGeneratorId{1};
+
+// Where the time of a chunk goes, for finding what to speed up: FALCON_PROFILE_WORLDGEN=1 prints the totals when the generator is destroyed (at the
+// exit of the game). Off, a lap costs one branch. Wall-clock time summed over the threads.
+constexpr int kProfileStages = 7;
+const char* const kProfileNames[kProfileStages] = {"biomes", "density", "fill (aquifer)", "surface level", "surface rules", "caves+ores", "chunk build"};
+struct StageProfile {
+    bool enabled = std::getenv("FALCON_PROFILE_WORLDGEN") != nullptr;
+    std::atomic<std::int64_t> nanos[kProfileStages]{};
+    std::atomic<long> chunks{0};
+};
+StageProfile g_profile;
+
+class Lap {
+public:
+    Lap() : on_(g_profile.enabled), last_(on_ ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{}) {}
+    void to(int stage) {
+        if (!on_) return;
+        const auto now = std::chrono::steady_clock::now();
+        g_profile.nanos[stage] += std::chrono::duration_cast<std::chrono::nanoseconds>(now - last_).count();
+        last_ = now;
+    }
+
+private:
+    bool on_;
+    std::chrono::steady_clock::time_point last_;
+};
 
 // <gameData>/data/minecraft/worldgen, or the directory itself when it is already the worldgen folder.
 std::filesystem::path resolveWorldgenDir(const std::filesystem::path& dir) {
@@ -167,7 +196,15 @@ struct OverworldGenerator::Workspace {
 };
 
 OverworldGenerator::OverworldGenerator() = default;
-OverworldGenerator::~OverworldGenerator() = default;
+OverworldGenerator::~OverworldGenerator() {
+    const long chunks = g_profile.chunks.load();
+    if (!g_profile.enabled || chunks == 0) return;
+    double total = 0.0;
+    for (const auto& n : g_profile.nanos) total += static_cast<double>(n.load()) / 1.0e6;
+    std::fprintf(stderr, "[worldgen profile] %ld chunks, %.2f ms each:", chunks, total / static_cast<double>(chunks));
+    for (int i = 0; i < kProfileStages; ++i) std::fprintf(stderr, " %s %.2f", kProfileNames[i], static_cast<double>(g_profile.nanos[i].load()) / 1.0e6 / static_cast<double>(chunks));
+    std::fputs("\n", stderr);
+}
 
 OverworldGenerator::Workspace& OverworldGenerator::workspace() const {
     thread_local std::vector<std::unique_ptr<Workspace>> spaces;
@@ -282,11 +319,14 @@ void OverworldGenerator::runStages(Workspace& w, int cx, int cz, Stage upTo) con
     const int minY = st.minY, height = st.height;
 
     // Biomes of the chunk (what the game stores), and the chunk-local lookup the surface rules read through.
+    Lap lap;
     biomeSource_->fillChunk(w.biomeCtx, cx, cz, w.biomes);
     w.lookup.begin(*biomeSource_, w.biomeCtx, cx, cz, w.biomes);
+    lap.to(0);
 
     // NoiseBasedChunkGenerator.doFill: z outermost, x, then y from the top; the aquifer decides everything that is not solid.
     const float* density = router_->finalDensityVolumeScratch(cx, cz);
+    lap.to(1);
     w.aquifer.begin(cx, cz);
     w.fluidUpdates.clear();
     const bool track = options_.trackFluidUpdates;
@@ -326,9 +366,11 @@ void OverworldGenerator::runStages(Workspace& w, int cx, int cz, Stage upTo) con
             w.worldSurface[static_cast<std::size_t>(x + 16 * z)] = static_cast<std::int16_t>(first);
         }
     }
+    lap.to(2);
     if (upTo == Stage::Fill) return;
 
     router_->chunkSurfaceLevelVolume(cx, cz, w.chunkSurface.data());
+    lap.to(3);
     SurfaceTarget target;
     target.chunkX = cx;
     target.chunkZ = cz;
@@ -337,6 +379,7 @@ void OverworldGenerator::runStages(Workspace& w, int cx, int cz, Stage upTo) con
     target.chunkSurfaceLevel = w.chunkSurface.data();
     target.biomes = &w.lookup;
     material_->buildSurface(w.material, target);
+    lap.to(4);
 }
 
 void OverworldGenerator::buildChunk(Workspace& w, Chunk& chunk, ChunkExtras* extras) const {
@@ -404,9 +447,13 @@ void OverworldGenerator::buildChunk(Workspace& w, Chunk& chunk, ChunkExtras* ext
 std::shared_ptr<Chunk> OverworldGenerator::generate(int chunkX, int chunkZ, ChunkExtras& extras) const {
     Workspace& w = workspace();
     runStages(w, chunkX, chunkZ, Stage::Surface);
+    Lap lap;
     if (stage_) stage_(w.blocks, chunkX, chunkZ);
+    lap.to(5);
     auto chunk = std::make_shared<Chunk>();
     buildChunk(w, *chunk, &extras);
+    lap.to(6);
+    ++g_profile.chunks;
     return chunk;
 }
 
