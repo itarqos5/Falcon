@@ -570,10 +570,10 @@ server in **online mode** asks for encryption and for proof of the account, and 
 Mojang's session server told that this account joins, the chat signed with the account's key. It uses the account that the Falcon Launcher signed in with (the launcher
 hands over the access token and the player's id; without it only servers with `online-mode=false` can be joined). A connection that fails or drops shows the game's
 "Failed to connect to the server" / "Connection Lost" screen with the reason. Players wear their own skins and about fifty kinds of mob are drawn (a few dozen models with walking legs; babies, equipment and most animations are not), and a chest, barrel,
-shulker box, dispenser, hopper, furnace, blast furnace, smoker or crafting table opens in a window of the game's own picture. Limits: other windows (an anvil, an enchanting
-table, a villager's trades ...) are closed again at once, other entities (boats, arrows, paintings ...) are not drawn, signed commands (`/msg`, `/say`, `/me` on a server that
-enforces secure profiles) go unsigned, and so far this has been run only against a Paper test server in offline mode: online mode, blocks, the inventory, containers and the
-chat signing are written from the game's own packet layouts but have not been tried against a server yet.
+shulker box, dispenser, hopper, furnace, blast furnace, smoker or crafting table opens in a window of the game's own picture. Boats, arrows, thrown pearls and snowballs, and paintings (with their pictures) are drawn too, a click on a player or mob hits it, and `/msg`, `/say`, `/me` and the like are signed
+for a server that enforces secure profiles. Limits: other windows (an anvil, an enchanting table, a villager's trades ...) are closed again at once, other entities (item frames,
+minecarts, armor stands ...) are not drawn, there is no riding or trading, and so far this has been run only against a Paper test server in offline mode: online mode, blocks, the
+inventory, containers, entities, attacks and the chat and command signing are written from the game's own packet layouts but have not been tried against a server yet.
 
 **Not built:** LAN world discovery (there is no "Scanning for games" row), the game's blocked-server list, the old pre-1.7 ping, and international (non-ASCII) host names
 are not converted to punycode. A ping that fails shows "Can't connect to server" with the unreachable icon; the game itself leaves some failures on its animated "pinging" bars.

@@ -476,7 +476,13 @@ void test_skins() {
 // The mobs that can be drawn (the table is checked against the game's files by the run that made it; here only what it says).
 void test_mob_table() {
     CHECK(MobRenderer::supports("zombie") && MobRenderer::supports("pig") && MobRenderer::supports("sheep") && MobRenderer::supports("spider"));
-    CHECK(!MobRenderer::supports("arrow") && !MobRenderer::supports("player") && !MobRenderer::supports(""));
+    CHECK(MobRenderer::supports("arrow") && MobRenderer::supports("oak_boat") && MobRenderer::supports("bamboo_chest_raft"));
+    CHECK(!MobRenderer::supports("item") && !MobRenderer::supports("player") && !MobRenderer::supports("painting") && !MobRenderer::supports(""));
+    float width = 0.0f, height = 0.0f;
+    CHECK(MobRenderer::sizeOf("zombie", width, height) && width == 0.6f && height == 1.95f);
+    CHECK(MobRenderer::sizeOf("oak_boat", width, height) && width == 1.375f && height == 0.5625f);
+    CHECK(!MobRenderer::sizeOf("item", width, height));
+    CHECK(MobRenderer::attackable("zombie") && MobRenderer::attackable("oak_boat") && !MobRenderer::attackable("arrow") && !MobRenderer::attackable("item"));
     const std::vector<std::string> types = MobRenderer::supportedTypes();
     CHECK(types.size() > 40);
     for (std::size_t i = 0; i < types.size(); ++i) {
