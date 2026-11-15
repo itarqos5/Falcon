@@ -79,6 +79,33 @@ Vulkan 1.3 (dynamic rendering, synchronization2), the vertex formats the meshes 
 made when first needed (a short stall the first time a state is seen; there is no pipeline cache on disk), the driver's memory is allocated in blocks of one object each (a few hundred
 objects), there is no transfer queue, and it is only measured on one GPU (see above).
 
+## Levels of detail (LODs): src/render/lod_renderer.*, src/worldgen/lod_surface.*
+
+Beyond the chunks that are loaded, the world is drawn as columns, the way Distant Horizons draws it: every cell is a block-shaped column with a flat top and a flat colour, with a wall where
+the next cell is lower. Video Settings > LODs: a checkbox (on or off), **LOD Distance** (a slider, 64 to 8192 chunks, every doubling the same width) and **LOD View Strength** (Low,
+Medium or Full Detail). The three are saved as lodsEnabled, lodChunkRadius and lodDetail, and the presets set them (Fast: off; Fancy: 128 chunks, Medium; Fabulous!: 256, Full).
+
+* **Where the heights come from: no chunk is generated for a LOD.** *Chunk* mode (the cells next to the loaded chunks, 1 or 2 blocks wide) reads the generator's own final density of whole
+  chunks and takes the top solid block of each column (OverworldGenerator::surfaceHeights): 16 microseconds a column, and the chunk's own ground (mean error 0.26 blocks against the real
+  chunks, 100% within 4). Further out the *preliminary surface* (the game's aquifer surface level, one evaluation of a function of x and z: 3 microseconds a column) is corrected by the
+  real height on a sparse grid, 100 samples a tile (*Residual*: 20 microseconds a column, 3.3 blocks off where the bare preliminary surface is 10). Low Detail uses the preliminary
+  surface alone. The colour is the biome's (grass tint from its climate, sand, snow where it is cold at that height, rock above the trees, the water's own colour and depth), with a few
+  percent of lightness varying from cell to cell, and where the decorator would grow trees (Decorator::treeFacts) a share of the columns is the colour of leaves and as tall as a tree.
+* **Which cells where.** Tiles are 32 x 32 cells. A quadtree splits a tile while its cell would be more than k times its distance wide: Low Detail k = 1/40 (cells from 8 blocks), Medium
+  k = 1/100 (from 2), Full k = 1/200 (from 1: the cells next to the chunks are blocks). So the cells double in width each time the distance doubles, and a radius of 8192 chunks is
+  nine levels of detail and a few hundred tiles (23 MB at Low).
+* **Making them.** The world's worker pool makes the tiles after the chunks (a coarse stand-in first so that the horizon fills in at once, then the tile itself, nearest first), a finished
+  tile is meshed there (a run of cells with the same top and colour is one quad: a calm sea is a few quads) and put on the GPU by the main thread within a time budget. Tiles are kept
+  while they might be wanted again, within a budget of vertices.
+* **Drawing.** A pass of its own between the sky and the chunks, with its own near and far plane (so the depth buffer stays precise to 130 000 blocks); then the depth is cleared and the chunks
+  are drawn over it. The haze (fog) is stretched to the far end of the LODs while they are on. 12 bytes a vertex, all the tiles in a few big buffers (a buffer a tile would be thousands of
+  allocations), one draw a tile, tiles outside the view skipped. Shaders: the lod program (src/vulkan/shaders/lod.vert and lod.frag are its Vulkan twins). Only worlds this client generates
+  itself have LODs (not a server's).
+
+Measured (hidden window, a 20 second flight at render distance 12, LODs 256 chunks, 12 logical processors): the GPU time of the frame does not change; the frame thread takes 0.25 ms more at Low
+Detail, 0.4 more at Medium, 0.8 at Full (897 tiles, 72 MB at Medium). OpenGL and Vulkan draw the same picture (RMS 0.23 of 255). The tests: falcon_lod_tests (the mesher),
+falcon_worldgen_chunk_tests (the heights against real chunks); falcon_bench_chunks --lod-bench prints the cost and the error of each way of getting a height.
+
 ## What an interface would have to cover (measured on the code, not guessed)
 
 The renderer's whole dependence on OpenGL, counted in `src/` and `include/`:
