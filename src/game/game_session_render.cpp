@@ -7,6 +7,7 @@
 #include "falcon/game/item_names.hpp"
 #include "falcon/game/item_render.hpp"
 #include "falcon/game/menu_background.hpp"
+#include "falcon/version.hpp"
 #include "falcon/platform/memory.hpp"
 #include "falcon/util/text_util.hpp"
 #include "falcon/world/recipes.hpp"
@@ -145,7 +146,7 @@ std::vector<std::string> GameSession::debugLines() const {
     const RenderStats s = renderer_.stats();
     const auto eye = player_.eye();
     std::vector<std::string> lines;
-    lines.push_back(format("Falcon 0.1.0 (Minecraft 26.3) - %s", info_.name.c_str()));
+    lines.push_back(format("Falcon " FALCON_VERSION_STRING " (Minecraft 26.3) - %s", info_.name.c_str()));
     lines.push_back(format("%.0f fps (%.1f ms)  cpu %.1f  gpu %.1f", fps_, frameMillis_, cpuMillis_, renderer_.gpuMillis()));
     lines.push_back("");
     const int bx = static_cast<int>(std::floor(player_.x));
