@@ -177,6 +177,7 @@ add_library(falcon_base
     src/platform/memory.cpp
     src/platform/system_info.cpp
     src/platform/ownership.cpp
+    src/platform/http.cpp
     src/platform/mapped_file.cpp
     src/platform/file_lock.cpp
 )

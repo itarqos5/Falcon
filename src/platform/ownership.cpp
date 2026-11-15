@@ -1,16 +1,12 @@
 #include "falcon/platform/ownership.hpp"
 
+#include "falcon/platform/http.hpp"
+
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
 #include <cctype>
 #include <string>
-
-#ifdef _WIN32
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
-#include <winhttp.h>
-#endif
 
 namespace falcon {
 
@@ -21,63 +17,6 @@ std::string normalizedId(std::string id) {
     for (char& c : id) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
     return id;
 }
-
-struct HttpAnswer {
-    int status = 0;  // 0: no answer at all
-    std::string body;
-    std::string error;
-};
-
-#ifdef _WIN32
-std::wstring widen(const std::string& s) { return std::wstring(s.begin(), s.end()); }  // (ASCII: tokens, host names)
-
-// One HTTPS GET with a bearer token (WinHTTP: the system's certificates and proxy settings).
-HttpAnswer httpsGet(const std::string& host, const std::string& path, const std::string& bearer) {
-    HttpAnswer answer;
-    HINTERNET session = WinHttpOpen(L"Falcon", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
-    if (session == nullptr) session = WinHttpOpen(L"Falcon", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
-    if (session == nullptr) {
-        answer.error = "WinHTTP cannot start (error " + std::to_string(GetLastError()) + ")";
-        return answer;
-    }
-    WinHttpSetTimeouts(session, 5000, 5000, 8000, 8000);
-    if (HINTERNET connection = WinHttpConnect(session, widen(host).c_str(), INTERNET_DEFAULT_HTTPS_PORT, 0)) {
-        if (HINTERNET request = WinHttpOpenRequest(connection, L"GET", widen(path).c_str(), nullptr, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE)) {
-            const std::wstring headers = L"Authorization: Bearer " + widen(bearer) + L"\r\nAccept: application/json\r\n";
-            if (WinHttpSendRequest(request, headers.c_str(), static_cast<DWORD>(headers.size()), WINHTTP_NO_REQUEST_DATA, 0, 0, 0) != FALSE && WinHttpReceiveResponse(request, nullptr) != FALSE) {
-                DWORD status = 0, size = sizeof(status);
-                WinHttpQueryHeaders(request, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_HEADER_NAME_BY_INDEX, &status, &size, WINHTTP_NO_HEADER_INDEX);
-                answer.status = static_cast<int>(status);
-                for (;;) {
-                    DWORD available = 0;
-                    if (WinHttpQueryDataAvailable(request, &available) == FALSE || available == 0) break;
-                    std::string chunk(available, '\0');
-                    DWORD read = 0;
-                    if (WinHttpReadData(request, chunk.data(), available, &read) == FALSE || read == 0) break;
-                    answer.body.append(chunk, 0, read);
-                    if (answer.body.size() > (1u << 20)) break;  // (nothing these two answers need is anywhere near a megabyte)
-                }
-            } else {
-                answer.error = "error " + std::to_string(GetLastError());
-            }
-            WinHttpCloseHandle(request);
-        } else {
-            answer.error = "error " + std::to_string(GetLastError());
-        }
-        WinHttpCloseHandle(connection);
-    } else {
-        answer.error = "error " + std::to_string(GetLastError());
-    }
-    WinHttpCloseHandle(session);
-    return answer;
-}
-#else
-HttpAnswer httpsGet(const std::string&, const std::string&, const std::string&) {
-    HttpAnswer answer;
-    answer.error = "no network code for this system";
-    return answer;
-}
-#endif
 
 }  // namespace
 
@@ -116,7 +55,7 @@ OwnershipCheck verifyMinecraftOwnership(const std::string& accessToken, const st
         return result;
     }
     const auto expired = [](int status) { return status == 401 || status == 403; };
-    const HttpAnswer entitlements = httpsGet("api.minecraftservices.com", "/entitlements/mcstore", accessToken);
+    const HttpAnswer entitlements = httpsRequest("GET", "api.minecraftservices.com", "/entitlements/mcstore", accessToken);
     if (entitlements.status == 0) {
         result.message = "Falcon could not reach Minecraft's servers to check that you own the game (" + entitlements.error + "). Check your internet connection and start it again.";
         return result;
@@ -129,7 +68,7 @@ OwnershipCheck verifyMinecraftOwnership(const std::string& accessToken, const st
         result.message = "This Minecraft account does not own Minecraft: Java Edition, so Falcon cannot be played with it.";
         return result;
     }
-    const HttpAnswer profile = httpsGet("api.minecraftservices.com", "/minecraft/profile", accessToken);
+    const HttpAnswer profile = httpsRequest("GET", "api.minecraftservices.com", "/minecraft/profile", accessToken);
     if (profile.status == 0) {
         result.message = "Falcon could not reach Minecraft's servers to check your profile (" + profile.error + ").";
         return result;
