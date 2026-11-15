@@ -31,9 +31,14 @@ add_executable(falcon_item_tests EXCLUDE_FROM_ALL test_items.cpp)
 target_link_libraries(falcon_item_tests PRIVATE falcon::core falcon_warnings)
 add_test(NAME falcon_item_tests COMMAND falcon_item_tests)
 
+# Digging, loot, falling blocks, fire, TNT, redstone and the command tree, on the game's own data.
+add_executable(falcon_world_tests EXCLUDE_FROM_ALL test_world_rules.cpp)
+target_link_libraries(falcon_world_tests PRIVATE falcon::core falcon_warnings)
+add_test(NAME falcon_world_tests COMMAND falcon_world_tests)
+
 add_custom_target(check
     COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure
-    DEPENDS falcon_tests falcon_worldgen_tests falcon_worldgen_chunk_tests falcon_item_tests
+    DEPENDS falcon_tests falcon_worldgen_tests falcon_worldgen_chunk_tests falcon_item_tests falcon_world_tests
     WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
     COMMENT "Running the unit tests"
     USES_TERMINAL
