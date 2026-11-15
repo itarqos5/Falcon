@@ -53,3 +53,15 @@ add_custom_target(check
 # A world folder without any screen (level.dat and session.lock, as Create New World writes them): for scripted runs that open a world with --play (the CI builds, the benchmarks).
 add_executable(falcon_make_world EXCLUDE_FROM_ALL ../tools/make_world.cpp)
 target_link_libraries(falcon_make_world PRIVATE falcon::core falcon_warnings)
+
+# How far apart two pictures of a frame are (the Vulkan renderer against the OpenGL one in the CI build).
+add_executable(falcon_image_diff EXCLUDE_FROM_ALL ../tools/image_diff.cpp)
+target_link_libraries(falcon_image_diff PRIVATE falcon::core falcon_warnings)
+
+# The Vulkan shader twins, read back from their SPIR-V (no graphics card needed).
+if(FALCON_VULKAN)
+    add_executable(falcon_vulkan_tests EXCLUDE_FROM_ALL test_vulkan_shaders.cpp)
+    target_link_libraries(falcon_vulkan_tests PRIVATE falcon::core falcon_warnings)
+    add_test(NAME falcon_vulkan_tests COMMAND falcon_vulkan_tests)
+    add_dependencies(check falcon_vulkan_tests)
+endif()
