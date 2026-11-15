@@ -21,6 +21,7 @@ struct LevelInfo {
     // Whether Falcon made this world (Create New World leaves its own note in level.dat). A world made by
     // Minecraft has real terrain in region files that Falcon cannot read: it can only show a generated stand-in.
     bool madeByFalcon = false;
+    bool remote = false;  // not a world of this computer: the session plays on a server (nothing is generated or saved)
 };
 
 // Reads <worldDir>/level.dat; nullopt if it is missing or damaged.

@@ -158,6 +158,12 @@ public:
     // Turns off what render() turned on, so the GUI can draw.
     void endFrame();
 
+    // A world a server sends: chunks come from receiveChunk (any thread) and are let go by forgetChunk; none are made here.
+    void setRemote(bool on) { remote_ = on; }
+    [[nodiscard]] bool remote() const { return remote_; }
+    void receiveChunk(ChunkPos pos, std::shared_ptr<Chunk> chunk);
+    void forgetChunk(ChunkPos pos);
+
     // Changes a block and remeshes the sections it touches at once.
     bool setBlock(int x, int y, int z, Block block);
     // Between these two, setBlock only records what it touched and the meshes and the light are redone once, at the end (an explosion changes hundreds of blocks).
@@ -304,6 +310,10 @@ private:
     std::unordered_map<ChunkPos, std::uint32_t, ChunkPosHash> lightStamps_;     // latest light request of each chunk
     std::unordered_map<ChunkPos, std::uint32_t, ChunkPosHash> editStamps_;
     int batchDepth_ = 0;
+    bool remote_ = false;
+    std::mutex remoteMutex_;
+    std::vector<std::pair<ChunkPos, std::shared_ptr<Chunk>>> remoteChunks_;
+    std::vector<ChunkPos> remoteForgets_;
     std::vector<SectionKey> batchTouched_;
     std::unordered_set<ChunkPos, ChunkPosHash> batchLight_;
 

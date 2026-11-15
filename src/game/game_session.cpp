@@ -96,6 +96,7 @@ std::shared_ptr<const ItemRegistry> loadItems(const ScreenServices& services, co
 // The game-exact world generator for this world's type (normal, amplified), or null for Superflat and when the game's
 // data cannot be read (the simple built-in terrain is used then).
 std::shared_ptr<const worldgen::OverworldGenerator> makeOverworld(const ResourceManager& resources, const BlockRegistry& registry, const LevelInfo& info) {
+    if (info.remote) return nullptr;  // (a server makes the world)
     const char* preset = worldgen::worldPresetFor(info.style);
     if (preset == nullptr) return nullptr;
     const std::filesystem::path dataDir = resources.dataRoot();
@@ -130,6 +131,7 @@ GameSession::GameSession(ScreenServices& services, const ResourceManager& resour
       overworld_(makeOverworld(resources, *registry_, info)),
       renderer_(models_, info.seed, info.style, workerCount(), overworld_) {
     (void)loadItems(services, resources, *registry_);
+    dataRoot_ = resources.dataRoot();
     models_.setBiomes(overworld_ ? &overworld_->biomes() : nullptr);  // grass, leaves and water follow the biomes
     inventory_.infiniteMaterials = info.gameType == 1;
     MenuPlayer menuPlayer;
@@ -239,7 +241,10 @@ GameSession::GameSession(ScreenServices& services, const ResourceManager& resour
     if (info_.madeByFalcon) loadSave();
 }
 
-GameSession::~GameSession() { save(); }
+GameSession::~GameSession() {
+    if (remote_) net::setComponentTranslator(nullptr);
+    save();
+}
 
 // What loadSave() puts back: the player (where they stood, what they carried and how they were), and the items lying about. The block edits are read into
 // `edits_` and applied by the renderer to every chunk it makes.
@@ -461,6 +466,7 @@ void GameSession::update(double dt, bool active, int framebufferWidth, int frame
         fpsFrames_ = 0;
     }
 
+    pumpRemote();  // what a server sent since the last frame
     const int distance = renderDistance();
     renderer_.setBrightness(static_cast<float>(services_.options.gamma));
     renderer_.setGpuTiming(showDebug_ || benchmark_.running);
@@ -679,6 +685,11 @@ void GameSession::addChatMessage(const std::string& text) {
 void GameSession::chatInput(const std::string& text) {
     if (text.empty()) return;
     chat_.remember(text);
+    if (remote_) {  // on a server it is the server that answers
+        if (text[0] == '/') remote_->sendCommand(text.substr(1));
+        else remote_->sendChat(text);
+        return;
+    }
     if (text[0] == '/') {
         runCommand(text.substr(1));
     } else {

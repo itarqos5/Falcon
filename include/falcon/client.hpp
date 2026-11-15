@@ -83,6 +83,7 @@ struct ClientOptions {
     bool auditLighting = false;                        // --audit-lighting: mesh every block, report which are not smooth-lit, exit
     std::optional<std::filesystem::path> compareVanilla;  // --compare-vanilla <world folder>: diff the terrain against the game's own, exit
     bool audioDevices = false;                         // --audio-devices: list outputs, try each silently, exit
+    std::optional<std::string> connect;                // --connect HOST[:PORT]: join this server at start-up (it must not check accounts)
     std::optional<std::string> play;                   // --play <folder>: open this world of saves/ at start-up
     std::optional<std::array<double, 5>> camera;       // --cam X,Y,Z,YAW,PITCH: put the player there (and make them fly)
     std::optional<double> benchmark;                   // --bench <s>: fly a fixed path for s seconds, print frame times, exit

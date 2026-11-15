@@ -45,6 +45,7 @@ void GameSession::tickPlayer(double seconds, bool steering) {
         if (!pinnedPose_) {  // (a pinned camera, for screenshots, freezes the player; the world goes on)
             const double vx = player_.vx, vy = player_.vy, vz = player_.vz;  // (what it was going at, for a splash)
             player_.tick(input, renderer_.level());
+            sendRemoteTick(input);
             waterVisionTicks_ = nextWaterVisionTicks(waterVisionTicks_, player_.isUnderWater(), info_.gameType == 3);  // the eyes get used to the water
             if (ready_ && !dead_) {
                 footsteps(input.shift);

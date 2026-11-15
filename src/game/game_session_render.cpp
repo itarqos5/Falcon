@@ -54,6 +54,7 @@ void GameSession::renderWorld(int framebufferWidth, int framebufferHeight) {
     if (ready_) {
         const std::array<double, 3> camPos = {cam.x, cam.y, cam.z};
         hand_.renderGroundItems(renderer_, renderer_.viewProjection(), camPos, itemEntities_.items(), partialTick_);
+        renderRemotePlayers(camPos);
         if (physics_) hand_.renderBlockEntities(renderer_, renderer_.viewProjection(), physics_->fallingBlocks(), physics_->primedTnt(), camPos, partialTick_);
         if (perspective_ != 0 && body_ && info_.gameType != 3) {  // F5: the player seen from outside
             const float t = static_cast<float>(partialTick_);
@@ -274,7 +275,9 @@ void GameSession::renderHud(GuiGraphics& g, int guiWidth, int guiHeight, bool ch
         if (perspective_ == 0) g.blitSprite("hud/crosshair", (guiWidth - 15) / 2, (guiHeight - 15) / 2, 15, 15);
         if (info_.gameType != 3) drawHotbar(g, guiWidth, guiHeight);  // (a spectator has no hotbar: no inventory)
         if (survivalBars()) drawSurvivalBars(g, guiWidth, guiHeight);
+        drawNameTags(g, guiWidth, guiHeight, camera());
     }
+    drawPlayerList(g, guiWidth);
 
     if (showDebug_) drawDebugScreen(g, guiWidth);
 

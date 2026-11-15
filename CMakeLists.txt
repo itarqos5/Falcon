@@ -318,6 +318,7 @@ add_library(falcon_core
     src/game/creative_inventory.cpp
     src/game/item_names.cpp
     src/game/game_session_player.cpp
+    src/game/game_session_remote.cpp
     src/game/game_session_blocks.cpp
     src/game/game_session_render.cpp
     src/game/item_render.cpp

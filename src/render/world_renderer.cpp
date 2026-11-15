@@ -786,6 +786,22 @@ void WorldRenderer::update(double playerX, double playerZ, int renderDistance, d
         if (dx * dx + dz * dz <= stream * stream) acceptChunk(r.pos, std::move(r.chunk));
     }
 
+    // A server's chunks that came (and the ones it says to forget).
+    if (remote_) {
+        std::vector<std::pair<ChunkPos, std::shared_ptr<Chunk>>> arrived;
+        std::vector<ChunkPos> forgotten;
+        {
+            std::lock_guard<std::mutex> lock(remoteMutex_);
+            arrived.swap(remoteChunks_);
+            forgotten.swap(remoteForgets_);
+        }
+        for (auto& [pos, chunk] : arrived) acceptChunk(pos, std::move(chunk));
+        for (const ChunkPos& pos : forgotten) {
+            dropSections(pos);
+            level_.removeChunk(pos);
+        }
+    }
+
     // Light the workers finished.
     std::vector<LightResult> lit;
     {
@@ -794,7 +810,7 @@ void WorldRenderer::update(double playerX, double playerZ, int renderDistance, d
     }
     for (LightResult& r : lit) applyLight(std::move(r));
 
-    if (moved) {
+    if (moved && !remote_) {
         // Ask for every missing chunk in range (a ring wider than the drawn one, so the drawn chunks have their
         // neighbours), nearest first; the pool keeps them in that order.
         // Light needs the ring around the drawn chunks, and meshing the ring after that: see streamRadius() for why this is
@@ -858,6 +874,16 @@ void WorldRenderer::update(double playerX, double playerZ, int renderDistance, d
     stats_.jobsWaiting = static_cast<int>(pool_.waiting());
     stats_.jobsInFlight = generating_.load() + meshing_.load() + lighting_.load();
     stats_.uploadsThisFrame = uploads;
+}
+
+void WorldRenderer::receiveChunk(ChunkPos pos, std::shared_ptr<Chunk> chunk) {
+    std::lock_guard<std::mutex> lock(remoteMutex_);
+    remoteChunks_.emplace_back(pos, std::move(chunk));
+}
+
+void WorldRenderer::forgetChunk(ChunkPos pos) {
+    std::lock_guard<std::mutex> lock(remoteMutex_);
+    remoteForgets_.push_back(pos);
 }
 
 float WorldRenderer::loadProgress(int radius) const {

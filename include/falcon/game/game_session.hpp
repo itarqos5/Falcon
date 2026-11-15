@@ -7,6 +7,7 @@
 #include "falcon/game/hotbar_hud.hpp"
 #include "falcon/game/mining.hpp"
 #include "falcon/game/survival_hud.hpp"
+#include "falcon/net/multiplayer_client.hpp"
 #include "falcon/game/world_sounds.hpp"
 #include "falcon/platform/system_info.hpp"
 #include "falcon/render/player_body.hpp"
@@ -83,6 +84,10 @@ public:
     [[nodiscard]] ChatComponent& chat() { return chat_; }
     // Handles a line the player typed into the chat: remembers it, then shows it (a "/..." is treated as a command).
     void chatInput(const std::string& text);
+    // Plays on a server instead of in a world of this computer (the server must not check accounts: online-mode=false). False and `error` when it cannot be reached.
+    bool connectRemote(const std::string& host, int port, const std::string& username, std::string& error);
+    [[nodiscard]] bool isRemote() const { return remote_ != nullptr; }
+    [[nodiscard]] const std::string& remoteLost() const { return remoteLost_; }  // why the server connection ended, "" while it lasts
     // The game's commands (null when its command list is missing), and what the argument parsers and the suggestions need to know.
     [[nodiscard]] const CommandTree* commandTree() const { return commands_.get(); }
     [[nodiscard]] CommandContext commandContext() const;
@@ -238,6 +243,11 @@ private:
     void runCommand(const std::string& text);  // a command typed in the chat, without its "/"
     void applyGameRule(const std::string& rule, const std::string& value);
     void tickBurning();
+    void pumpRemote();
+    void sendRemoteTick(const PlayerInput& input);
+    void renderRemotePlayers(const std::array<double, 3>& camPos);
+    void drawNameTags(GuiGraphics& g, int guiWidth, int guiHeight, const Camera& cam);
+    void drawPlayerList(GuiGraphics& g, int guiWidth);
     // A flint and steel or a fire charge used on a block (TNT goes off, a campfire or candle lights, else a fire starts next to it). True if it did something.
     bool useFireStarter(const std::string& item, const BlockHit& hit);
     void interact(double dt, bool active);
@@ -350,6 +360,14 @@ private:
     int difficulty_ = 2;
     int burnTicks_ = 0;  // how long the player is still on fire
     std::unique_ptr<BlockTags> blockTags_;
+    std::filesystem::path dataRoot_;
+    std::unique_ptr<net::MultiplayerClient> remote_;  // the server this session plays on (null: a world of this computer)
+    net::RemoteHandler remoteHandler_;
+    std::string remoteLost_;
+    int lastInputFlags_ = 0;
+    bool lastSprintSent_ = false;
+    bool loadedSent_ = false;
+    bool remoteTeleported_ = false;  // the server has put the player somewhere
     std::unique_ptr<MiningRules> mining_;
     std::unique_ptr<BlockLoot> loot_;
     double placeCooldown_ = 0.0;

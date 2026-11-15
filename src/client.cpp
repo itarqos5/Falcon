@@ -383,6 +383,7 @@ int Client::run() {
     // must be destroyed first. The renderer inside owns GL objects, so it also has to go before the window.
     std::unique_ptr<GameSession> session;
     std::optional<std::string> worldToStart = options_.play;
+    std::optional<std::string> serverToJoin = options_.connect;
     bool quitWorldRequested = false;
     std::vector<std::string> pendingEdits = options_.edits;
     std::vector<std::string> pendingGives = options_.give;
@@ -570,6 +571,36 @@ int Client::run() {
             window.setCursorCaptured(false);
             trimWorkingSet();
             screens.back()->resize(guiWidth, guiHeight);
+        }
+        // --connect: a session that plays on a server.
+        if (serverToJoin && session == nullptr) {
+            std::string address = *serverToJoin;
+            serverToJoin.reset();
+            int port = 25565;
+            if (const auto colon = address.rfind(':'); colon != std::string::npos) {
+                port = std::atoi(address.c_str() + colon + 1);
+                address.erase(colon);
+            }
+            LevelInfo info;
+            info.name = address;
+            info.style = TerrainStyle::Flat;
+            info.remote = true;
+            try {
+                session = std::make_unique<GameSession>(services, resources, window, info);
+                std::string error;
+                if (!session->connectRemote(address, port, options_.username.value_or(services.playerName), error)) {
+                    std::printf("[falcon] cannot join %s:%d: %s\n", address.c_str(), port, error.c_str());
+                    session.reset();
+                } else {
+                    services.session = session.get();
+                    session->setSavingEnabled(false);
+                    screens.push_back(std::make_unique<InGameScreen>(navigator, services));
+                    screens.back()->resize(guiWidth, guiHeight);
+                }
+            } catch (const std::exception& e) {
+                std::printf("[falcon] could not start the session: %s\n", e.what());
+                session.reset();
+            }
         }
         // Opening a world (Play, or --play): the session starts loading and the in-game screen goes on top.
         if (worldToStart) {
@@ -770,7 +801,7 @@ int Client::run() {
             memStage("after 3 s");
         }
 
-        const bool worldReadyForCapture = !options_.play || leftWorld || options_.captureLoading ||
+        const bool worldReadyForCapture = (!options_.play && !options_.connect) || leftWorld || options_.captureLoading ||
                                           (session != nullptr && session->ready() && !options_.benchmark);
         if (options_.capturePath && millis >= options_.captureAfterSeconds * 1000.0 && worldReadyForCapture) {
             if (!silent && audio.available()) {
