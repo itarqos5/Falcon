@@ -41,7 +41,9 @@ std::int64_t modifiedMillis(const fs::path& file) {
     std::error_code ec;
     const auto time = fs::last_write_time(file, ec);
     if (ec) return -1;
-    const auto system = std::chrono::clock_cast<std::chrono::system_clock>(time);
+    // The file clock's time as a calendar time: by how long ago it was, since the compilers differ in the conversion between the two clocks (clock_cast is C++20 but newer than GCC 12).
+    const auto age = fs::file_time_type::clock::now() - time;
+    const auto system = std::chrono::system_clock::now() - std::chrono::duration_cast<std::chrono::system_clock::duration>(age);
     return std::chrono::duration_cast<std::chrono::milliseconds>(system.time_since_epoch()).count();
 }
 

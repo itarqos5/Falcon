@@ -40,9 +40,14 @@ int main(int argc, char** argv) {
         }
         {  // The launcher hands over the account's access token in the environment: it is kept (for a server in online mode, which asks Mojang who joins) and wiped from there,
            // so that nothing this process starts inherits it.
-            const char* token = std::getenv("FALCON_MC_TOKEN");
+            char* token = std::getenv("FALCON_MC_TOKEN");
             options.accessToken = token != nullptr ? token : "";
+#ifdef _WIN32
             _putenv_s("FALCON_MC_TOKEN", "");
+#else
+            if (token != nullptr) std::memset(token, 0, std::strlen(token));  // (/proc/<pid>/environ shows this very memory, which unsetenv alone leaves as it is)
+            unsetenv("FALCON_MC_TOKEN");
+#endif
         }
 #ifdef FALCON_REQUIRE_OWNERSHIP
         // The client that is bundled in the launcher plays only for an account that owns Minecraft: Java Edition. The launcher hands it the account's Minecraft
