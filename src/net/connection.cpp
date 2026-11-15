@@ -8,6 +8,12 @@
 #endif
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#else
+#include <netdb.h>
+#include <netinet/in.h>
+#include <netinet/tcp.h>
+#include <sys/socket.h>
+#include <unistd.h>
 #endif
 
 #include <stb_image.h>  // declarations only: zlib inflate for compressed packets
@@ -18,6 +24,7 @@ namespace falcon::net {
 
 namespace {
 
+#ifdef _WIN32
 SOCKET asSocket(std::uintptr_t s) { return static_cast<SOCKET>(s); }
 
 void startWinsock() {
@@ -27,6 +34,21 @@ void startWinsock() {
     }();
     (void)once;
 }
+#else
+// The same calls under their POSIX names. (A closed connection must not kill the program with SIGPIPE: send() is given MSG_NOSIGNAL.)
+using SOCKET = int;
+constexpr SOCKET INVALID_SOCKET = -1;
+constexpr int SD_BOTH = SHUT_RDWR;
+SOCKET asSocket(std::uintptr_t s) { return static_cast<SOCKET>(s); }
+int closesocket(SOCKET s) { return ::close(s); }
+void startWinsock() {}
+#endif
+
+#ifdef _WIN32
+constexpr int kSendFlags = 0;
+#else
+constexpr int kSendFlags = MSG_NOSIGNAL;
+#endif
 
 }  // namespace
 
@@ -55,6 +77,9 @@ bool Connection::connect(const std::string& host, int port, std::string& error) 
     }
     const int one = 1;
     setsockopt(s, IPPROTO_TCP, TCP_NODELAY, reinterpret_cast<const char*>(&one), sizeof one);
+#ifndef _WIN32
+    setsockopt(s, SOL_SOCKET, SO_KEEPALIVE, &one, sizeof one);  // (a server that vanished without a word is noticed in the end)
+#endif
     socket_ = static_cast<std::uintptr_t>(s);
     open_.store(true);
     login_.store(true);
@@ -66,7 +91,7 @@ bool Connection::connect(const std::string& host, int port, std::string& error) 
 bool Connection::readExact(std::uint8_t* out, std::size_t n) {
     std::size_t got = 0;
     while (got < n) {
-        const int r = ::recv(asSocket(socket_), reinterpret_cast<char*>(out + got), static_cast<int>(n - got), 0);
+        const auto r = static_cast<int>(::recv(asSocket(socket_), reinterpret_cast<char*>(out + got), static_cast<std::size_t>(n - got), 0));
         if (r <= 0) return false;
         if (decrypting_.load(std::memory_order_acquire)) receiveCipher_.decrypt(out + got, static_cast<std::size_t>(r));
         got += static_cast<std::size_t>(r);
@@ -179,7 +204,7 @@ void Connection::transmit(Bytes& bytes) {
     if (encrypting_) sendCipher_.encrypt(bytes.data(), bytes.size());
     std::size_t sent = 0;
     while (sent < bytes.size()) {
-        const int r = ::send(asSocket(socket_), reinterpret_cast<const char*>(bytes.data() + sent), static_cast<int>(bytes.size() - sent), 0);
+        const auto r = static_cast<int>(::send(asSocket(socket_), reinterpret_cast<const char*>(bytes.data() + sent), static_cast<std::size_t>(bytes.size() - sent), kSendFlags));
         if (r <= 0) {
             setClosed("the connection was closed");
             return;
@@ -211,7 +236,8 @@ bool Connection::sendAndEncrypt(int id, const Bytes& body, const std::uint8_t* s
 void Connection::close() {
     if (socket_ != ~static_cast<std::uintptr_t>(0)) {
         open_.store(false);
-        shutdown(asSocket(socket_), SD_BOTH);
+        shutdown(asSocket(socket_), SD_BOTH);  // wakes the reader if it waits in recv()
+        if (reader_.joinable()) reader_.join();  // (before the descriptor goes: a number that is closed can be given to the next open file at once)
         closesocket(asSocket(socket_));
         socket_ = ~static_cast<std::uintptr_t>(0);
     }

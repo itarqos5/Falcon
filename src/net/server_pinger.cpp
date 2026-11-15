@@ -23,7 +23,10 @@
 #include <arpa/inet.h>
 #include <fcntl.h>
 #include <netdb.h>
+#include <netinet/in.h>
+#include <arpa/nameser.h>
 #include <poll.h>
+#include <resolv.h>
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <unistd.h>
@@ -260,8 +263,34 @@ std::optional<ServerAddress> lookupSrv(const std::string& host) {
     DnsRecordListFree(records, DnsFreeRecordList);
     return best;
 #else
-    (void)host;
-    return std::nullopt;
+    // The system's resolver (res_query, in libc since glibc 2.34 and in libresolv before): the answer is a DNS message to read the SRV records out of.
+    const std::string name = "_minecraft._tcp." + host;
+    unsigned char answer[4096];
+    const int length = res_query(name.c_str(), ns_c_in, ns_t_srv, answer, sizeof(answer));
+    if (length <= 0) return std::nullopt;
+    ns_msg message;
+    if (ns_initparse(answer, length, &message) != 0) return std::nullopt;
+    std::optional<ServerAddress> best;
+    int bestPriority = 0x10000;
+    int bestWeight = -1;
+    for (int i = 0; i < ns_msg_count(message, ns_s_an); ++i) {
+        ns_rr record;
+        if (ns_parserr(&message, ns_s_an, i, &record) != 0 || ns_rr_type(record) != ns_t_srv || ns_rr_rdlen(record) < 7) continue;
+        const unsigned char* data = ns_rr_rdata(record);  // priority, weight, port (each 16 bits, big-endian), then the target's name
+        const int priority = (data[0] << 8) | data[1];
+        const int weight = (data[2] << 8) | data[3];
+        const int port = (data[4] << 8) | data[5];
+        char target[NS_MAXDNAME] = {};
+        if (dn_expand(ns_msg_base(message), ns_msg_end(message), data + 6, target, sizeof(target)) < 0) continue;
+        if (priority < bestPriority || (priority == bestPriority && weight > bestWeight)) {
+            bestPriority = priority;
+            bestWeight = weight;
+            std::string targetName = target;
+            while (!targetName.empty() && targetName.back() == '.') targetName.pop_back();
+            best = ServerAddress{targetName, port};
+        }
+    }
+    return best;
 #endif
 }
 
