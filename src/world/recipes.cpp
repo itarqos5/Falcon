@@ -223,7 +223,7 @@ std::optional<CraftingMatch> RecipeManager::find(const CraftingInput& input) con
 // Loading
 
 namespace {
-constexpr char kRecipeCacheMagic[4] = {'F', 'R', 'C', '1'};
+constexpr char kRecipeCacheMagic[4] = {'F', 'R', 'C', '2'};
 }  // namespace
 
 class RecipeBuilder {
@@ -307,6 +307,7 @@ public:
             (void)indexOf(r.input);
             (void)indexOf(r.material);
         }
+        for (const CookingRecipe& r : m.cooking_) (void)indexOf(r.ingredient);
         out.write(kRecipeCacheMagic, 4);
         put(out, fp);
         put(out, static_cast<std::uint32_t>(ordered.size()));
@@ -337,6 +338,15 @@ public:
             put(out, indexOf(r.input));
             put(out, indexOf(r.material));
             put(out, itemId(r.result));
+        }
+        put(out, static_cast<std::uint32_t>(m.cooking_.size()));
+        for (const CookingRecipe& r : m.cooking_) {
+            putString(out, r.id);
+            put(out, static_cast<std::uint8_t>(r.kind));
+            put(out, indexOf(r.ingredient));
+            putResult(out, r.result);
+            put(out, static_cast<std::int32_t>(r.cookingTime));
+            put(out, r.experience);
         }
         out.close();
         if (out) {
@@ -403,6 +413,17 @@ public:
             if (!getString(in, r.id) || !get(in, a) || !get(in, b) || !get(in, result) || !ingredientAt(a, r.input) || !ingredientAt(b, r.material)) return false;
             r.result = static_cast<Item>(result);
             m.transmute_.push_back(std::move(r));
+        }
+        if (!get(in, count) || count > 100000) return false;
+        for (std::uint32_t k = 0; k < count; ++k) {
+            CookingRecipe r;
+            std::uint8_t kind = 0;
+            std::uint32_t a = 0;
+            std::int32_t time = 0;
+            if (!getString(in, r.id) || !get(in, kind) || kind > 2 || !get(in, a) || !ingredientAt(a, r.ingredient) || !getResult(in, r.result) || !get(in, time) || !get(in, r.experience)) return false;
+            r.kind = static_cast<CookingKind>(kind);
+            r.cookingTime = time;
+            m.cooking_.push_back(std::move(r));
         }
         return true;
     }
@@ -506,7 +527,19 @@ public:
         m_.transmute_.push_back(std::move(r));
     }
 
+    void cooking(const std::string& id, CookingKind kind, const json& doc) const {
+        CookingRecipe r;
+        r.id = id;
+        r.kind = kind;
+        if (!doc.contains("ingredient") || !ingredient(doc["ingredient"], r.ingredient)) return;
+        if (!result(doc.value("result", json()), r.result)) return;
+        r.cookingTime = doc.value("cookingtime", 200);
+        r.experience = doc.value("experience", 0.0f);
+        m_.cooking_.push_back(std::move(r));
+    }
+
     static void addShaped(RecipeManager& m, ShapedRecipe r) { m.shaped_.push_back(std::move(r)); }
+    static void addCooking(RecipeManager& m, CookingRecipe r) { m.cooking_.push_back(std::move(r)); }
     static void addShapeless(RecipeManager& m, ShapelessRecipe r) { m.shapeless_.push_back(std::move(r)); }
     static ItemTags& tags(RecipeManager& m) { return m.tags_; }
 
@@ -550,6 +583,12 @@ std::shared_ptr<const RecipeManager> RecipeManager::loadFromGameData(const fs::p
             builder.shapeless(id, *doc);
         } else if (type == "crafting_transmute") {
             builder.transmute(id, *doc);
+        } else if (type == "smelting") {
+            builder.cooking(id, CookingKind::Smelting, *doc);
+        } else if (type == "blasting") {
+            builder.cooking(id, CookingKind::Blasting, *doc);
+        } else if (type == "smoking") {
+            builder.cooking(id, CookingKind::Smoking, *doc);
         }
     }
     if (manager->recipeCount() == 0) {
@@ -559,6 +598,14 @@ std::shared_ptr<const RecipeManager> RecipeManager::loadFromGameData(const fs::p
     manager->fromGameData_ = true;
     if (fingerprint) RecipeBuilder::writeCache(cachePath, *fingerprint, *manager);
     return manager;
+}
+
+const CookingRecipe* RecipeManager::findCooking(CookingKind kind, const ItemStack& input) const {
+    if (input.isEmpty()) return nullptr;
+    for (const CookingRecipe& r : cooking_) {
+        if (r.kind == kind && r.ingredient.test(input.item)) return &r;
+    }
+    return nullptr;
 }
 
 std::shared_ptr<const RecipeManager> RecipeManager::makeMinimal(const ItemRegistry& items) {
@@ -615,6 +662,21 @@ std::shared_ptr<const RecipeManager> RecipeManager::makeMinimal(const ItemRegist
     magenta.ingredients = {single("blue_dye"), single("red_dye"), single("pink_dye")};
     magenta.result = stack("magenta_dye", 3);
     RecipeBuilder::addShapeless(*manager, magenta);
+
+    // Something to cook (the furnace tests): cobblestone in a furnace or a blast furnace (not in a smoker, which only takes food).
+    const auto cook = [&](const char* from, const char* to, CookingKind kind, int time, float xp) {
+        if (!items.find(from) || !items.find(to)) return;
+        CookingRecipe r;
+        r.id = std::string(to) + "_from_" + from + (kind == CookingKind::Blasting ? "_blasting" : "");
+        r.kind = kind;
+        r.ingredient = single(from);
+        r.result = stack(to, 1);
+        r.cookingTime = time;
+        r.experience = xp;
+        RecipeBuilder::addCooking(*manager, std::move(r));
+    };
+    cook("cobblestone", "stone", CookingKind::Smelting, 200, 0.1f);
+    cook("cobblestone", "stone", CookingKind::Blasting, 200, 0.1f);  // (the game's blasting recipes say 200 too: the blast furnace goes through it twice as fast)
     return manager;
 }
 

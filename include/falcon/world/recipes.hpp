@@ -67,6 +67,17 @@ struct TransmuteRecipe {
     [[nodiscard]] bool matches(const CraftingInput& input) const;
 };
 
+// smelting (a furnace), blasting (a blast furnace: ores and metal) and smoking (a smoker: food): one ingredient cooked into one result.
+enum class CookingKind : std::uint8_t { Smelting, Blasting, Smoking };
+struct CookingRecipe {
+    std::string id;
+    CookingKind kind = CookingKind::Smelting;
+    Ingredient ingredient;
+    ItemStack result;
+    int cookingTime = 200;     // ticks a furnace takes (a blast furnace and a smoker go through it twice as fast, see AbstractFurnaceBlockEntity)
+    float experience = 0.0f;   // what the player gets for one result when taking it out
+};
+
 // The item tags of the game's data (data/minecraft/tags/item), resolved: "#minecraft:planks" -> its items.
 class ItemTags {
 public:
@@ -108,6 +119,9 @@ public:
     [[nodiscard]] const std::vector<ShapelessRecipe>& shapeless() const { return shapeless_; }
     [[nodiscard]] const std::vector<TransmuteRecipe>& transmute() const { return transmute_; }
     [[nodiscard]] const ItemTags& tags() const { return tags_; }
+    [[nodiscard]] const std::vector<CookingRecipe>& cooking() const { return cooking_; }
+    // The recipe a furnace of that kind cooks `input` by, or null (RecipeManager.getRecipeFor for a SingleRecipeInput).
+    [[nodiscard]] const CookingRecipe* findCooking(CookingKind kind, const ItemStack& input) const;
 
     // The first recipe that matches the grid (RecipeManager.getRecipeFor): its assembled result.
     [[nodiscard]] std::optional<CraftingMatch> find(const CraftingInput& input) const;
@@ -120,6 +134,7 @@ private:
     std::vector<ShapedRecipe> shaped_;
     std::vector<ShapelessRecipe> shapeless_;
     std::vector<TransmuteRecipe> transmute_;
+    std::vector<CookingRecipe> cooking_;
 };
 
 // The installed recipes (null until installed; the session loads them on a background thread).
