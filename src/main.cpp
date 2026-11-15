@@ -29,6 +29,8 @@ int main(int argc, char** argv) {
     // The exe is built for the GUI subsystem (no console window); this reconnects the log output
     // when it was launched from a terminal.
     falcon::attachParentConsole();
+    // The log is read while the game runs (the launcher's log, a script waiting for "spawn area loaded"): a line goes out when it is written, also into a file or a pipe.
+    std::setvbuf(stdout, nullptr, _IOLBF, 4096);
 
     try {
         falcon::ClientOptions options = falcon::parseOptions(argc, argv);
