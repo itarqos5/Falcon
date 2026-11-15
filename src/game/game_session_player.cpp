@@ -395,7 +395,7 @@ void GameSession::tickBody() {
 }
 
 bool GameSession::giveItem(const std::string& spec) {
-    // "item", "item:count" or "item:count:wear".
+    // "item", "item:count", "item:count:wear" or "item:count:wear:RRGGBB" (the colour of dyed leather or of a potion, for a look at it).
     std::vector<std::string> parts;
     for (std::size_t from = 0;;) {
         const std::size_t colon = spec.find(':', from);
@@ -414,6 +414,7 @@ bool GameSession::giveItem(const std::string& spec) {
     if (!item || *item == Item::Air) return false;
     ItemStack stack(*item, count);
     stack.damage = std::min(wear, std::max(0, stack.maxDamage() - 1));
+    if (parts.size() > 3 && !parts[3].empty()) stack.tintColor = static_cast<int>(std::strtol(parts[3].c_str(), nullptr, 16) & 0xFFFFFF);
     const int max = stack.maxStackSize();
     while (!stack.isEmpty()) {  // as many full stacks as it takes
         ItemStack part = stack.split(std::min(stack.count, max));

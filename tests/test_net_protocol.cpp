@@ -629,6 +629,89 @@ void test_lp_vec3() {
     CHECK(one.data[2] == ((expected >> 40) & 0xFF) && one.data[3] == ((expected >> 32) & 0xFF) && one.data[4] == ((expected >> 24) & 0xFF) && one.data[5] == ((expected >> 16) & 0xFF));
 }
 
+// The components that come with items from a server: each is read to its end (the reader stands right after the stack, so the next stack in a list is where it should be),
+// and the colours that decide how an item looks are kept in the stack. The layouts are the game's codecs, read from its bytecode.
+void test_item_components() {
+    ComponentIds ids;
+    ids.damage = 1;
+    ids.kinds[10] = ComponentKind::DyedColor;
+    ids.kinds[11] = ComponentKind::Lore;
+    ids.kinds[12] = ComponentKind::PotionContents;
+    ids.kinds[13] = ComponentKind::ItemTemplateList;
+    ids.kinds[14] = ComponentKind::Profile;
+    ids.kinds[15] = ComponentKind::AttributeModifiers;
+    ids.kinds[16] = ComponentKind::CustomModelData;
+    ids.kinds[17] = ComponentKind::Tool;
+    ids.kinds[18] = ComponentKind::Equippable;
+    ids.kinds[19] = ComponentKind::Consumable;
+    ids.kinds[20] = ComponentKind::Identifier;
+    const auto text = [](Writer& w, const std::string& s) { w.string(s); };
+    const auto component = [&](Writer& w, const std::string& s) {  // a text component on the network: a string tag (type 8) with its text
+        w.u8(8);
+        w.u8(static_cast<std::uint8_t>(s.size() >> 8));
+        w.u8(static_cast<std::uint8_t>(s.size() & 0xFF));
+        for (const char c : s) w.u8(static_cast<std::uint8_t>(c));
+    };
+    {  // dyed leather: the colour is kept
+        Writer w;
+        w.varint(1); w.varint(7);  // one of item 7
+        w.varint(1); w.varint(0);  // one component added
+        w.varint(10); w.i32(0x00A06540);
+        w.varint(99);              // what follows the stack
+        Reader r(w.data);
+        bool known = true;
+        const ItemStack s = readItemStack(r, ids, known);
+        CHECK(known && s.tintColor == 0xA06540 && r.varint() == 99);
+    }
+    {  // a potion with a colour of its own, with an effect, and a name; lore; then the next stack is where it should be
+        Writer w;
+        w.varint(1); w.varint(8);
+        w.varint(3); w.varint(0);
+        w.varint(12);
+        w.boolean(true); w.varint(5);                 // the potion
+        w.boolean(true); w.i32(0x112233);             // its own colour
+        w.varint(1);                                  // one effect: number, amplifier, duration, three flags, nothing hidden
+        w.varint(3); w.varint(0); w.varint(600); w.boolean(false); w.boolean(true); w.boolean(true); w.boolean(false);
+        w.boolean(true); text(w, "custom");           // a name
+        w.varint(11); w.varint(2); component(w, "line one"); component(w, "line two");  // the lore
+        w.varint(20); text(w, "minecraft:thing");     // an item model
+        w.varint(99);
+        Reader r(w.data);
+        bool known = true;
+        const ItemStack s = readItemStack(r, ids, known);
+        CHECK(known && s.tintColor == 0x112233 && r.varint() == 99);
+    }
+    {  // items inside an item (a bundle's), a head with a profile, attribute modifiers, custom model data, a tool and an equippable piece
+        Writer w;
+        w.varint(2); w.varint(9);
+        w.varint(6); w.varint(0);  // six components
+        w.varint(13); w.varint(1); w.varint(4); w.varint(3); w.varint(1); w.varint(0); w.varint(10); w.i32(0x00FF0000);  // one thing inside: dyed red
+        w.varint(14); w.boolean(true); for (int i = 0; i < 16; ++i) w.u8(static_cast<std::uint8_t>(i)); text(w, "Notch"); w.varint(1); text(w, "textures"); text(w, "e30="); w.boolean(false);
+        w.boolean(false); w.boolean(false); w.boolean(false); w.boolean(false);  // (no skin pictures of its own, no arm model)
+        w.varint(15); w.varint(1); w.varint(3); text(w, "minecraft:base_attack_damage"); w.u8(0x40); for (int i = 0; i < 7; ++i) w.u8(0); w.varint(0); w.varint(1); w.varint(0);
+        w.varint(16); w.varint(1); w.u8(0x3F); w.u8(0x80); w.u8(0); w.u8(0); w.varint(0); w.varint(1); text(w, "red"); w.varint(0);
+        w.varint(17); w.varint(1); w.varint(2); w.varint(8); w.boolean(true); w.f32(5.0f); w.boolean(false); w.f32(1.0f); w.varint(1); w.boolean(true);
+        w.varint(18); w.varint(5); w.varint(3); w.boolean(false); w.boolean(false); w.boolean(false); for (int i = 0; i < 5; ++i) w.boolean(i == 0); w.varint(2);
+        w.varint(99);
+        Reader r(w.data);
+        bool known = true;
+        const ItemStack s = readItemStack(r, ids, known);
+        CHECK(known && s.count == 2 && r.varint() == 99);
+        CHECK(r.ok);
+    }
+    {  // a type that is not known stops the reading, and says so
+        Writer w;
+        w.varint(1); w.varint(7);
+        w.varint(1); w.varint(0);
+        w.varint(77);  // no such type in the table
+        Reader r(w.data);
+        bool known = true;
+        (void)readItemStack(r, ids, known);
+        CHECK(!known);
+    }
+    CHECK(componentKindOf("minecraft:dyed_color") == ComponentKind::DyedColor && componentKindOf("lore") == ComponentKind::Lore && componentKindOf("minecraft:no_such") == ComponentKind::Unknown);
+}
+
 }  // namespace
 
 int main() {
@@ -647,6 +730,7 @@ int main() {
     test_server_commands();
     test_trade_offers();
     test_lp_vec3();
+    test_item_components();
 #ifdef _WIN32
     test_encrypted_connection();
 #endif

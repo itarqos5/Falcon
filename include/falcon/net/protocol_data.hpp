@@ -6,6 +6,7 @@
 #include "falcon/world/chunk.hpp"
 #include "falcon/world/item_stack.hpp"
 
+#include <unordered_map>
 #include <functional>
 #include <memory>
 #include <string>
@@ -32,9 +33,56 @@ void setComponentTranslator(std::function<std::string(const std::string&)> trans
 
 // The numbers (in the game's data component type registry) of the components of an item that Falcon can read; -1 for one the game's data does not have.
 // A component that is not one of these has no layout known here and cannot be stepped over.
+// How the value of a data component is written on the network (what its StreamCodec does), for the kinds that are known; Unknown ends the reading of a stack.
+enum class ComponentKind : std::uint8_t {
+    Unknown,
+    Unit,           // nothing
+    Float,
+    VarInt,         // also an enum or a registry entry by number
+    Int4,           // a plain 4-byte int
+    Identifier,     // a string
+    Bool,
+    Component,      // a text component
+    HolderSet,      // a tag or a list of registry entries
+    SoundHolder,    // a sound event: by number or written out
+    Lore,
+    AttributeModifiers,
+    CustomModelData,
+    Food,
+    Consumable,
+    ConsumeEffects,  // a list of them
+    ItemTemplate,    // an item, a count and its components (ItemStackTemplate)
+    ItemTemplateList,
+    UseCooldown,
+    Tool,
+    Weapon,
+    AttackRange,
+    Equippable,
+    PiercingWeapon,
+    SwingAnimation,
+    DyedColor,
+    PotionContents,
+    SuspiciousStew,
+    WritableBook,
+    WrittenBook,
+    TypedEntity,     // a registry entry and its data
+    Nbt,
+    Profile,
+    BannerPatterns,
+    BlockState,
+    PotDecorations,
+    Enchantments,
+    TooltipDisplay,
+    CustomName,
+    ItemName,
+    LodestoneTracker,
+};
+[[nodiscard]] ComponentKind componentKindOf(const std::string& name);  // "minecraft:lore" or "lore"
+
 struct ComponentIds {
     int damage = -1, repairCost = -1, maxStackSize = -1, maxDamage = -1, unbreakable = -1, customName = -1, itemName = -1, enchantments = -1, glintOverride = -1,
         tooltipDisplay = -1, customData = -1;
+    std::unordered_map<int, ComponentKind> kinds;  // by the component type's number: every type of the game's registry that can be read
 };
 
 // An item stack as the network writes it (ItemStack.OPTIONAL_STREAM_CODEC): the count, the item's number, then the components that differ from the item's own.

@@ -17,6 +17,7 @@ struct ItemStack {
     std::string customName;   // an anvil name: shown in italics
     std::string components;   // other components as the game wrote them (SNBT); "" for none
     std::string variantName;  // the name those components give it ("Potion of Healing"); not part of what makes stacks alike
+    int tintColor = -1;       // 0xRRGGBB from the stack's own components (dyed leather, a potion with a colour of its own), or -1: the item model's own colour then
 
     ItemStack() = default;
     explicit ItemStack(Item i, int n = 1) : item(i), count(n) {}

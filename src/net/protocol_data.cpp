@@ -325,39 +325,397 @@ void writeLpVec3(Writer& w, double x, double y, double z) {
     if (more) w.varint(static_cast<int>(scale >> 2));
 }
 
-// The value of a component of this type (the type's number has been read): kept in the stack where the stack has a place for it (the damage, a name), stepped over otherwise.
-// False for a type whose layout is not known here.
-bool readComponentValue(Reader& r, int type, const ComponentIds& ids, ItemStack* stack) {
+ComponentKind componentKindOf(const std::string& rawName) {
+    static const std::unordered_map<std::string, ComponentKind> kTable = {
+        {"custom_data", ComponentKind::Nbt}, {"max_stack_size", ComponentKind::VarInt}, {"max_damage", ComponentKind::VarInt}, {"damage", ComponentKind::VarInt},
+        {"unbreakable", ComponentKind::Unit}, {"use_effects", ComponentKind::UseCooldown /* placeholder, replaced below */},
+        {"custom_name", ComponentKind::CustomName}, {"minimum_attack_charge", ComponentKind::Float}, {"damage_type", ComponentKind::VarInt}, {"item_name", ComponentKind::ItemName},
+        {"item_model", ComponentKind::Identifier}, {"lore", ComponentKind::Lore}, {"rarity", ComponentKind::VarInt}, {"enchantments", ComponentKind::Enchantments},
+        {"attribute_modifiers", ComponentKind::AttributeModifiers}, {"custom_model_data", ComponentKind::CustomModelData}, {"tooltip_display", ComponentKind::TooltipDisplay},
+        {"repair_cost", ComponentKind::VarInt}, {"enchantment_glint_override", ComponentKind::Bool}, {"food", ComponentKind::Food}, {"consumable", ComponentKind::Consumable},
+        {"use_remainder", ComponentKind::ItemTemplate}, {"use_cooldown", ComponentKind::UseCooldown}, {"damage_resistant", ComponentKind::HolderSet}, {"tool", ComponentKind::Tool},
+        {"weapon", ComponentKind::Weapon}, {"attack_range", ComponentKind::AttackRange}, {"enchantable", ComponentKind::VarInt}, {"equippable", ComponentKind::Equippable},
+        {"repairable", ComponentKind::HolderSet}, {"glider", ComponentKind::Unit}, {"tooltip_style", ComponentKind::Identifier}, {"death_protection", ComponentKind::ConsumeEffects},
+        {"piercing_weapon", ComponentKind::PiercingWeapon}, {"attack_animation", ComponentKind::SwingAnimation}, {"interact_animation", ComponentKind::SwingAnimation},
+        {"additional_trade_cost", ComponentKind::VarInt}, {"villager_food", ComponentKind::VarInt}, {"stored_enchantments", ComponentKind::Enchantments}, {"dye", ComponentKind::VarInt},
+        {"dyed_color", ComponentKind::DyedColor}, {"map_id", ComponentKind::VarInt}, {"map_post_processing", ComponentKind::VarInt}, {"charged_projectiles", ComponentKind::ItemTemplateList},
+        {"bundle_contents", ComponentKind::ItemTemplateList}, {"potion_contents", ComponentKind::PotionContents}, {"potion_duration_scale", ComponentKind::Float},
+        {"suspicious_stew_effects", ComponentKind::SuspiciousStew}, {"writable_book_content", ComponentKind::WritableBook}, {"written_book_content", ComponentKind::WrittenBook},
+        {"entity_data", ComponentKind::TypedEntity}, {"bucket_entity_data", ComponentKind::Nbt}, {"block_entity_data", ComponentKind::TypedEntity},
+        {"ominous_bottle_amplifier", ComponentKind::VarInt}, {"lodestone_tracker", ComponentKind::LodestoneTracker}, {"profile", ComponentKind::Profile},
+        {"note_block_sound", ComponentKind::Identifier}, {"banner_patterns", ComponentKind::BannerPatterns}, {"base_color", ComponentKind::VarInt},
+        {"pot_decorations", ComponentKind::PotDecorations}, {"container", ComponentKind::ItemTemplateList}, {"block_state", ComponentKind::BlockState},
+        {"break_sound", ComponentKind::SoundHolder}, {"waxed", ComponentKind::Unit},
+    };
+    std::string name = rawName;
+    if (name.compare(0, 10, "minecraft:") == 0) name.erase(0, 10);
+    if (name == "use_effects") return ComponentKind::Unknown;  // (replaced below by its own layout)
+    const auto it = kTable.find(name);
+    return it == kTable.end() ? ComponentKind::Unknown : it->second;
+}
+
+namespace {
+
+bool readComponentValueDepth(Reader& r, int type, const ComponentIds& ids, ItemStack* stack, int depth);
+
+// A list's length, refused when it is absurd (a misread stream, or a server that does not mean it).
+bool readCount(Reader& r, int maxCount, int& n) {
+    n = r.varint();
+    return r.ok && n >= 0 && n <= maxCount;
+}
+
+// HolderSet: 0 then a tag's name, or the number of entries plus one and the entries (by number).
+bool skipHolderSet(Reader& r) {
+    const int n = r.varint();
+    if (!r.ok || n < 0 || n > 65537) return false;
+    if (n == 0) {
+        (void)r.string();
+        return r.ok;
+    }
+    for (int i = 0; i < n - 1 && r.ok; ++i) r.varint();
+    return r.ok;
+}
+
+// A sound event: 0 then its name and an optional fixed range, or its number plus one.
+bool skipSoundHolder(Reader& r) {
+    if (r.varint() != 0) return r.ok;
+    (void)r.string();
+    if (r.boolean()) r.f32();
+    return r.ok;
+}
+
+// Optional<T>: a bool, then the value when it is true.
+template <typename Fn>
+bool optionally(Reader& r, Fn&& fn) {
+    if (!r.boolean()) return r.ok;
+    return fn();
+}
+
+// MobEffectInstance: the effect by number, then its details (the amplifier, the duration, three flags and, optionally, the effect that this one hides).
+bool skipEffectDetails(Reader& r, int depth) {
+    if (depth > 8) return false;
+    r.varint();
+    r.varint();
+    r.boolean();
+    r.boolean();
+    r.boolean();
+    return optionally(r, [&] { return skipEffectDetails(r, depth + 1); });
+}
+bool skipEffectInstance(Reader& r) {
+    r.varint();
+    return skipEffectDetails(r, 0) && r.ok;
+}
+
+// One ConsumeEffect: its type's number, then what that type writes.
+bool skipConsumeEffect(Reader& r) {
+    const int type = r.varint();
+    int n = 0;
+    switch (type) {
+        case 0:  // apply_effects: the effects and the chance
+            if (!readCount(r, 256, n)) return false;
+            for (int i = 0; i < n; ++i) {
+                if (!skipEffectInstance(r)) return false;
+            }
+            r.f32();
+            return r.ok;
+        case 1: return skipHolderSet(r);  // remove_effects
+        case 2: return r.ok;              // clear_all_effects
+        case 3:                           // teleport_randomly: the diameter and a flag
+            r.f32();
+            r.boolean();
+            return r.ok;
+        case 4: return skipSoundHolder(r);  // play_sound
+        default: return false;
+    }
+}
+
+// ItemStackTemplate: the item (by number), the count and the changes to its components.
+bool readItemTemplate(Reader& r, const ComponentIds& ids, int depth) {
+    if (depth > 6) return false;
+    r.varint();
+    r.varint();
+    const int added = r.varint(), removed = r.varint();
+    if (!r.ok || added < 0 || removed < 0 || added > 128 || removed > 128) return false;
+    for (int i = 0; i < added; ++i) {
+        if (!readComponentValueDepth(r, r.varint(), ids, nullptr, depth + 1)) return false;
+    }
+    for (int i = 0; i < removed && r.ok; ++i) r.varint();
+    return r.ok;
+}
+
+// What a Filterable is: the text, and optionally the same text as it reads to someone with the filter on.
+bool skipFilterableString(Reader& r) {
+    (void)r.string();
+    return optionally(r, [&] {
+        (void)r.string();
+        return r.ok;
+    });
+}
+
+bool readComponentKind(Reader& r, ComponentKind kind, const ComponentIds& ids, ItemStack* stack, int depth) {
+    int n = 0;
+    switch (kind) {
+        case ComponentKind::Unknown: return false;
+        case ComponentKind::Unit: return r.ok;
+        case ComponentKind::Float: r.f32(); return r.ok;
+        case ComponentKind::VarInt: r.varint(); return r.ok;
+        case ComponentKind::Int4: r.i32(); return r.ok;
+        case ComponentKind::Identifier: (void)r.string(); return r.ok;
+        case ComponentKind::Bool: r.boolean(); return r.ok;
+        case ComponentKind::Component: (void)readComponent(r); return r.ok;
+        case ComponentKind::CustomName: {
+            const std::string name = plainText(readComponent(r));
+            if (stack != nullptr) stack->customName = name;
+            return r.ok;
+        }
+        case ComponentKind::ItemName: (void)readComponent(r); return r.ok;
+        case ComponentKind::Nbt: (void)readNetworkNbt(r); return r.ok;
+        case ComponentKind::HolderSet: return skipHolderSet(r);
+        case ComponentKind::SoundHolder: return skipSoundHolder(r);
+        case ComponentKind::Enchantments:
+            if (!readCount(r, 1024, n)) return false;
+            for (int i = 0; i < n && r.ok; ++i) {
+                r.varint();  // the enchantment
+                r.varint();  // its level
+            }
+            return r.ok;
+        case ComponentKind::TooltipDisplay:
+            r.boolean();  // hide everything
+            if (!readCount(r, 256, n)) return false;
+            for (int i = 0; i < n && r.ok; ++i) r.varint();
+            return r.ok;
+        case ComponentKind::Lore:
+            if (!readCount(r, 256, n)) return false;
+            for (int i = 0; i < n && r.ok; ++i) (void)readComponent(r);
+            return r.ok;
+        case ComponentKind::AttributeModifiers:
+            if (!readCount(r, 256, n)) return false;
+            for (int i = 0; i < n && r.ok; ++i) {
+                r.varint();     // the attribute
+                (void)r.string();  // the modifier's id
+                r.f64();        // the amount
+                r.varint();     // how it is added
+                r.varint();     // in which slots
+                const int display = r.varint();  // how the tooltip shows it: by default, hidden, or by a text of its own
+                if (display == 2) (void)readComponent(r);
+                else if (display != 0 && display != 1) return false;
+            }
+            return r.ok;
+        case ComponentKind::CustomModelData: {
+            for (int part = 0; part < 4; ++part) {
+                if (!readCount(r, 4096, n)) return false;
+                for (int i = 0; i < n && r.ok; ++i) {
+                    if (part == 0) r.f32();
+                    else if (part == 1) r.boolean();
+                    else if (part == 2) (void)r.string();
+                    else r.i32();
+                }
+            }
+            return r.ok;
+        }
+        case ComponentKind::Food:
+            r.varint();
+            r.f32();
+            r.boolean();
+            return r.ok;
+        case ComponentKind::Consumable:
+            r.f32();
+            r.varint();
+            if (!skipSoundHolder(r)) return false;
+            r.boolean();
+            if (!readCount(r, 64, n)) return false;
+            for (int i = 0; i < n; ++i) {
+                if (!skipConsumeEffect(r)) return false;
+            }
+            return r.ok;
+        case ComponentKind::ConsumeEffects:
+            if (!readCount(r, 64, n)) return false;
+            for (int i = 0; i < n; ++i) {
+                if (!skipConsumeEffect(r)) return false;
+            }
+            return r.ok;
+        case ComponentKind::ItemTemplate: return readItemTemplate(r, ids, depth);
+        case ComponentKind::ItemTemplateList:
+            if (!readCount(r, 256, n)) return false;
+            for (int i = 0; i < n; ++i) {
+                if (!readItemTemplate(r, ids, depth)) return false;
+            }
+            return r.ok;
+        case ComponentKind::UseCooldown:
+            r.f32();
+            return optionally(r, [&] {
+                (void)r.string();
+                return r.ok;
+            });
+        case ComponentKind::Tool:
+            if (!readCount(r, 256, n)) return false;
+            for (int i = 0; i < n; ++i) {
+                if (!skipHolderSet(r)) return false;
+                if (!optionally(r, [&] { r.f32(); return r.ok; })) return false;
+                if (!optionally(r, [&] { r.boolean(); return r.ok; })) return false;
+            }
+            r.f32();
+            r.varint();
+            r.boolean();
+            return r.ok;
+        case ComponentKind::Weapon:
+            r.varint();
+            r.f32();
+            return r.ok;
+        case ComponentKind::AttackRange:
+            for (int i = 0; i < 6; ++i) r.f32();
+            return r.ok;
+        case ComponentKind::Equippable:
+            r.varint();  // the slot
+            if (!skipSoundHolder(r)) return false;
+            if (!optionally(r, [&] { (void)r.string(); return r.ok; })) return false;  // the asset
+            if (!optionally(r, [&] { (void)r.string(); return r.ok; })) return false;  // the camera overlay
+            if (!optionally(r, [&] { return skipHolderSet(r); })) return false;         // who may wear it
+            for (int i = 0; i < 5; ++i) r.boolean();
+            return skipSoundHolder(r);
+        case ComponentKind::PiercingWeapon:
+            r.boolean();
+            r.boolean();
+            if (!optionally(r, [&] { return skipSoundHolder(r); })) return false;
+            return optionally(r, [&] { return skipSoundHolder(r); });
+        case ComponentKind::SwingAnimation:
+            r.varint();
+            r.varint();
+            return r.ok;
+        case ComponentKind::DyedColor: {
+            const std::int32_t rgb = r.i32();
+            if (stack != nullptr && r.ok) stack->tintColor = rgb & 0xFFFFFF;
+            return r.ok;
+        }
+        case ComponentKind::PotionContents: {
+            if (!optionally(r, [&] { r.varint(); return r.ok; })) return false;  // the potion
+            const bool hasColor = r.boolean();
+            const std::int32_t color = hasColor ? r.i32() : 0;
+            if (hasColor && stack != nullptr && r.ok) stack->tintColor = color & 0xFFFFFF;
+            if (!readCount(r, 256, n)) return false;
+            for (int i = 0; i < n; ++i) {
+                if (!skipEffectInstance(r)) return false;
+            }
+            return optionally(r, [&] { (void)r.string(); return r.ok; });  // its name
+        }
+        case ComponentKind::SuspiciousStew:
+            if (!readCount(r, 256, n)) return false;
+            for (int i = 0; i < n && r.ok; ++i) {
+                r.varint();
+                r.varint();
+            }
+            return r.ok;
+        case ComponentKind::WritableBook:
+            if (!readCount(r, 256, n)) return false;
+            for (int i = 0; i < n; ++i) {
+                if (!skipFilterableString(r)) return false;
+            }
+            return r.ok;
+        case ComponentKind::WrittenBook:
+            if (!skipFilterableString(r)) return false;  // the title
+            (void)r.string();                            // the author
+            r.varint();                                  // the generation
+            if (!readCount(r, 256, n)) return false;
+            for (int i = 0; i < n; ++i) {  // the pages: a text and what a filtered reader sees instead
+                (void)readComponent(r);
+                if (!optionally(r, [&] { (void)readComponent(r); return r.ok; })) return false;
+            }
+            r.boolean();
+            return r.ok;
+        case ComponentKind::TypedEntity:
+            r.varint();
+            (void)readNetworkNbt(r);
+            return r.ok;
+        case ComponentKind::Profile: {
+            const auto properties = [&]() {  // name, value, and an optional signature, each
+                if (!readCount(r, 64, n)) return false;
+                for (int i = 0; i < n && r.ok; ++i) {
+                    (void)r.string();
+                    (void)r.string();
+                    if (r.boolean()) (void)r.string();
+                }
+                return r.ok;
+            };
+            if (r.boolean()) {  // a whole profile: id, name, properties
+                r.skip(16);
+                (void)r.string();
+                if (!properties()) return false;
+            } else {  // a part of one: a name, an id, properties
+                if (!optionally(r, [&] { (void)r.string(); return r.ok; })) return false;
+                if (!optionally(r, [&] { r.skip(16); return r.ok; })) return false;
+                if (!properties()) return false;
+            }
+            for (int i = 0; i < 3; ++i) {  // the skin's own pictures: body, cape, elytra
+                if (!optionally(r, [&] { (void)r.string(); return r.ok; })) return false;
+            }
+            return optionally(r, [&] { r.boolean(); return r.ok; });  // the arm model
+        }
+        case ComponentKind::BannerPatterns:
+            if (!readCount(r, 64, n)) return false;
+            for (int i = 0; i < n && r.ok; ++i) {
+                if (r.varint() == 0) {  // a pattern written out: its picture and its name
+                    (void)r.string();
+                    (void)r.string();
+                }
+                r.varint();  // the colour
+            }
+            return r.ok;
+        case ComponentKind::BlockState:
+            if (!readCount(r, 256, n)) return false;
+            for (int i = 0; i < n && r.ok; ++i) {
+                (void)r.string();
+                (void)r.string();
+            }
+            return r.ok;
+        case ComponentKind::PotDecorations:
+            for (int i = 0; i < 4; ++i) {
+                if (!optionally(r, [&] { return readItemTemplate(r, ids, depth); })) return false;
+            }
+            return r.ok;
+        case ComponentKind::LodestoneTracker:
+            if (!optionally(r, [&] {  // where: the dimension and a position
+                    (void)r.string();
+                    r.i64();
+                    return r.ok;
+                }))
+                return false;
+            r.boolean();
+            return r.ok;
+    }
+    return false;
+}
+
+bool readComponentValueDepth(Reader& r, int type, const ComponentIds& ids, ItemStack* stack, int depth) {
+    if (depth > 8) return false;
     if (type == ids.damage) {
         const int damage = r.varint();
         if (stack != nullptr) stack->damage = damage;
-    } else if (type == ids.repairCost || type == ids.maxStackSize || type == ids.maxDamage) {
-        r.varint();
-    } else if (type == ids.unbreakable) {  // (a unit: nothing is written)
-    } else if (type == ids.customName) {
-        const std::string name = plainText(readComponent(r));
-        if (stack != nullptr) stack->customName = name;
-    } else if (type == ids.itemName) {
-        (void)readComponent(r);
-    } else if (type == ids.enchantments) {
-        const int n = r.varint();
-        for (int e = 0; e < n && r.ok; ++e) {
-            r.varint();  // the enchantment
-            r.varint();  // its level
-        }
-    } else if (type == ids.glintOverride) {
-        r.boolean();
-    } else if (type == ids.tooltipDisplay) {
-        r.boolean();  // hide everything
-        const int n = r.varint();
-        for (int h = 0; h < n && r.ok; ++h) r.varint();
-    } else if (type == ids.customData) {
-        (void)readNetworkNbt(r);
-    } else {
-        return false;
+        return r.ok;
     }
-    return r.ok;
+    if (type == ids.repairCost || type == ids.maxStackSize || type == ids.maxDamage) {
+        r.varint();
+        return r.ok;
+    }
+    if (type == ids.unbreakable) return r.ok;  // (a unit: nothing is written)
+    if (type == ids.customName) return readComponentKind(r, ComponentKind::CustomName, ids, stack, depth);
+    if (type == ids.itemName) return readComponentKind(r, ComponentKind::ItemName, ids, stack, depth);
+    if (type == ids.enchantments) return readComponentKind(r, ComponentKind::Enchantments, ids, stack, depth);
+    if (type == ids.glintOverride) {
+        r.boolean();
+        return r.ok;
+    }
+    if (type == ids.tooltipDisplay) return readComponentKind(r, ComponentKind::TooltipDisplay, ids, stack, depth);
+    if (type == ids.customData) return readComponentKind(r, ComponentKind::Nbt, ids, stack, depth);
+    const auto kind = ids.kinds.find(type);
+    if (kind == ids.kinds.end()) return false;
+    return readComponentKind(r, kind->second, ids, stack, depth);
 }
+
+}  // namespace
+
+// The value of a component of this type (the type's number has been read): kept in the stack where the stack has a place for it (the damage, a name, a colour), stepped over otherwise.
+// False for a type whose layout is not known here: nothing more of the stack (or of the list it is in) can be read.
+bool readComponentValue(Reader& r, int type, const ComponentIds& ids, ItemStack* stack) { return readComponentValueDepth(r, type, ids, stack, 0); }
 
 // An ItemCost: the item, how many, and a predicate on its components (a list of components that must be there, which is empty for nearly every trade).
 bool readItemCost(Reader& r, const ComponentIds& ids, ItemStack& out) {

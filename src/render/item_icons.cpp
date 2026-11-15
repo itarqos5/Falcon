@@ -33,13 +33,14 @@ std::uint32_t rgbOf(const json& v, std::uint32_t fallback = 0xFFFFFF) {
     return fallback;
 }
 
-std::vector<std::uint32_t> readTints(const json& node, const BlockModels* colors) {
+std::vector<std::uint32_t> readTints(const json& node, const BlockModels* colors, std::vector<std::uint8_t>& fromStack) {
     std::vector<std::uint32_t> out;
     const auto tints = node.find("tints");
     if (tints == node.end() || !tints->is_array()) return out;
     for (const json& t : *tints) {
         const std::string type = stripNamespace(t.value("type", std::string()));
         std::uint32_t rgb = 0xFFFFFF;
+        fromStack.push_back(type == "dye" || type == "potion" ? 1 : 0);
         if (type == "constant") {
             rgb = rgbOf(t.value("value", json()));
         } else if (type == "grass") {
@@ -72,7 +73,7 @@ void resolveNode(const json& node, const BlockModels* colors, ResolvedItemModel&
     if (type == "model") {
         IconPart part;
         part.model = stripNamespace(node.value("model", std::string()));
-        part.tints = readTints(node, colors);
+        part.tints = readTints(node, colors, part.fromStack);
         if (!part.model.empty()) out.parts.push_back(std::move(part));
     } else if (type == "condition") {
         // Nothing is being used, selected or broken: the "off" branch.
@@ -527,7 +528,7 @@ void ItemIcons::workerLoop() {
             queue_.pop_front();
             busy_ = true;
         }
-        const std::string key = stack.type().itemModel;
+        const std::string key = iconKey(stack);
         Image image = render(stack, iconPixels_.load(std::memory_order_relaxed));
         {
             std::lock_guard<std::mutex> lock(queueMutex_);
@@ -540,7 +541,7 @@ void ItemIcons::workerLoop() {
 
 void ItemIcons::prefetch(const ItemStack& stack) {
     if (stack.isEmpty()) return;
-    const std::string key = stack.type().itemModel;
+    const std::string key = iconKey(stack);
     if (cell_.count(key) != 0) return;
     std::lock_guard<std::mutex> lock(queueMutex_);
     if (ready_.count(key) != 0 || !queued_.insert(key).second) return;
@@ -584,7 +585,8 @@ struct ItemIcons::Rendered {
     std::string kind;  // "flat", "block", "stand-in", "missing"
 };
 
-ItemIcons::Rendered ItemIcons::renderPart(const IconPart& part, int size) {
+ItemIcons::Rendered ItemIcons::renderPart(const IconPart& part, int size, int stackColor) {
+    const std::vector<std::uint32_t> tints = part.tintsFor(stackColor);
     Rendered r;
     r.image = blankImage(size);
     const auto info = models_.itemModelInfo(part.model);
@@ -611,7 +613,7 @@ ItemIcons::Rendered ItemIcons::renderPart(const IconPart& part, int size) {
                 it = textures_.emplace(name, std::move(image)).first;
             }
             Image layer = resizeNearest(it->second, size);
-            if (i < part.tints.size()) tintImage(layer, part.tints[i]);
+            if (i < tints.size()) tintImage(layer, tints[i]);
             drawOver(r.image, layer);
         }
         return r;
@@ -676,21 +678,27 @@ ItemIcons::Rendered ItemIcons::renderPart(const IconPart& part, int size) {
             missingCube();
             return r;
         }
-        r.image = rasterize(models_, cubeQuads(layer), defaultGui(), true, part.tints, size);
+        r.image = rasterize(models_, cubeQuads(layer), defaultGui(), true, tints, size);
         return r;
     }
     r.kind = "block";
     const DisplayTransform gui = info->display.count("gui") != 0 ? info->display.at("gui") : DisplayTransform{};
-    r.image = rasterize(models_, *info->quads, gui, info->guiLight != "front", part.tints, size);
+    r.image = rasterize(models_, *info->quads, gui, info->guiLight != "front", tints, size);
     return r;
+}
+
+// What a picture is kept under: the item model, and the colour of the stack when it has one of its own (so dyed leather of two colours are two pictures).
+std::string ItemIcons::iconKey(const ItemStack& stack) {
+    const std::string& model = stack.type().itemModel;
+    return stack.tintColor >= 0 ? model + "#" + std::to_string(stack.tintColor) : model;
 }
 
 Image ItemIcons::render(const ItemStack& stack, int size) {
     if (stack.isEmpty()) return blankImage(size);
-    return renderModel(stack.type().itemModel, size);
+    return renderModel(stack.type().itemModel, size, stack.tintColor);
 }
 
-Image ItemIcons::renderModel(const std::string& itemModel, int size) {
+Image ItemIcons::renderModel(const std::string& itemModel, int size, int stackColor) {
     Image out = blankImage(size);
     std::lock_guard<std::mutex> lock(renderMutex_);
     const ResolvedItemModel& model = resolved(itemModel);
@@ -699,7 +707,7 @@ Image ItemIcons::renderModel(const std::string& itemModel, int size) {
         part.model = "builtin/missing";
         return renderPart(part, size).image;
     }
-    for (const IconPart& part : model.parts) drawOver(out, renderPart(part, size).image);
+    for (const IconPart& part : model.parts) drawOver(out, renderPart(part, size, stackColor).image);
     return out;
 }
 
@@ -736,7 +744,7 @@ void ItemIcons::setScale(int guiScale) {
 
 ItemIcons::Slot ItemIcons::slot(const ItemStack& stack) {
     if (atlas_.id() == 0) atlas_ = Texture2D::empty(kMaxSize * kColumns, kMaxSize * kRows, FilterMode::Nearest);  // (the first picture: now there is a GL context)
-    const std::string key = stack.type().itemModel;
+    const std::string key = iconKey(stack);
     auto it = cell_.find(key);
     if (it == cell_.end()) {
         const int capacity = kColumns * kRows;

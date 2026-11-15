@@ -311,6 +311,7 @@ HandRenderer::HeldModel HandRenderer::buildHeldModel(const ItemStack& stack) {
         if (!part.special.empty()) continue;  // drawn by code in the game: not held here
         const auto info = models_.itemModelInfo(part.model);
         if (!info) continue;
+        const std::vector<std::uint32_t> tints = part.tintsFor(stack.tintColor);  // (dyed leather, a potion with a colour: the stack's own)
         if (first) {
             model.firstRight = info->transform("firstperson_righthand");
             model.firstLeft = info->transform("firstperson_lefthand");
@@ -328,7 +329,7 @@ HandRenderer::HeldModel HandRenderer::buildHeldModel(const ItemStack& stack) {
             for (std::size_t li = 0; li < info->layers.size(); ++li) {
                 const int layer = models_.layerFor(info->layers[li]);
                 const Image tile = models_.layerImage(static_cast<std::uint16_t>(layer));
-                const std::uint32_t rgb = li < part.tints.size() ? part.tints[li] : 0xFFFFFFu;
+                const std::uint32_t rgb = li < tints.size() ? tints[li] : 0xFFFFFFu;
                 const int n = tile.width;
                 const float step = 1.0f / static_cast<float>(n);
                 push(model.vertices, {{{0, 1, z1}, {0, 0, z1}, {1, 0, z1}, {1, 1, z1}}}, {{{0, 0}, {0, 1}, {1, 1}, {1, 0}}}, layer, rgb, 0.9f);
@@ -350,7 +351,7 @@ HandRenderer::HeldModel HandRenderer::buildHeldModel(const ItemStack& stack) {
             }
         } else if (info->quads) {
             for (const ModelQuad& q : *info->quads) {
-                const std::uint32_t rgb = q.tint >= 0 && static_cast<std::size_t>(q.tint) < part.tints.size() ? part.tints[static_cast<std::size_t>(q.tint)] : 0xFFFFFFu;
+                const std::uint32_t rgb = q.tint >= 0 && static_cast<std::size_t>(q.tint) < tints.size() ? tints[static_cast<std::size_t>(q.tint)] : 0xFFFFFFu;
                 push(model.vertices, q.pos, q.uv, q.layer, rgb, q.shade ? faceShade(q.face) : 1.0f);
             }
         }
@@ -360,7 +361,7 @@ HandRenderer::HeldModel HandRenderer::buildHeldModel(const ItemStack& stack) {
 }
 
 const HandRenderer::HeldModel& HandRenderer::modelFor(const ItemStack& stack) {
-    const std::string key = stack.type().itemModel;
+    const std::string key = ItemIcons::iconKey(stack);  // (a stack with a colour of its own is a model of its own)
     auto it = heldModels_.find(key);
     if (it == heldModels_.end()) it = heldModels_.emplace(key, buildHeldModel(stack)).first;
     return it->second;

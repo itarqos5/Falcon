@@ -26,6 +26,17 @@ namespace falcon {
 struct IconPart {
     std::string model;                 // "item/diamond_pickaxe", "block/stone"
     std::vector<std::uint32_t> tints;  // tint index -> 0xRRGGBB (an index past the end is not tinted)
+    std::vector<std::uint8_t> fromStack;  // per tint index: 1 when that tint takes the colour of the stack itself (dye, potion) if the stack has one; `tints` then holds the item's own
+    // The tints with the colour of the stack (its dyed_color, or the colour of its potion) where a tint takes it.
+    [[nodiscard]] std::vector<std::uint32_t> tintsFor(int stackColor) const {
+        std::vector<std::uint32_t> out = tints;
+        if (stackColor >= 0) {
+            for (std::size_t i = 0; i < out.size() && i < fromStack.size(); ++i) {
+                if (fromStack[i] != 0) out[i] = static_cast<std::uint32_t>(stackColor) & 0xFFFFFFu;
+            }
+        }
+        return out;
+    }
     // A model the game draws with code instead of geometry ("banner", "chest", "shield", "head", ...): `model` is then its
     // base model, and the picture is a stand-in.
     std::string special;
@@ -87,7 +98,8 @@ public:
     [[nodiscard]] Image render(const ItemStack& stack, int size);
     // The same for an item model by name (the items/<name>.json that an item's "item_model" component names): a name that has no
     // definition gives the missing texture on a cube, like the game.
-    [[nodiscard]] Image renderModel(const std::string& itemModel, int size);
+    [[nodiscard]] Image renderModel(const std::string& itemModel, int size, int stackColor = -1);
+    [[nodiscard]] static std::string iconKey(const ItemStack& stack);
     [[nodiscard]] std::string kindOfModel(const std::string& itemModel);
     // What an item's definition resolves to (cached); for tests and reports.
     // What an item's definition resolves to for a display context (default "gui"; held items pass a first-person context so a
@@ -99,7 +111,7 @@ public:
 
 private:
     struct Rendered;
-    [[nodiscard]] Rendered renderPart(const IconPart& part, int size);
+    [[nodiscard]] Rendered renderPart(const IconPart& part, int size, int stackColor = -1);
 
     void workerLoop();
 

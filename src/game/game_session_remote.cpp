@@ -184,6 +184,11 @@ net::ComponentIds componentIds(const std::filesystem::path& dataRoot) {
     ids.glintOverride = id("minecraft:enchantment_glint_override");
     ids.tooltipDisplay = id("minecraft:tooltip_display");
     ids.customData = id("minecraft:custom_data");
+    for (const auto& [name, entry] : entries->items()) {  // every type the game has, with how it is written when that is known
+        const int number = entry.value("protocol_id", -1);
+        const net::ComponentKind kind = net::componentKindOf(name);
+        if (number >= 0 && kind != net::ComponentKind::Unknown) ids.kinds[number] = kind;
+    }
     return ids;
 }
 
