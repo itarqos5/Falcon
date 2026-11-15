@@ -3,147 +3,22 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Falcon: a Minecraft: Java Edition client in C++</title>
-<meta name="description" content="Falcon is a Minecraft: Java Edition 26.3 client written from scratch in C++ and OpenGL, with its own launcher. It starts quickly and uses little memory. Open source, Windows.">
-<link rel="icon" type="image/png" href="assets/falcon.png">
-<link rel="stylesheet" href="style.css">
+<title>Falcon: Minecraft: Java Edition, rebuilt in C++</title>
+<meta name="description" content="Falcon is a Minecraft: Java Edition 26.3 client written from scratch in C++ and OpenGL, with its own launcher. About 3x faster to be in a world and about 6x less memory than the Java client in one test. Open source, for Windows and Linux.">
+<meta name="theme-color" content="#0e1013">
+<meta name="color-scheme" content="dark">
+<link rel="icon" type="image/png" href="/falcon.png">
+<link rel="canonical" href="https://falcon.literaluu.xyz/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Falcon">
+<meta property="og:title" content="Falcon: Minecraft: Java Edition, rebuilt in C++">
+<meta property="og:description" content="A native Minecraft: Java Edition 26.3 client with its own launcher. Starts about 3x faster and uses about 6x less memory than the Java client in one test.">
+<meta property="og:url" content="https://falcon.literaluu.xyz/">
+<meta property="og:image" content="https://falcon.literaluu.xyz/world.jpg">
+<meta name="twitter:card" content="summary_large_image">
 </head>
 <body>
-
-<header class="top">
-  <div class="wrap">
-    <a class="brand" href="#top"><img src="assets/falcon.png" alt="" width="28" height="28"> Falcon</a>
-    <nav>
-      <a href="#features">Features</a>
-      <a href="#benchmarks">Benchmarks</a>
-      <a href="#how">How it works</a>
-      <a href="#faq">FAQ</a>
-      <a href="https://github.com/itarqos5/Falcon">GitHub</a>
-    </nav>
-  </div>
-</header>
-
-<main id="top">
-  <div class="wrap hero">
-    <h1>Minecraft: Java Edition 26.3, written from scratch in C++.</h1>
-    <p class="lead">Falcon is a client for the game you already own: a native program with its own launcher, no Java, and menus that match the game's own. It starts in a few seconds and needs a fraction of the memory of the Java client.</p>
-    <div class="actions">
-      <a class="btn primary" href="https://github.com/itarqos5/Falcon/releases/latest">Download the launcher</a>
-      <a class="btn" href="https://github.com/itarqos5/Falcon">Source on GitHub</a>
-    </div>
-    <p class="note">Windows 10 or 11 &middot; needs a Microsoft account that owns Minecraft: Java Edition &middot; version 1.2.0</p>
-  </div>
-
-  <section id="features">
-    <div class="wrap">
-      <h2>What it does</h2>
-      <p class="intro">Falcon reimplements the game's client, not the whole game. It reads your own copy of the game's files, so it looks like the game. It is not finished, and the lists below say where.</p>
-      <div class="cards">
-        <div class="card"><h3>The game's own menus</h3><p>Title screen, world list, options, resource packs, the pause menu: drawn from the game's own pictures, sizes and layout rules.</p></div>
-        <div class="card"><h3>Singleplayer worlds</h3><p>Terrain from a port of the game's world generator (the same seed gives the same land), caves and ores, survival and creative, an inventory, crafting, chests, furnaces, elytra, food.</p></div>
-        <div class="card"><h3>Multiplayer</h3><p>Joins servers of version 26.3, online or offline mode. Other players are drawn as the game draws them: skins, capes, armor, elytra, swimming, sleeping, crossbows.</p></div>
-        <div class="card"><h3>A small launcher</h3><p>Signs you in with Microsoft, checks that you own the game, downloads the game's files from Mojang, and starts Falcon. About 9 MB.</p></div>
-      </div>
-      <div class="shots">
-        <figure><img src="assets/in-game.jpg" alt="Falcon in a singleplayer world, render distance 8" width="854" height="480" loading="lazy"><figcaption>A world at render distance 8.</figcaption></figure>
-        <figure><img src="assets/valley.jpg" alt="A valley seen in Falcon" width="854" height="480" loading="lazy"><figcaption>A valley from the game's world generator.</figcaption></figure>
-      </div>
-      <h3 style="margin-top:32px">What is missing</h3>
-      <p class="intro" style="margin-bottom:0">In singleplayer: mobs, villagers and trading, structures, day and night, weather, clouds, redstone beyond levers, doors and buttons, the anvil, the enchanting table and the brewing stand, and the effects of potions and food. In multiplayer: mounts other than boats and minecarts cannot be steered, and only a test server in offline mode has been tried so far. The full list is in the <a href="https://github.com/itarqos5/Falcon#readme">README</a>.</p>
-    </div>
-  </section>
-
-  <section id="benchmarks">
-    <div class="wrap">
-      <h2>Benchmarks</h2>
-      <p class="intro">Falcon and the vanilla Java client, 26.3, in the same world (same seed), at render distance 8, on one PC. Falcon starts about three times faster once its caches exist and uses about a sixth of the memory. <strong>No frame-rate comparison with vanilla was run</strong>, and vanilla does more work than Falcon does, so read the caveats below before quoting these.</p>
-
-      <div class="bench">
-        <h3>From starting the program to being in the world</h3>
-        <p class="sub">Seconds, lower is better. A new world that has to be generated, at render distance 8.</p>
-        <div class="row"><span class="name">Vanilla 26.3</span><span class="track"><span class="bar" style="width:96%"></span></span><span class="value">15.4 s</span></div>
-        <div class="row"><span class="name">Falcon, first start</span><span class="track"><span class="bar falcon" style="width:57%"></span></span><span class="value">9.1 s</span></div>
-        <div class="row"><span class="name">Falcon, later starts</span><span class="track"><span class="bar falcon" style="width:33%"></span></span><span class="value">5.3 s</span></div>
-        <p class="sub" style="margin:12px 0 0">Vanilla: 15.2 s and 15.6 s in two runs. Falcon, first start (its caches of blocks, shapes and recipes are built): 9.2 s, 9.2 s, 9.1 s. Falcon, later starts: 5.3 s and 5.3 s (render distance 8 and 16).</p>
-      </div>
-
-      <div class="bench">
-        <h3>Memory 30 seconds after the world is ready</h3>
-        <p class="sub">Megabytes of working set (what the Windows Task Manager shows for the process), lower is better. Render distance 8.</p>
-        <div class="row"><span class="name">Vanilla 26.3</span><span class="track"><span class="bar" style="width:100%"></span></span><span class="value">1484 MB</span></div>
-        <div class="row"><span class="name">Falcon</span><span class="track"><span class="bar falcon" style="width:16.5%"></span></span><span class="value">245 MB</span></div>
-        <p class="sub" style="margin:12px 0 0">Private memory (what the process has committed): vanilla 2296 MB, Falcon 370 MB. Falcon at render distance 16: 392 MB working set, 521 MB private. Vanilla was run with the official launcher's default heap limit, <code>-Xmx2G</code>. The vanilla figures are from one run, Falcon's from three.</p>
-      </div>
-
-      <div class="bench">
-        <h3>The launcher</h3>
-        <p class="sub">Measured on the same PC.</p>
-        <table>
-          <tr><th>Window and splash on screen</th><td class="num">about 20 ms</td></tr>
-          <tr><th>Page ready to use</th><td class="num">about 0.3 s</td></tr>
-          <tr><th>Memory, all processes together</th><td class="num">about 65 MB</td></tr>
-        </table>
-        <p class="sub" style="margin:12px 0 0">Most of the 65 MB is the system's web view that draws the page; the launcher's own process is 2.7 MB.</p>
-      </div>
-
-      <div class="bench">
-        <h3>The world renderer against its own earlier version</h3>
-        <p class="sub">Not a comparison with vanilla. The same fixed flight over the terrain, the renderer before and after occlusion culling and multi-draw, render distance 32.</p>
-        <table>
-          <tr><th></th><th class="num">before</th><th class="num">after</th></tr>
-          <tr><td>GPU time of the world pass</td><td class="num">9.60 ms</td><td class="num">6.40 ms</td></tr>
-          <tr><td>CPU time per frame</td><td class="num">3.68 ms</td><td class="num">2.36 ms</td></tr>
-          <tr><td>Draw calls per frame</td><td class="num">about 17,000</td><td class="num">3</td></tr>
-        </table>
-        <p class="sub" style="margin:12px 0 0">The pictures are pixel-identical. The write-up, with what did not help, is <a href="https://github.com/itarqos5/Falcon/blob/main/docs/performance.md">docs/performance.md</a>.</p>
-      </div>
-
-      <div class="caveats">
-        <h3>What these numbers do not say</h3>
-        <ul>
-          <li><strong>Vanilla does more.</strong> It generates structures and every feature of the world, runs mobs (animals were in view), particles and the server's whole tick. Falcon's singleplayer has none of those yet. Part of the difference is work Falcon does not do.</li>
-          <li><strong>No frame rate comparison.</strong> I did not measure vanilla's frames per second, so there is no claim about it. Falcon's frame times are only compared with Falcon's.</li>
-          <li><strong>How "in the world" was timed.</strong> Vanilla: until its log says the player has logged in, which is a moment before the first picture of the world, so this favours vanilla slightly. Falcon: until it says the spawn area is loaded.</li>
-          <li><strong>Different windows.</strong> The vanilla runs were in a visible 854x480 window; Falcon's were in a hidden window of that size (the memory and the time to load do not depend much on it, the frame rate would). Falcon's player stood still at the spot where vanilla spawned.</li>
-          <li><strong>Few runs, one PC.</strong> Two vanilla runs for the start, one for memory; Ryzen 5 5600G, Radeon RX 580 2048SP, 16 GB, Windows 10, Java 25. Take them as the size of the difference, not as exact figures.</li>
-          <li>Both used the same options (vsync off, frame cap off, clouds off, minimal particles, no entity shadows). The world, the scripts and the exact method are in the repository, under <code>tools/vs_vanilla</code> and <a href="https://github.com/itarqos5/Falcon/blob/main/docs/vs-vanilla.md">docs/vs-vanilla.md</a>.</li>
-        </ul>
-      </div>
-    </div>
-  </section>
-
-  <section id="how">
-    <div class="wrap">
-      <h2>How it works</h2>
-      <p class="intro">Falcon contains no Minecraft textures, sounds or code. It uses the files of a copy of the game you own, and it asks Mojang whether you own it.</p>
-      <div class="cards">
-        <div class="card"><h3>1. Sign in</h3><p>The launcher opens Microsoft's own sign-in page. Your password never goes through Falcon. It then checks with Mojang that the account owns Java Edition.</p></div>
-        <div class="card"><h3>2. Download</h3><p>On the first Play, the launcher downloads the game's pictures, sounds and languages from Mojang's servers (the same ones the official launcher uses), and Falcon's data tables (about 2.4 MB, checked against a hash) from this project's release.</p></div>
-        <div class="card"><h3>3. Play</h3><p>It starts the client, which checks again with Mojang that the account owns the game before it opens.</p></div>
-      </div>
-    </div>
-  </section>
-
-  <section id="faq">
-    <div class="wrap">
-      <h2>Questions</h2>
-      <details><summary>Is Falcon made by Mojang or Microsoft?</summary><p>No. It is an independent project, not approved by or connected to Mojang or Microsoft. "Minecraft" is a trademark of Mojang Synergies AB.</p></details>
-      <details><summary>Do I need to buy Minecraft?</summary><p>Yes. The launcher only works for a Microsoft account that owns Minecraft: Java Edition, and the client checks it again.</p></details>
-      <details><summary>What are the "data tables"?</summary><p>The singleplayer world needs lists the game derives from its own data: block and item numbers, block shapes, recipes' helpers and the like. They are about 2.4 MB, published with each release as <code>falcon-data-26.3.zip</code>, and the launcher refuses a copy whose hash is not the one it carries. They are facts about the game's data, not its pictures, sounds or code.</p></details>
-      <details><summary>Why does the sign-in page say "Minecraft"?</summary><p>Falcon uses the Minecraft launcher's public sign-in identity, as other third-party launchers do, so no registration is needed. The consent page therefore names the official app. Falcon is not an approved application of Mojang's, and Mojang could change what that identity accepts.</p></details>
-      <details><summary>Does it work on Mac or Linux?</summary><p>No, Windows only for now.</p></details>
-      <details><summary>Can I use it on a server?</summary><p>It joins servers of version 26.3 in online and offline mode. So far it has mostly been tried against a test server in offline mode. Some servers kick unknown clients, and anti-cheat plugins may object to it; use it at your own risk.</p></details>
-      <details><summary>Where is the code?</summary><p>On <a href="https://github.com/itarqos5/Falcon">GitHub</a>, under the Apache 2.0 licence.</p></details>
-    </div>
-  </section>
-</main>
-
-<footer>
-  <div class="wrap">
-    <p>Falcon is an independent project. It is not affiliated with Mojang Studios or Microsoft. Minecraft is a trademark of Mojang Synergies AB.</p>
-    <p>Benchmarks measured on one PC on 15 November 2026; see the notes above for what they cover.</p>
-  </div>
-</footer>
-
+<div id="root"></div>
+<script type="module" src="/src/main.tsx"></script>
 </body>
 </html>
