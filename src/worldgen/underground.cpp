@@ -7,7 +7,11 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <deque>
 #include <functional>
+#include <memory>
+#include <mutex>
+#include <unordered_map>
 #include <string>
 
 namespace falcon::worldgen {
@@ -74,7 +78,301 @@ struct Underground::Context {
     [[nodiscard]] static std::size_t index(int lx, int y, int lz) { return static_cast<std::size_t>(y - kMinY) + static_cast<std::size_t>(kHeight) * static_cast<std::size_t>(lx + 16 * lz); }
 };
 
-Underground::Underground(const BlockRegistry& registry, std::int64_t seed) : registry_(registry), seed_(seed) {
+// ---------------------------------------------------------------------------------------------------------------
+// Carvers
+
+// What the carvers of one chunk do, worked out once. A cave's tunnels and rooms start from a seed that depends on the chunk they start in and on nothing else, so every chunk
+// that replays them (the 17 x 17 chunks round it do) gets the same walk; only whether a step of a walk reaches the chunk being made depends on that chunk. So the walks are made
+// here, once per starting chunk, and each chunk keeps the steps that reach it (carve below) exactly as the game's loops would have.
+struct Underground::SourcePlan {
+    struct Shape {
+        double x, y, z, hr, vr;
+    };
+    struct Step : Shape {
+        int j;  // the step's number in its tunnel (canReach looks at how far the tunnel has come)
+    };
+    struct Tunnel {
+        int distance = 0;
+        float thickness = 0.0f;
+        std::vector<Step> steps;       // the steps that carve, in order (a step the walk skips is not here)
+        std::vector<Tunnel> children;  // the two branches after a split (the walk of this tunnel ends there), or none
+    };
+    struct Cave {
+        double floorLevel = 0.0;
+        bool hasRoom = false;
+        Shape room{};
+        std::vector<Tunnel> tunnels;
+    };
+    std::vector<Cave> caves;
+    bool hasCanyon = false;
+    int canyonDistance = 0;
+    float canyonThickness = 0.0f;
+    std::vector<Step> canyonSteps;
+    std::array<float, kHeight> canyonWidthFactors{};
+};
+
+// The plans of the chunks that were asked for lately, shared by the threads that make chunks. The oldest are dropped when a part is full; a dropped one is only made again.
+class Underground::PlanCache {
+public:
+    std::shared_ptr<const SourcePlan> find(std::uint64_t key) {
+        Shard& s = shardOf(key);
+        std::lock_guard<std::mutex> lock(s.mutex);
+        const auto it = s.map.find(key);
+        return it == s.map.end() ? nullptr : it->second;
+    }
+    void put(std::uint64_t key, std::shared_ptr<const SourcePlan> plan) {
+        Shard& s = shardOf(key);
+        std::lock_guard<std::mutex> lock(s.mutex);
+        if (!s.map.emplace(key, std::move(plan)).second) return;  // another thread made it first
+        s.order.push_back(key);
+        while (s.order.size() > kPerShard) {
+            s.map.erase(s.order.front());
+            s.order.pop_front();
+        }
+    }
+
+private:
+    static constexpr std::size_t kShards = 16;
+    static constexpr std::size_t kPerShard = 384;  // 6144 chunks' plans: more than the area the workers are making chunks in at any time
+    struct Shard {
+        std::mutex mutex;
+        std::unordered_map<std::uint64_t, std::shared_ptr<const SourcePlan>> map;
+        std::deque<std::uint64_t> order;
+    };
+    Shard& shardOf(std::uint64_t key) { return shards_[static_cast<std::size_t>((key * 0x9E3779B97F4A7C15ULL) >> 60) % kShards]; }
+    std::array<Shard, kShards> shards_;
+};
+
+std::shared_ptr<const Underground::SourcePlan> Underground::planFor(int sourceX, int sourceZ) const {
+    const std::uint64_t key = (static_cast<std::uint64_t>(static_cast<std::uint32_t>(sourceX)) << 32) | static_cast<std::uint32_t>(sourceZ);
+    if (std::shared_ptr<const SourcePlan> cached = plans_->find(key)) return cached;
+    std::shared_ptr<const SourcePlan> plan = makePlan(sourceX, sourceZ);
+    plans_->put(key, plan);
+    return plan;
+}
+
+// The walks of CaveWorldCarver and CanyonWorldCarver from one chunk, written down (see SourcePlan): the game's random draws, in the game's order.
+std::shared_ptr<const Underground::SourcePlan> Underground::makePlan(int sourceX, int sourceZ) const {
+    using Plan = SourcePlan;
+    auto plan = std::make_shared<Plan>();
+    LegacyRandomSource random(0);
+
+    // CaveWorldCarver.createTunnel: a random walk that carves an ellipsoid at most steps, and may split in two once.
+    std::function<void(Plan::Tunnel&, std::int64_t, double, double, double, double, double, float, float, float, int, int)> tunnel;
+    tunnel = [&](Plan::Tunnel& out, std::int64_t tunnelSeed, double x, double y, double z, double hMul, double vMul, float thickness, float yaw, float pitch, int step, int distance) {
+        out.distance = distance;
+        out.thickness = thickness;
+        LegacyRandomSource r(tunnelSeed);
+        const int splitAt = r.nextInt(distance / 2) + distance / 4;
+        const bool steep = r.nextInt(6) == 0;
+        float f = 0.0f, g = 0.0f;
+        for (int j = step; j < distance; ++j) {
+            const double d = 1.5 + static_cast<double>(std::sin(static_cast<float>(j) * kPi / static_cast<float>(distance)) * thickness);
+            const double e = d;  // (the game's y scale is 1 for every tunnel here)
+            const float h = std::cos(pitch);
+            x += static_cast<double>(std::cos(yaw) * h);
+            y += static_cast<double>(std::sin(pitch));
+            z += static_cast<double>(std::sin(yaw) * h);
+            pitch *= steep ? 0.92f : 0.7f;
+            pitch += g * 0.1f;
+            yaw += f * 0.1f;
+            g *= 0.9f;
+            f *= 0.75f;
+            g += wobble(r, 2.0f);
+            f += wobble(r, 4.0f);
+            if (j == splitAt && thickness > 1.0f) {
+                // The branches have generators of their own, so both can be drawn for now; they are walked after this tunnel's steps, as in the game.
+                const std::int64_t seedA = r.nextLong();
+                const float thicknessA = r.nextFloat() * 0.5f + 0.5f;
+                const std::int64_t seedB = r.nextLong();
+                const float thicknessB = r.nextFloat() * 0.5f + 0.5f;
+                out.children.resize(2);
+                tunnel(out.children[0], seedA, x, y, z, hMul, vMul, thicknessA, yaw - kPi / 2.0f, pitch / 3.0f, j, distance);
+                tunnel(out.children[1], seedB, x, y, z, hMul, vMul, thicknessB, yaw + kPi / 2.0f, pitch / 3.0f, j, distance);
+                return;
+            }
+            if (r.nextInt(4) == 0) continue;
+            out.steps.push_back({{x, y, z, d * hMul, e * vMul}, j});
+        }
+    };
+
+    struct CaveSettings {
+        float probability;
+        int maxY;
+    };
+    // cave.json and cave_extra_underground.json, then canyon.json (below).
+    static constexpr CaveSettings kCaves[2] = {{0.15f, 180}, {0.07f, 47}};
+    for (int index = 0; index < 2; ++index) {
+        setLargeFeatureSeed(random, seed_ + index, sourceX, sourceZ);
+        if (!(random.nextFloat() <= kCaves[index].probability)) continue;
+        // count: very_biased_to_bottom 0..14 = nextInt(nextInt(nextInt(15) + 1) + 1)
+        const int count = random.nextInt(random.nextInt(random.nextInt(15) + 1) + 1);
+        for (int k = 0; k < count; ++k) {
+            Plan::Cave cave;
+            const double x = sourceX * 16 + random.nextInt(16);
+            const double y = static_cast<double>(kMinY + 8 + random.nextInt(kCaves[index].maxY - (kMinY + 8) + 1));
+            const double z = sourceZ * 16 + random.nextInt(16);
+            const double hMul = uniformFloat(random, 0.7f, 1.4f);
+            const double vMul = uniformFloat(random, 0.8f, 1.3f);
+            cave.floorLevel = uniformFloat(random, -1.0f, -0.4f);
+            int tunnels = 1;
+            if (random.nextInt(4) == 0) {  // a round room first, then a few more tunnels
+                const double roomVertical = uniformFloat(random, 0.1f, 0.9f);
+                const float roomRadius = 1.0f + random.nextFloat() * 6.0f;
+                const double d = 1.5 + static_cast<double>(std::sin(1.5707963705062866f) * roomRadius);
+                cave.hasRoom = true;
+                cave.room = {x + 1.0, y, z, d, d * roomVertical};
+                tunnels += random.nextInt(4);
+            }
+            cave.tunnels.resize(static_cast<std::size_t>(tunnels));
+            for (int p = 0; p < tunnels; ++p) {
+                const float yaw = random.nextFloat() * (kPi * 2.0f);
+                const float pitch = (random.nextFloat() - 0.5f) / 4.0f;
+                // getThickness: trapezoid(0, 3, plateau 1), and one tunnel in ten is much fatter (weird_thickness_bias)
+                const float t1 = random.nextFloat() * 2.0f;
+                float thickness = t1 + random.nextFloat();
+                if (random.nextInt(10) == 0) {
+                    const float a = random.nextFloat();
+                    const float b = random.nextFloat();
+                    thickness *= a * b * 3.0f + 1.0f;
+                }
+                const int distance = kTunnelRange - random.nextInt(kTunnelRange / 4);
+                const std::int64_t tunnelSeed = random.nextLong();
+                tunnel(cave.tunnels[static_cast<std::size_t>(p)], tunnelSeed, x, y, z, hMul, vMul, thickness, yaw, pitch, 0, distance);
+            }
+            plan->caves.push_back(std::move(cave));
+        }
+    }
+
+    // CanyonWorldCarver (canyon.json): one long, tall, narrow cut with its walls of uneven width, rarely.
+    setLargeFeatureSeed(random, seed_ + 2, sourceX, sourceZ);
+    if (!(random.nextFloat() <= 0.01f)) return plan;
+    const double x = sourceX * 16 + random.nextInt(16);
+    const double y = static_cast<double>(10 + random.nextInt(67 - 10 + 1));
+    const double z = sourceZ * 16 + random.nextInt(16);
+    const float yaw = random.nextFloat() * (kPi * 2.0f);
+    const float pitch0 = uniformFloat(random, -0.125f, 0.125f);
+    const float t1 = random.nextFloat() * 4.0f;  // thickness: trapezoid(0, 6, plateau 2)
+    const float thickness = t1 + random.nextFloat() * 2.0f;
+    const int distance = static_cast<int>(static_cast<float>(kTunnelRange) * uniformFloat(random, 0.75f, 1.0f));
+    {
+        const std::int64_t canyonSeed = random.nextLong();
+        LegacyRandomSource r(canyonSeed);
+        // initWidthFactors: the squared width of each layer, changing every third layer or so
+        float factor = 1.0f;
+        for (int i = 0; i < kHeight; ++i) {
+            if (i == 0 || r.nextInt(3) == 0) {
+                const float a = r.nextFloat();
+                factor = 1.0f + a * r.nextFloat();
+            }
+            plan->canyonWidthFactors[static_cast<std::size_t>(i)] = factor * factor;
+        }
+        plan->hasCanyon = true;
+        plan->canyonDistance = distance;
+        plan->canyonThickness = thickness;
+        float f = 0.0f, g = 0.0f, pitch = pitch0, yawNow = yaw;
+        double px = x, py = y, pz = z;
+        for (int step = 0; step < distance; ++step) {
+            double hr = 1.5 + static_cast<double>(std::sin(static_cast<float>(step) * kPi / static_cast<float>(distance)) * thickness);
+            double vr = hr * 3.0;  // y_scale 3
+            hr *= static_cast<double>(uniformFloat(r, 0.75f, 1.0f));
+            // updateVerticalRadius: widest in the middle of the canyon
+            const float mid = 1.0f - std::abs(0.5f - static_cast<float>(step) / static_cast<float>(distance)) * 2.0f;
+            vr = static_cast<double>(1.0f + 0.0f * mid) * vr * static_cast<double>(uniformFloat(r, 0.75f, 1.0f));
+            const float h = std::cos(pitch);
+            const float p = std::sin(pitch);
+            px += static_cast<double>(std::cos(yawNow) * h);
+            py += static_cast<double>(p);
+            pz += static_cast<double>(std::sin(yawNow) * h);
+            pitch *= 0.7f;
+            pitch += g * 0.05f;
+            yawNow += f * 0.05f;
+            g *= 0.8f;
+            f *= 0.5f;
+            g += wobble(r, 2.0f);
+            f += wobble(r, 4.0f);
+            if (r.nextInt(4) == 0) continue;
+            plan->canyonSteps.push_back({{px, py, pz, hr, vr}, step});
+        }
+    }
+    return plan;
+}
+
+// WorldCarver.carveEllipsoid, with the game's carveBlock for each cell it keeps. `skip(dx, dy, dz, y)` says which cells of the ellipsoid are left alone.
+template <class Skip>
+void Underground::carveEllipsoid(Context& c, double x, double y, double z, double hr, double vr, const Skip& skip) const {
+    const int midX = c.minX + 8, midZ = c.minZ + 8;
+    if (std::abs(x - midX) > 16.0 + hr * 2.0 || std::abs(z - midZ) > 16.0 + hr * 2.0) return;
+    const int x0 = std::max(javaFloor(x - hr) - c.minX - 1, 0), x1 = std::min(javaFloor(x + hr) - c.minX, 15);
+    const int y0 = std::max(javaFloor(y - vr) - 1, kMinY), y1 = std::min(javaFloor(y + vr) + 1, kMaxY);
+    const int z0 = std::max(javaFloor(z - hr) - c.minZ - 1, 0), z1 = std::min(javaFloor(z + hr) - c.minZ, 15);
+    for (int lx = x0; lx <= x1; ++lx) {
+        const double dx = (c.minX + lx + 0.5 - x) / hr;
+        for (int lz = z0; lz <= z1; ++lz) {
+            const double dz = (c.minZ + lz + 0.5 - z) / hr;
+            if (dx * dx + dz * dz >= 1.0) continue;
+            bool surfaceReached = false;
+            Block top = Block::Air;
+            for (int wy = y1; wy > y0; --wy) {
+                const double dy = (wy - 0.5 - y) / vr;
+                if (skip(dx, dy, dz, wy)) continue;
+                Block& cell = c.blocks[Context::index(lx, wy, lz)];
+                const std::size_t block = registry_.state(cell).block;
+                if (surfaceKind_[block] != 0) {  // the top of the world is being cut: the soil below must show as the top again
+                    surfaceReached = true;
+                    top = surfaceKind_[block] == 1 ? b_.grass : b_.mycelium;
+                }
+                if (carvable_[block] == 0) continue;
+                cell = wy <= kLavaLevel ? b_.lava : (wy < kSeaLevel && c.ocean[static_cast<std::size_t>(lx + 16 * lz)] != 0 ? b_.water : Block::Air);
+                if (surfaceReached && wy - 1 >= kMinY) {
+                    Block& below = c.blocks[Context::index(lx, wy - 1, lz)];
+                    if (below == b_.dirt) below = top;
+                }
+            }
+        }
+    }
+}
+
+void Underground::carve(Context& c, int sourceX, int sourceZ) const {
+    const std::shared_ptr<const SourcePlan> plan = planFor(sourceX, sourceZ);
+    const int midX = c.minX + 8, midZ = c.minZ + 8;
+    // WorldCarver.canReach.
+    const auto canReach = [&](double x, double z, int step, int distance, float thickness) {
+        const double dx = midX - x, dz = midZ - z;
+        const double left = distance - step;
+        const double reach = thickness + 2.0f + 16.0f;
+        return dx * dx + dz * dz - left * left <= reach * reach;
+    };
+
+    for (const SourcePlan::Cave& cave : plan->caves) {
+        const double floorLevel = cave.floorLevel;
+        const auto skip = [floorLevel](double dx, double dy, double dz, int) { return dy <= floorLevel || dx * dx + dy * dy + dz * dz >= 1.0; };
+        if (cave.hasRoom) carveEllipsoid(c, cave.room.x, cave.room.y, cave.room.z, cave.room.hr, cave.room.vr, skip);
+        // A tunnel that stops reaching the chunk ends there, and its branches (if it has any) are never made.
+        std::function<void(const SourcePlan::Tunnel&)> run;
+        run = [&](const SourcePlan::Tunnel& tunnel) {
+            for (const SourcePlan::Step& s : tunnel.steps) {
+                if (!canReach(s.x, s.z, s.j, tunnel.distance, tunnel.thickness)) return;
+                carveEllipsoid(c, s.x, s.y, s.z, s.hr, s.vr, skip);
+            }
+            for (const SourcePlan::Tunnel& child : tunnel.children) run(child);
+        };
+        for (const SourcePlan::Tunnel& tunnel : cave.tunnels) run(tunnel);
+    }
+
+    if (!plan->hasCanyon) return;
+    const std::array<float, kHeight>& widthFactors = plan->canyonWidthFactors;
+    for (const SourcePlan::Step& s : plan->canyonSteps) {
+        if (!canReach(s.x, s.z, s.j, plan->canyonDistance, plan->canyonThickness)) return;
+        carveEllipsoid(c, s.x, s.y, s.z, s.hr, s.vr, [&widthFactors](double dx, double dy, double dz, int wy) {
+            return (dx * dx + dz * dz) * static_cast<double>(widthFactors[static_cast<std::size_t>(wy - kMinY - 1)]) + dy * dy / 6.0 >= 1.0;
+        });
+    }
+}
+
+Underground::~Underground() = default;
+
+Underground::Underground(const BlockRegistry& registry, std::int64_t seed) : registry_(registry), seed_(seed), plans_(std::make_unique<PlanCache>()) {
     const auto named = [&](const char* text) { return registry.parse(text).value_or(Block::Air); };
     b_.lava = named("lava");
     b_.water = named("water");
@@ -121,6 +419,15 @@ Underground::Underground(const BlockRegistry& registry, std::int64_t seed) : reg
         {"diorite", 2, 0, 64, 0, 60, false, 0.0f, K::Diorite, W::Everywhere},   {"andesite", 1, 6, 64, 64, 128, false, 0.0f, K::Andesite, W::Everywhere},
         {"andesite", 2, 0, 64, 0, 60, false, 0.0f, K::Andesite, W::Everywhere}, {"tuff", 2, 0, 64, -64, 0, false, 0.0f, K::Tuff, W::Everywhere},
     };
+    // sin(pi * i / size) of every step of every vein, worked out once: the same expression as the loop used to evaluate (std::sin on a float goes through the slow long double
+    // sine on this compiler's runtime, and it was a few percent of making a chunk).
+    oreSines_.resize(ores_.size());
+    for (std::size_t i = 0; i < ores_.size(); ++i) {
+        for (int step = 0; step < ores_[i].size; ++step) {
+            const float t = static_cast<float>(step) / static_cast<float>(ores_[i].size);
+            oreSines_[i].push_back(static_cast<double>(std::sin(kPi * t)));
+        }
+    }
     oreBlocks_.resize(ores_.size());
     for (std::size_t i = 0; i < ores_.size(); ++i) {
         if (ores_[i].kind != Ore::Kind::Ore) continue;
@@ -128,188 +435,6 @@ Underground::Underground(const BlockRegistry& registry, std::int64_t seed) : reg
         oreBlocks_[i].stone = named((stem + "_ore").c_str());
         oreBlocks_[i].deepslate = named(("deepslate_" + stem + "_ore").c_str());
         if (registry.isAir(oreBlocks_[i].deepslate)) oreBlocks_[i].deepslate = oreBlocks_[i].stone;
-    }
-}
-
-// ---------------------------------------------------------------------------------------------------------------
-// Carvers
-
-void Underground::carve(Context& c, int sourceX, int sourceZ) const {
-    LegacyRandomSource random(0);
-    const int midX = c.minX + 8, midZ = c.minZ + 8;
-
-    // WorldCarver.carveEllipsoid, with the game's carveBlock for each cell it keeps.
-    const auto ellipsoid = [&](double x, double y, double z, double hr, double vr, const auto& skip) {
-        if (std::abs(x - midX) > 16.0 + hr * 2.0 || std::abs(z - midZ) > 16.0 + hr * 2.0) return;
-        const int x0 = std::max(javaFloor(x - hr) - c.minX - 1, 0), x1 = std::min(javaFloor(x + hr) - c.minX, 15);
-        const int y0 = std::max(javaFloor(y - vr) - 1, kMinY), y1 = std::min(javaFloor(y + vr) + 1, kMaxY);
-        const int z0 = std::max(javaFloor(z - hr) - c.minZ - 1, 0), z1 = std::min(javaFloor(z + hr) - c.minZ, 15);
-        for (int lx = x0; lx <= x1; ++lx) {
-            const double dx = (c.minX + lx + 0.5 - x) / hr;
-            for (int lz = z0; lz <= z1; ++lz) {
-                const double dz = (c.minZ + lz + 0.5 - z) / hr;
-                if (dx * dx + dz * dz >= 1.0) continue;
-                bool surfaceReached = false;
-                Block top = Block::Air;
-                for (int wy = y1; wy > y0; --wy) {
-                    const double dy = (wy - 0.5 - y) / vr;
-                    if (skip(dx, dy, dz, wy)) continue;
-                    Block& cell = c.blocks[Context::index(lx, wy, lz)];
-                    const std::size_t block = registry_.state(cell).block;
-                    if (surfaceKind_[block] != 0) {  // the top of the world is being cut: the soil below must show as the top again
-                        surfaceReached = true;
-                        top = surfaceKind_[block] == 1 ? b_.grass : b_.mycelium;
-                    }
-                    if (carvable_[block] == 0) continue;
-                    cell = wy <= kLavaLevel ? b_.lava : (wy < kSeaLevel && c.ocean[static_cast<std::size_t>(lx + 16 * lz)] != 0 ? b_.water : Block::Air);
-                    if (surfaceReached && wy - 1 >= kMinY) {
-                        Block& below = c.blocks[Context::index(lx, wy - 1, lz)];
-                        if (below == b_.dirt) below = top;
-                    }
-                }
-            }
-        }
-    };
-    // WorldCarver.canReach.
-    const auto canReach = [&](double x, double z, int step, int distance, float thickness) {
-        const double dx = midX - x, dz = midZ - z;
-        const double left = distance - step;
-        const double reach = thickness + 2.0f + 16.0f;
-        return dx * dx + dz * dz - left * left <= reach * reach;
-    };
-
-    // CaveWorldCarver.createTunnel: a random walk that carves an ellipsoid at most steps, and may split in two once.
-    std::function<void(std::int64_t, double, double, double, double, double, float, float, float, int, int, double, double)> tunnel;
-    tunnel = [&](std::int64_t tunnelSeed, double x, double y, double z, double hMul, double vMul, float thickness, float yaw, float pitch, int step, int distance, double yScale,
-                 double floorLevel) {
-        LegacyRandomSource r(tunnelSeed);
-        const int splitAt = r.nextInt(distance / 2) + distance / 4;
-        const bool steep = r.nextInt(6) == 0;
-        float f = 0.0f, g = 0.0f;
-        for (int j = step; j < distance; ++j) {
-            const double d = 1.5 + static_cast<double>(std::sin(static_cast<float>(j) * kPi / static_cast<float>(distance)) * thickness);
-            const double e = d * yScale;
-            const float h = std::cos(pitch);
-            x += static_cast<double>(std::cos(yaw) * h);
-            y += static_cast<double>(std::sin(pitch));
-            z += static_cast<double>(std::sin(yaw) * h);
-            pitch *= steep ? 0.92f : 0.7f;
-            pitch += g * 0.1f;
-            yaw += f * 0.1f;
-            g *= 0.9f;
-            f *= 0.75f;
-            g += wobble(r, 2.0f);
-            f += wobble(r, 4.0f);
-            if (j == splitAt && thickness > 1.0f) {
-                const std::int64_t seedA = r.nextLong();
-                const float thicknessA = r.nextFloat() * 0.5f + 0.5f;
-                tunnel(seedA, x, y, z, hMul, vMul, thicknessA, yaw - kPi / 2.0f, pitch / 3.0f, j, distance, 1.0, floorLevel);
-                const std::int64_t seedB = r.nextLong();
-                const float thicknessB = r.nextFloat() * 0.5f + 0.5f;
-                tunnel(seedB, x, y, z, hMul, vMul, thicknessB, yaw + kPi / 2.0f, pitch / 3.0f, j, distance, 1.0, floorLevel);
-                return;
-            }
-            if (r.nextInt(4) == 0) continue;
-            if (!canReach(x, z, j, distance, thickness)) return;
-            ellipsoid(x, y, z, d * hMul, e * vMul, [floorLevel](double dx, double dy, double dz, int) { return dy <= floorLevel || dx * dx + dy * dy + dz * dz >= 1.0; });
-        }
-    };
-
-    struct CaveSettings {
-        float probability;
-        int maxY;
-    };
-    // cave.json and cave_extra_underground.json, then canyon.json (below).
-    static constexpr CaveSettings kCaves[2] = {{0.15f, 180}, {0.07f, 47}};
-    for (int index = 0; index < 2; ++index) {
-        setLargeFeatureSeed(random, seed_ + index, sourceX, sourceZ);
-        if (!(random.nextFloat() <= kCaves[index].probability)) continue;
-        // count: very_biased_to_bottom 0..14 = nextInt(nextInt(nextInt(15) + 1) + 1)
-        const int count = random.nextInt(random.nextInt(random.nextInt(15) + 1) + 1);
-        for (int k = 0; k < count; ++k) {
-            const double x = sourceX * 16 + random.nextInt(16);
-            const double y = static_cast<double>(kMinY + 8 + random.nextInt(kCaves[index].maxY - (kMinY + 8) + 1));
-            const double z = sourceZ * 16 + random.nextInt(16);
-            const double hMul = uniformFloat(random, 0.7f, 1.4f);
-            const double vMul = uniformFloat(random, 0.8f, 1.3f);
-            const double floorLevel = uniformFloat(random, -1.0f, -0.4f);
-            int tunnels = 1;
-            if (random.nextInt(4) == 0) {  // a round room first, then a few more tunnels
-                const double roomVertical = uniformFloat(random, 0.1f, 0.9f);
-                const float roomRadius = 1.0f + random.nextFloat() * 6.0f;
-                const double d = 1.5 + static_cast<double>(std::sin(1.5707963705062866f) * roomRadius);
-                ellipsoid(x + 1.0, y, z, d, d * roomVertical, [floorLevel](double dx, double dy, double dz, int) { return dy <= floorLevel || dx * dx + dy * dy + dz * dz >= 1.0; });
-                tunnels += random.nextInt(4);
-            }
-            for (int p = 0; p < tunnels; ++p) {
-                const float yaw = random.nextFloat() * (kPi * 2.0f);
-                const float pitch = (random.nextFloat() - 0.5f) / 4.0f;
-                // getThickness: trapezoid(0, 3, plateau 1), and one tunnel in ten is much fatter (weird_thickness_bias)
-                const float t1 = random.nextFloat() * 2.0f;
-                float thickness = t1 + random.nextFloat();
-                if (random.nextInt(10) == 0) {
-                    const float a = random.nextFloat();
-                    const float b = random.nextFloat();
-                    thickness *= a * b * 3.0f + 1.0f;
-                }
-                const int distance = kTunnelRange - random.nextInt(kTunnelRange / 4);
-                const std::int64_t tunnelSeed = random.nextLong();
-                tunnel(tunnelSeed, x, y, z, hMul, vMul, thickness, yaw, pitch, 0, distance, 1.0, floorLevel);
-            }
-        }
-    }
-
-    // CanyonWorldCarver (canyon.json): one long, tall, narrow cut with its walls of uneven width, rarely.
-    setLargeFeatureSeed(random, seed_ + 2, sourceX, sourceZ);
-    if (!(random.nextFloat() <= 0.01f)) return;
-    const double x = sourceX * 16 + random.nextInt(16);
-    const double y = static_cast<double>(10 + random.nextInt(67 - 10 + 1));
-    const double z = sourceZ * 16 + random.nextInt(16);
-    const float yaw = random.nextFloat() * (kPi * 2.0f);
-    const float pitch0 = uniformFloat(random, -0.125f, 0.125f);
-    const float t1 = random.nextFloat() * 4.0f;  // thickness: trapezoid(0, 6, plateau 2)
-    const float thickness = t1 + random.nextFloat() * 2.0f;
-    const int distance = static_cast<int>(static_cast<float>(kTunnelRange) * uniformFloat(random, 0.75f, 1.0f));
-    {
-        const std::int64_t canyonSeed = random.nextLong();
-        LegacyRandomSource r(canyonSeed);
-        // initWidthFactors: the squared width of each layer, changing every third layer or so
-        std::array<float, kHeight> widthFactors{};
-        float factor = 1.0f;
-        for (int i = 0; i < kHeight; ++i) {
-            if (i == 0 || r.nextInt(3) == 0) {
-                const float a = r.nextFloat();
-                factor = 1.0f + a * r.nextFloat();
-            }
-            widthFactors[static_cast<std::size_t>(i)] = factor * factor;
-        }
-        float f = 0.0f, g = 0.0f, pitch = pitch0, yawNow = yaw;
-        double px = x, py = y, pz = z;
-        for (int step = 0; step < distance; ++step) {
-            double hr = 1.5 + static_cast<double>(std::sin(static_cast<float>(step) * kPi / static_cast<float>(distance)) * thickness);
-            double vr = hr * 3.0;  // y_scale 3
-            hr *= static_cast<double>(uniformFloat(r, 0.75f, 1.0f));
-            // updateVerticalRadius: widest in the middle of the canyon
-            const float mid = 1.0f - std::abs(0.5f - static_cast<float>(step) / static_cast<float>(distance)) * 2.0f;
-            vr = static_cast<double>(1.0f + 0.0f * mid) * vr * static_cast<double>(uniformFloat(r, 0.75f, 1.0f));
-            const float h = std::cos(pitch);
-            const float p = std::sin(pitch);
-            px += static_cast<double>(std::cos(yawNow) * h);
-            py += static_cast<double>(p);
-            pz += static_cast<double>(std::sin(yawNow) * h);
-            pitch *= 0.7f;
-            pitch += g * 0.05f;
-            yawNow += f * 0.05f;
-            g *= 0.8f;
-            f *= 0.5f;
-            g += wobble(r, 2.0f);
-            f += wobble(r, 4.0f);
-            if (r.nextInt(4) == 0) continue;
-            if (!canReach(px, pz, step, distance, thickness)) return;
-            ellipsoid(px, py, pz, hr, vr, [&widthFactors](double dx, double dy, double dz, int wy) {
-                return (dx * dx + dz * dz) * static_cast<double>(widthFactors[static_cast<std::size_t>(wy - kMinY - 1)]) + dy * dy / 6.0 >= 1.0;
-            });
-        }
     }
 }
 
@@ -329,6 +454,11 @@ void Underground::placeOres(Context& c, int sourceX, int sourceZ, const Overworl
             VeinRandom r(mix(chance.next(), static_cast<std::uint64_t>(attempt)));
             const int ox = sourceX * 16 + r.nextInt(16);
             const int oz = sourceZ * 16 + r.nextInt(16);
+            // Nearly every vein of a chunk beside this one is nowhere near this chunk, and the first two draws say where it starts: the line of a vein reaches at most size / 8
+            // from there, and a blob at most size / 16 + 0.5 from the line. Those are far fewer draws and no trigonometry for the veins that are not wanted (the draws that
+            // follow are this vein's own, so leaving them out changes nothing else).
+            const double near = ore.size / 8.0 + ore.size / 16.0 + 0.51;
+            if (ox + near < c.minX || ox - near >= c.minX + 16 || oz + near < c.minZ || oz - near >= c.minZ + 16) continue;
             int oy;
             if (ore.triangle) {
                 const int span = ore.maxY - ore.minY;
@@ -343,10 +473,14 @@ void Underground::placeOres(Context& c, int sourceX, int sourceZ, const Overworl
             const double x1 = ox + std::sin(angle) * f, x2 = ox - std::sin(angle) * f;
             const double z1 = oz + std::cos(angle) * f, z2 = oz - std::cos(angle) * f;
             const double y1 = oy + r.nextInt(3) - 2, y2 = oy + r.nextInt(3) - 2;
+            // Most veins of the chunks beside this one do not reach it. No blob is further from the line than the largest radius, (2 * size / 16 + 1) / 2, so a vein whose line
+            // (with that much round it) misses the chunk changes nothing here: skip its blobs. (Its random numbers are its own, so nothing else is affected.)
+            const double reach = ore.size / 16.0 + 0.51;
+            if (std::max(x1, x2) + reach < c.minX || std::min(x1, x2) - reach >= c.minX + 16 || std::max(z1, z2) + reach < c.minZ || std::min(z1, z2) - reach >= c.minZ + 16) continue;
             for (int i = 0; i < ore.size; ++i) {
                 const float t = static_cast<float>(i) / static_cast<float>(ore.size);
                 const double bx = x1 + (x2 - x1) * t, by = y1 + (y2 - y1) * t, bz = z1 + (z2 - z1) * t;
-                const double radius = ((static_cast<double>(std::sin(kPi * t)) + 1.0) * (r.nextDouble() * ore.size / 16.0) + 1.0) / 2.0;
+                const double radius = ((oreSines_[o][static_cast<std::size_t>(i)] + 1.0) * (r.nextDouble() * ore.size / 16.0) + 1.0) / 2.0;
                 const int lx0 = std::max(javaFloor(bx - radius) - c.minX, 0), lx1 = std::min(javaFloor(bx + radius) - c.minX, 15);
                 const int lz0 = std::max(javaFloor(bz - radius) - c.minZ, 0), lz1 = std::min(javaFloor(bz + radius) - c.minZ, 15);
                 const int y0 = std::max(javaFloor(by - radius), kMinY), y1c = std::min(javaFloor(by + radius), kMaxY);

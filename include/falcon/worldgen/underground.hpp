@@ -3,6 +3,7 @@
 #include "falcon/world/block_registry.hpp"
 
 #include <cstdint>
+#include <memory>
 #include <vector>
 
 namespace falcon::worldgen {
@@ -24,7 +25,11 @@ class OverworldGenerator;
 class Underground {
 public:
     Underground(const BlockRegistry& registry, std::int64_t seed);
+    ~Underground();
+    Underground(const Underground&) = delete;
+    Underground& operator=(const Underground&) = delete;
 
+    // Thread-safe: the workers that make chunks call it at the same time (they share the plans of the carvers, see SourcePlan in the .cpp).
     // `blocks` is the chunk as the generator holds it while it works: index (y - minY) + 384 * (x + 16 * z), x and z local to the chunk, minY -64.
     void apply(std::vector<Block>& blocks, int chunkX, int chunkZ, const OverworldGenerator& generator) const;
 
@@ -33,6 +38,12 @@ public:
 
 private:
     struct Context;
+    struct SourcePlan;  // the walks of the carvers that start in one chunk, made once and shared by the chunks they reach into
+    class PlanCache;
+    [[nodiscard]] std::shared_ptr<const SourcePlan> planFor(int sourceX, int sourceZ) const;
+    [[nodiscard]] std::shared_ptr<const SourcePlan> makePlan(int sourceX, int sourceZ) const;
+    template <class Skip>
+    void carveEllipsoid(Context& c, double x, double y, double z, double hr, double vr, const Skip& skip) const;
     void carve(Context& c, int sourceX, int sourceZ) const;
     void placeOres(Context& c, int sourceX, int sourceZ, const OverworldGenerator& generator) const;
 
@@ -60,6 +71,8 @@ private:
         Block stone = Block::Air, deepslate = Block::Air;
     };
     std::vector<OreBlocks> oreBlocks_;  // by index in ores_
+    std::vector<std::vector<double>> oreSines_;  // by index in ores_: sin(pi * step / size) for each step of a vein
+    std::unique_ptr<PlanCache> plans_;  // (shared by the threads; what it holds is a pure function of the seed and the chunk)
 };
 
 }  // namespace falcon::worldgen
