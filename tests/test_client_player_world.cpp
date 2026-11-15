@@ -1,6 +1,8 @@
 // Client tests: player, world.
 #include "test_support.hpp"
 
+#include "falcon/world/boat.hpp"
+
 // Special blocks: stairs, slabs, a fence post, with shapes the test makes up (bottom slab, a 0.6 and a 0.625 high block).
 void test_player_stepping() {
     using falcon::PlayerInput;
@@ -82,6 +84,91 @@ void test_player_stepping() {
         level.setBlock(0, -60, 8, falcon::Block::Air);
     }
     falcon::installCollisionShapes(nullptr);
+}
+
+// A boat the way the game moves it (AbstractBoat): it floats with 0.65 of its height under the surface (where the lift of the water, 0.04 / 0.65 a unit of depth, balances gravity),
+// goes at most 0.04 / (1 - 0.9) = 0.4 blocks a tick on water (8 a second) and 0.04 / (1 - 0.6) = 0.1 on land, turns up to 10 degrees a tick, and stops against a wall.
+void test_boat() {
+    using falcon::BoatBody;
+    using falcon::BoatInput;
+    using falcon::BoatStatus;
+    falcon::Level level = makeFloorLevel();
+    for (int y = -60; y <= -51; ++y) {  // the pool of the fluid tests: water from y -60 to -51, x -4..4, z 4..44
+        for (int z = 4; z <= 44; ++z) {
+            for (int x = -4; x <= 4; ++x) level.setBlock(x, y, z, falcon::commonBlocks().water);
+        }
+    }
+    for (int y = -60; y <= -45; ++y) {  // and a wall along its east shore
+        for (int z = 4; z <= 44; ++z) level.setBlock(5, y, z, falcon::commonBlocks().stone);
+    }
+    const auto settled = [&level]() {
+        BoatBody boat;
+        boat.x = 0.5;
+        boat.y = -48.0;
+        boat.z = 20.5;
+        for (int i = 0; i < 300; ++i) boat.tick(level, {});
+        return boat;
+    };
+    {  // dropped onto the water, it comes to rest at the water level less 0.65 of its height: the top of a source block is 8/9 up
+        const BoatBody boat = settled();
+        CHECK(boat.status() == BoatStatus::InWater);
+        CHECK(closeTo(boat.y, -51.0 + 8.0 / 9.0 - 0.65 * 0.5625, 0.005));
+        CHECK(std::abs(boat.vy) < 1e-3 && std::abs(boat.x - 0.5) < 1e-9 && std::abs(boat.z - 20.5) < 1e-9);
+    }
+    {  // forward: 0.04 added a tick against a drag of 0.9, so 0.4 blocks a tick at the end, straight ahead (yaw 0 is south, +Z)
+        BoatBody boat = settled();
+        BoatInput forward;
+        forward.up = true;
+        for (int i = 0; i < 60; ++i) boat.tick(level, forward);
+        CHECK(closeTo(boat.vz, 0.4, 0.005) && std::abs(boat.vx) < 1e-9 && boat.z > 35.0);
+        CHECK(boat.paddleLeft && boat.paddleRight);  // (forward: both paddles)
+        // let go: the speed dies away by the 0.9 of the water
+        for (int i = 0; i < 40; ++i) boat.tick(level, {});
+        CHECK(boat.vz < 0.4 * std::pow(0.9, 39));
+    }
+    {  // turning right (D) adds a degree a tick to the rate, which the water holds down to 10 a tick; one side alone also gives a little way (0.005) and only that paddle moves
+        BoatBody boat = settled();
+        BoatInput right;
+        right.right = true;
+        for (int i = 0; i < 100; ++i) boat.tick(level, right);
+        CHECK(closeTo(boat.deltaRotation, 10.0, 0.05) && boat.yaw > 500.0f);
+        CHECK(boat.paddleLeft && !boat.paddleRight);
+        BoatInput left;
+        left.left = true;
+        for (int i = 0; i < 100; ++i) boat.tick(level, left);
+        CHECK(boat.deltaRotation < 0.0f && !boat.paddleLeft && boat.paddleRight);
+    }
+    {  // on the ground the drag is the block's friction, 0.6, so forward ends at 0.1 a tick
+        BoatBody boat;
+        boat.x = 20.5;  // (away from the pool)
+        boat.y = -60.0;
+        boat.z = 0.5;
+        BoatInput forward;
+        forward.up = true;
+        for (int i = 0; i < 60; ++i) boat.tick(level, forward);
+        CHECK(boat.status() == BoatStatus::OnLand && boat.onGround);
+        CHECK(closeTo(boat.vz, 0.1, 0.002));
+    }
+    {  // against the wall (east is yaw -90): it stops with its side flush, half its width from the wall, and loses its speed there
+        BoatBody boat = settled();
+        boat.yaw = -90.0f;
+        BoatInput forward;
+        forward.up = true;
+        for (int i = 0; i < 80; ++i) boat.tick(level, forward);
+        CHECK(closeTo(boat.x, 5.0 - 1.375 / 2.0, 1e-6) && boat.vx == 0.0 && boat.horizontalCollision);
+    }
+    {  // the seat: a third of the height above the floor of the boat less the rider's 0.6, a rider alone in the middle, two a little forward and back (turned with the boat)
+        BoatBody boat;
+        boat.x = 10.0;
+        boat.y = 5.0;
+        boat.z = 20.0;
+        const std::array<double, 3> alone = boat.seat(false, 0, 1);
+        CHECK(closeTo(alone[0], 10.0, 1e-9) && closeTo(alone[1], 5.0 + 0.5625 / 3.0 - 0.6, 1e-6) && closeTo(alone[2], 20.0, 1e-9));
+        CHECK(closeTo(boat.seat(true, 0, 1)[1], 5.0 + 0.5625 * 0.8888889 - 0.6, 1e-6));  // (a raft sits higher)
+        boat.yaw = 90.0f;
+        const std::array<double, 3> front = boat.seat(false, 0, 2), back = boat.seat(false, 1, 2);
+        CHECK(closeTo(front[0], 9.8, 1e-4) && closeTo(front[2], 20.0, 1e-4) && closeTo(back[0], 10.6, 1e-4));
+    }
 }
 
 void test_player_fluids() {
@@ -477,6 +564,7 @@ void test_player_physics() {
     test_player_sneak_edge_and_poses();
     test_player_stepping();
     test_player_fluids();
+    test_boat();
     test_player_current();
     test_player_real_blocks();
 }

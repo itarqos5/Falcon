@@ -128,6 +128,15 @@ inline Aabb makeBox(double px, double py, double pz, const Dims& d) {
     return {px - half, py, pz - half, px + half, py + static_cast<double>(d.height), pz + half};
 }
 
+// FluidState.getHeight of the fluid in a block (water or lava): a full block when the same fluid is above it, else its own height (a source is 8/9).
+inline float fluidHeightAt(const Level& level, const BlockRegistry& registry, int bx, int by, int bz, const StateInfo& s, bool lava) {
+    const StateInfo& above = registry.state(level.block(bx, by + 1, bz));
+    if (lava ? above.has(kStateLava) : above.has(kStateWater)) return 1.0f;
+    const int level8 = s.fluidLevel;
+    const int amount = level8 == 0 || level8 >= 8 ? 8 : 8 - level8;
+    return static_cast<float>(amount) / 9.0f;
+}
+
 // Every block shape the box may touch (BlockCollisions): the box grown by a block on every side, but the outer shell
 // only counts for shapes that stick out of their block (fences). A chunk that is not loaded is a solid cube, so
 // nobody falls through the world while it is arriving. `fn` returns true to stop; the result says whether it did.

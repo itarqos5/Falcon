@@ -402,13 +402,6 @@ void Player::applyEffectsFromBlocks() {
 
 namespace {
 // FlowingFluid.getHeight: a full block under another of the same fluid, else the fluid's own level (8/9 for a source).
-float fluidHeightAt(const Level& level, const BlockRegistry& registry, int bx, int by, int bz, const StateInfo& s, bool lava) {
-    const StateInfo& above = registry.state(level.block(bx, by + 1, bz));
-    if (lava ? above.has(kStateLava) : above.has(kStateWater)) return 1.0f;
-    const int level8 = s.fluidLevel;
-    const int amount = level8 == 0 || level8 >= 8 ? 8 : 8 - level8;
-    return static_cast<float>(amount) / 9.0f;
-}
 }  // namespace
 
 // EntityFluidInteraction.update: how deep the body is in water and in lava, and whether the eyes are in water.
