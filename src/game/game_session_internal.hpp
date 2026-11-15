@@ -36,6 +36,26 @@ inline std::string format(const char* pattern, ...) {
 // terrain fill-in are quick while the main and render threads - and anything else running - still keep cores.
 inline unsigned workerCount() { return std::clamp(std::thread::hardware_concurrency() / 2, 3u, 8u); }
 
+// A body that glides with elytra (AvatarRenderer.setupRotations, HumanoidModel.setupAnim): the body leans over as it picks up speed (in the first 10 ticks), turns toward where it
+// is going when that is not where it looks, and the limbs hardly swing at speed. `flown` is how long it has glided (ticks, with the part of this one), the look is in degrees, the
+// motion is per tick.
+inline void poseGliding(BodyPose& pose, float flown, float lookYaw, float lookPitch, double deltaX, double deltaY, double deltaZ) {
+    pose.fallFlying = true;
+    pose.glideLean = std::clamp(flown * flown / 100.0f, 0.0f, 1.0f) * (-90.0f - lookPitch);
+    const double yawRad = static_cast<double>(lookYaw) * 0.017453292519943295, pitchRad = static_cast<double>(lookPitch) * 0.017453292519943295;
+    const double viewX = -std::sin(yawRad) * std::cos(pitchRad), viewZ = std::cos(yawRad) * std::cos(pitchRad);
+    const double moving = deltaX * deltaX + deltaZ * deltaZ, looking = viewX * viewX + viewZ * viewZ;
+    pose.glideTurn = 0.0f;
+    if (moving > 1.0E-5 && looking > 1.0E-5) {
+        const double dot = std::clamp((deltaX * viewX + deltaZ * viewZ) / std::sqrt(moving * looking), -1.0, 1.0);
+        const double cross = deltaX * viewZ - deltaZ * viewX;
+        pose.glideTurn = static_cast<float>((cross > 0.0 ? 1.0 : cross < 0.0 ? -1.0 : 0.0) * std::acos(dot));
+    }
+    double k = (deltaX * deltaX + deltaY * deltaY + deltaZ * deltaZ) / 0.2;
+    k = k * k * k;
+    pose.limbScale = static_cast<float>(std::max(1.0, k));
+}
+
 inline double megabytes(std::size_t bytes) { return static_cast<double>(bytes) / (1024.0 * 1024.0); }
 
 inline float percentile(std::vector<float> values, double p) {

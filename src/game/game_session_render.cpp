@@ -85,6 +85,11 @@ void GameSession::renderWorld(int framebufferWidth, int framebufferHeight) {
             }
             pose.swimAmount = swimAmountOld_ + (swimAmount_ - swimAmountOld_) * t;
             pose.visuallySwimming = player_.isVisuallySwimming();
+            if (player_.fallFlying) poseGliding(pose, static_cast<float>(player_.fallFlyTicks) + t, player_.yaw, player_.pitch, player_.vx, player_.vy, player_.vz);
+            pose.elytra = !inventory_.item(Inventory::kChest).isEmpty() && inventory_.item(Inventory::kChest).type().name == "elytra";
+            pose.elytraX = elytraXO_ + (elytraX_ - elytraXO_) * t;
+            pose.elytraY = elytraYO_ + (elytraY_ - elytraYO_) * t;
+            pose.elytraZ = elytraZO_ + (elytraZ_ - elytraZO_) * t;
             pose.inWater = player_.inWater;
             for (std::size_t i = 0; i < 4; ++i) {  // head, chest, legs, feet
                 static constexpr int kSlots[4] = {Inventory::kHead, Inventory::kChest, Inventory::kLegs, Inventory::kFeet};

@@ -279,7 +279,7 @@ void GameSession::interact(double dt, bool active) {
         const std::string& heldName = held.isEmpty() ? std::string() : held.type().name;
         const bool usable = !held.isEmpty() && (held.type().food.has_value() || heldName == "bow" || heldName == "crossbow" || heldName == "trident" || heldName == "shield" ||
                                                  heldName == "ender_pearl" || heldName == "snowball" || heldName == "egg" || heldName == "fishing_rod" || heldName == "spyglass" ||
-                                                 heldName == "experience_bottle" || heldName == "wind_charge" || heldName == "potion" || heldName == "splash_potion" ||
+                                                 heldName == "experience_bottle" || heldName == "firework_rocket" || heldName == "wind_charge" || heldName == "potion" || heldName == "splash_potion" ||
                                                  heldName == "lingering_potion" || heldName.find("bucket") != std::string::npos ||
                                                  held.type().armorSlot != EquipSlot::None);  // (armor in the hand goes on by a click)
         if (use && usable && !usingRemote_ && placeCooldown_ <= 0.0) {
@@ -306,6 +306,19 @@ void GameSession::interact(double dt, bool active) {
             std::swap(inventory_.selectedItem(), inventory_.item(slot));
             placeCooldown_ = kRepeatDelay * 2.0;
             playWorldSound("item.armor.equip_generic", SoundSource::Players, 1.0f, 1.0f);
+            swingArm();
+            return;
+        }
+        // FireworkRocketItem.use: a rocket used in the air while gliding goes off attached to the player and pushes the glide along for about a second (10 ticks of the flight duration
+        // of 1, and up to 11 more by chance); it is used up (not in creative).
+        if (inventory_.selectedItem().type().name == "firework_rocket" && player_.fallFlying) {
+            if (!creative()) {
+                inventory_.selectedItem().shrink(1);
+                if (inventory_.selectedItem().isEmpty()) inventory_.selectedItem() = ItemStack();
+            }
+            player_.rocketBoostTicks = 10 + static_cast<int>(randomFloat() * 6.0f) + static_cast<int>(randomFloat() * 7.0f);
+            placeCooldown_ = kRepeatDelay * 2.0;
+            playWorldSound("entity.firework_rocket.launch", SoundSource::Ambient, 3.0f, 1.0f);
             swingArm();
             return;
         }

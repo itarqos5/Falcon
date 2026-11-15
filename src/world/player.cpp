@@ -247,7 +247,7 @@ bool Player::isHorizontalCollisionMinor(const Vec3& actual) const {
 
 // Entity.getBlockSpeedFactor (soul sand, honey) as the player sees it.
 float Player::blockSpeedFactor() {
-    if (flying) return 1.0f;
+    if (flying || fallFlying) return 1.0f;  // (Player.getBlockSpeedFactor)
     const BlockRegistry& registry = blockRegistry();
     const Block here = blockAtFeet();
     float f = registry.state(here).speedFactor;
@@ -509,6 +509,8 @@ void Player::updatePlayerPose() {
     PlayerPose want = PlayerPose::Standing;
     if (isSwimming()) {
         want = PlayerPose::Swimming;
+    } else if (fallFlying) {
+        want = PlayerPose::FallFlying;
     } else if (keys_.shift && !flying) {
         want = PlayerPose::Crouching;
     }
@@ -541,6 +543,16 @@ void Player::tick(const PlayerInput& input, const Level& level) {
     wasUnderwater_ = eyesInWater_;
     baseTick();
     aiStep(input);
+    fallFlyTicks = fallFlying ? fallFlyTicks + 1 : 0;  // LivingEntity.tick
+    if (fallFlying && rocketBoostTicks > 0) {          // FireworkRocketEntity.tick: a rocket attached to a glider pushes it toward where it looks
+        const auto look = lookVector();
+        vx += look[0] * 0.1 + (look[0] * 1.5 - vx) * 0.5;
+        vy += look[1] * 0.1 + (look[1] * 1.5 - vy) * 0.5;
+        vz += look[2] * 0.1 + (look[2] * 1.5 - vz) * 0.5;
+        --rocketBoostTicks;
+    } else if (!fallFlying) {
+        rocketBoostTicks = 0;
+    }
     updatePlayerPose();
     sneaking = pose_ == PlayerPose::Crouching;
     level_ = nullptr;

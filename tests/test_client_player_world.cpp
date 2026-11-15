@@ -754,10 +754,86 @@ void test_player_real_blocks() {
     if (previous) falcon::installBlockRegistry(previous);
 }
 
+// Gliding with elytra (LivingEntity.travelFallFlying): only a fresh jump in the air with a glider worn opens the wings; the glide holds the body up (a flat look settles
+// at about 0.15 blocks a tick down, 1.03 along after 100 ticks), a steeper dive is faster, a climb gives the speed back as height; the pose is the small one (0.6 high); the glider
+// wears every 20 ticks; a rocket pushes toward the look; landing ends it; and a crash into a wall at speed hurts.
+void test_player_gliding() {
+    using falcon::PlayerInput;
+    using falcon::PlayerPose;
+    falcon::Level level = makeFloorLevel(6);
+    {
+        PhysicsRun r(level, 0.5, -20.0, 0.5, 0.0f);  // high above the floor, looking south
+        PlayerInput jump;
+        jump.jump = true;
+        r.ticks(4);
+        r.tick(jump);  // no glider: the jump does nothing in the air
+        CHECK(!r.p.fallFlying && !r.p.startedGliding);
+    }
+    PhysicsRun r(level, 0.5, -20.0, 0.5, 0.0f);
+    r.p.gliderEquipped = true;
+    PlayerInput jump;
+    jump.jump = true;
+    r.ticks(4);
+    CHECK(!r.p.fallFlying && !r.p.onGround);
+    r.tick(jump);  // a fresh press in the air with a glider worn
+    CHECK(r.p.fallFlying && r.p.startedGliding && r.p.pose() == PlayerPose::FallFlying && closeTo(r.p.boundingBox().maxY - r.p.boundingBox().minY, 0.6, 1e-6) && closeTo(r.p.eyeHeight(), 0.4, 1e-6));
+    r.tick(jump);  // (held: no second start)
+    CHECK(r.p.fallFlying && !r.p.startedGliding);
+    // looking flat: gliding along, sinking slowly
+    r.p.pitch = r.p.pitchO = 0.0f;
+    bool damaged = false;
+    for (int i = 0; i < 100; ++i) {
+        r.tick();
+        damaged = damaged || r.p.gliderDamageDue;
+        r.p.gliderDamageDue = false;
+    }
+    CHECK(damaged && r.p.fallFlying && r.p.vz > 0.8 && r.p.vz < 1.3 && r.p.vy < -0.05 && r.p.vy > -0.3 && std::abs(r.p.vx) < 1e-9);
+    // a dive is faster than a flat glide, a climb gives speed back as height
+    {
+        PhysicsRun dive(level, 0.5, -20.0, 0.5, 0.0f);
+        dive.p.gliderEquipped = true;
+        dive.ticks(4);
+        dive.tick(jump);
+        dive.p.pitch = dive.p.pitchO = 30.0f;
+        dive.ticks(60);
+        CHECK(dive.p.vz > r.p.vz * 0.9 && dive.p.vy < -0.25);
+    }
+    // a rocket: while it burns the speed goes toward 1.5 along the look
+    {
+        PhysicsRun boost(level, 0.5, -20.0, 0.5, 0.0f);
+        boost.p.gliderEquipped = true;
+        boost.ticks(4);
+        boost.tick(jump);
+        boost.p.pitch = boost.p.pitchO = 0.0f;
+        boost.ticks(20);
+        const double before = boost.p.vz;
+        boost.p.rocketBoostTicks = 12;
+        boost.ticks(12);
+        CHECK(boost.p.vz > before + 0.4 && boost.p.vz < 1.7 && boost.p.rocketBoostTicks == 0);
+    }
+    // the glider cannot go on (worn out): the glide ends in the tick
+    r.p.gliderEquipped = false;
+    r.tick();
+    CHECK(!r.p.fallFlying);
+    // landing ends it too, and walking on the ground starts nothing
+    {
+        PhysicsRun land(level, 0.5, -55.0, 0.5, 0.0f);
+        land.p.gliderEquipped = true;
+        land.ticks(3);
+        land.tick(jump);
+        CHECK(land.p.fallFlying);
+        land.p.pitch = land.p.pitchO = 80.0f;
+        land.ticks(60);
+        CHECK(land.p.onGround && !land.p.fallFlying && land.p.pose() == PlayerPose::Standing);
+        CHECK(land.p.takeFlyIntoWallDamage() == 0);
+    }
+}
+
 void test_player_physics() {
     test_player_input_and_walking();
     test_player_jump_and_fall();
     test_player_flying();
+    test_player_gliding();
     test_player_sneak_edge_and_poses();
     test_player_stepping();
     test_player_fluids();

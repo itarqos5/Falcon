@@ -176,6 +176,83 @@ Player::Vec3 Player::handleRelativeFrictionAndCalculateMovement(Vec3 input, floa
     return v;
 }
 
+// Entity.getLookAngle (calculateViewVector).
+std::array<double, 3> Player::lookVector() const {
+    const float pitchRad = pitch * kDegToRad;
+    const float yawRad = -yaw * kDegToRad;
+    const float yawCos = mthCos(yawRad), yawSin = mthSin(yawRad), pitchCos = mthCos(pitchRad), pitchSin = mthSin(pitchRad);
+    return {static_cast<double>(yawSin * pitchCos), static_cast<double>(-pitchSin), static_cast<double>(yawCos * pitchCos)};
+}
+
+// LivingEntity.updateFallFlyingMovement: the glide. Gravity is mostly held up by the lift of a flat body, a dive turns height into speed along the look, a climb turns speed
+// into height, and the movement is pulled toward the way the player looks; then a little drag.
+Player::Vec3 Player::updateFallFlyingMovement(Vec3 m) {
+    const auto look = lookVector();
+    const float pitchRad = pitch * 0.017453292f;
+    const double lookHorizontal = std::sqrt(look[0] * look[0] + look[2] * look[2]);
+    const double movingHorizontal = std::sqrt(m.x * m.x + m.z * m.z);
+    const double gravity = attributes.gravity;
+    const double cosine = std::cos(static_cast<double>(pitchRad));
+    const double lift = cosine * cosine;
+    m.y += gravity * (-1.0 + lift * 0.75);
+    if (m.y < 0.0 && lookHorizontal > 0.0) {
+        const double convert = m.y * -0.1 * lift;
+        m.x += look[0] * convert / lookHorizontal;
+        m.y += convert;
+        m.z += look[2] * convert / lookHorizontal;
+    }
+    if (pitchRad < 0.0f && lookHorizontal > 0.0) {
+        const double convert = movingHorizontal * static_cast<double>(-mthSin(pitchRad)) * 0.04;
+        m.x += -look[0] * convert / lookHorizontal;
+        m.y += convert * 3.2;
+        m.z += -look[2] * convert / lookHorizontal;
+    }
+    if (lookHorizontal > 0.0) {
+        m.x += (look[0] / lookHorizontal * movingHorizontal - m.x) * 0.1;
+        m.z += (look[2] / lookHorizontal * movingHorizontal - m.z) * 0.1;
+    }
+    return {m.x * 0.9900000095367432, m.y * 0.9800000190734863, m.z * 0.9900000095367432};
+}
+
+// LivingEntity.travelFallFlying (and handleFallFlyingCollisions): a ladder ends the glide; the glide moves the body, and hitting a wall at speed hurts.
+void Player::travelFallFlying(Vec3 input) {
+    if (onClimbable()) {
+        travelInAir(input);
+        fallFlying = false;
+        return;
+    }
+    const double before = std::sqrt(vx * vx + vz * vz);
+    const Vec3 next = updateFallFlyingMovement({vx, vy, vz});
+    vx = next.x;
+    vy = next.y;
+    vz = next.z;
+    moveSelf({vx, vy, vz});
+    const double after = std::sqrt(vx * vx + vz * vz);
+    if (horizontalCollision) {
+        const float damage = static_cast<float>((before - after) * 10.0 - 3.0);
+        if (damage > 0.0f) flyIntoWallDamage = static_cast<int>(damage);
+    }
+}
+
+// LivingEntity.updateFallFlying: the fall does not add up while gliding, the glide ends when it cannot go on, and the glider wears every second.
+void Player::updateFallFlying() {
+    if (vy > -0.5 && fallDistance > 1.0) fallDistance = 1.0;  // checkFallDistanceAccumulation
+    if (!canGlide()) {
+        fallFlying = false;
+        return;
+    }
+    if ((fallFlyTicks + 1) % 20 == 0) gliderDamageDue = true;
+}
+
+// Player.tryToStartFallFlying.
+bool Player::tryToStartFallFlying() {
+    if (!fallFlying && canGlide() && !(inWater || isInLava())) {
+        fallFlying = true;
+        return true;
+    }
+    return false;
+}
+
 // LivingEntity.travelInAir: walking, falling and creative flight.
 void Player::travelInAir(Vec3 input) {
     const BlockRegistry& registry = blockRegistry();
@@ -281,6 +358,8 @@ void Player::travel(Vec3 input) {
         const bool inLiquid = inWater || isInLava();
         if (inLiquid && !flying) {
             travelInFluid(in);
+        } else if (fallFlying) {
+            travelFallFlying(in);
         } else {
             travelInAir(in);
         }
@@ -351,7 +430,8 @@ void Player::aiStep(const PlayerInput& input) {
             }
         }
     }
-    (void)toggled;
+    startedGliding = false;
+    if (keys_.jump && !toggled && !wasJumping && !onClimbable() && tryToStartFallFlying()) startedGliding = true;  // LocalPlayer.aiStep: a fresh jump in the air opens the wings
     if (inWater && keys_.shift && !flying) vy += -0.03999999910593033;  // sink
     if (flying) {
         const int dy = (keys_.shift ? -1 : 0) + (keys_.jump ? 1 : 0);
@@ -391,6 +471,7 @@ void Player::aiStep(const PlayerInput& input) {
     } else {
         noJumpDelay_ = 0;
     }
+    if (fallFlying) updateFallFlying();
     travel({static_cast<double>(xxa_), 0.0, static_cast<double>(zza_)});
     applyEffectsFromBlocks();
 

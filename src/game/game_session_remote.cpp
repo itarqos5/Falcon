@@ -712,6 +712,7 @@ void GameSession::sendRemoteTick(const PlayerInput& input, bool riding, const Bo
         remote_->sendHeldSlot(inventory_.selected);
         lastHeldSent_ = inventory_.selected;
     }
+    if (player_.startedGliding) remote_->sendFallFlying();  // (LocalPlayer.aiStep: START_FALL_FLYING)
     syncCreativeSlots();
     if (riding) {  // ClientboundSetPassengers: the rider's position is the vehicle's; the server is told only how it looks round, and the vehicle's place when the rider steers it
         remote_->sendRotation(player_.yaw, player_.pitch, player_.onGround, player_.horizontalCollision);
@@ -970,21 +971,8 @@ void GameSession::renderRemotePlayers(const std::array<double, 3>& camPos) {
         }
         // Gliding (AvatarRenderer.setupRotations): the body leans over as it picks up speed, and turns toward where it is going when that is not where it looks
         if ((p.entityFlags & 0x80) != 0) {
-            pose.fallFlying = true;
-            const float flown = static_cast<float>(p.fallFlyingTicks) + t;
-            pose.glideLean = std::clamp(flown * flown / 100.0f, 0.0f, 1.0f) * (-90.0f - lookPitch);
             const double deltaX = p.deltaXO + (p.deltaX - p.deltaXO) * partialTick_, deltaY = p.deltaYO + (p.deltaY - p.deltaYO) * partialTick_, deltaZ = p.deltaZO + (p.deltaZ - p.deltaZO) * partialTick_;
-            const double yawRad = static_cast<double>(lookYaw) * 0.017453292519943295, pitchRad = static_cast<double>(lookPitch) * 0.017453292519943295;
-            const double viewX = -std::sin(yawRad) * std::cos(pitchRad), viewZ = std::cos(yawRad) * std::cos(pitchRad);
-            const double moving = deltaX * deltaX + deltaZ * deltaZ, looking = viewX * viewX + viewZ * viewZ;
-            if (moving > 1.0E-5 && looking > 1.0E-5) {
-                const double dot = std::clamp((deltaX * viewX + deltaZ * viewZ) / std::sqrt(moving * looking), -1.0, 1.0);
-                const double cross = deltaX * viewZ - deltaZ * viewX;
-                pose.glideTurn = static_cast<float>((cross > 0.0 ? 1.0 : cross < 0.0 ? -1.0 : 0.0) * std::acos(dot));
-            }
-            double k = (deltaX * deltaX + deltaY * deltaY + deltaZ * deltaZ) / 0.2;  // (HumanoidModel: the limbs hardly swing at speed)
-            k = k * k * k;
-            pose.limbScale = static_cast<float>(std::max(1.0, k));
+            poseGliding(pose, static_cast<float>(p.fallFlyingTicks) + t, lookYaw, lookPitch, deltaX, deltaY, deltaZ);
         }
         pose.hurt = p.hurtTime > 0 || p.deathTime > 0 ? 1.0f : 0.0f;
         if (p.deathTime > 0) {

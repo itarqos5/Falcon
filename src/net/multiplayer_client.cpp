@@ -1427,6 +1427,15 @@ void MultiplayerClient::sendSprint(bool on) {
     connection_.send(42, w.data);
 }
 
+void MultiplayerClient::sendFallFlying() {
+    if (phase_ != Phase::Play) return;
+    Writer w;
+    w.varint(selfEntity_);
+    w.varint(6);  // START_FALL_FLYING (after STOP_SLEEPING, START/STOP_SPRINTING, START/STOP_RIDING_JUMP, OPEN_INVENTORY)
+    w.varint(0);
+    connection_.send(42, w.data);
+}
+
 void MultiplayerClient::sendTickEnd() {
     if (phase_ == Phase::Play) connection_.send(13, {});
 }

@@ -63,7 +63,9 @@ void GameSession::tickPlayer(double seconds, bool steering) {
                 tickRiding(input);
             } else {
                 if (ridingEntity_ >= 0 || boat_) leaveVehicle();
+                player_.gliderEquipped = gliderUsable();
                 player_.tick(input, renderer_.level());
+                tickGlide();
                 sendRemoteTick(input);
             }
             tickFovModifier();
@@ -368,7 +370,60 @@ void GameSession::pickUpItems() {
 
 // The walk cycle and where the body faces (LivingEntity.tick and tickHeadTurn): the body turns towards where the player is going, never more than
 // 75 degrees away from where the head looks.
+void GameSession::wearTestItem() {
+    static const char* const name = std::getenv("FALCON_TEST_WEAR");
+    static bool done = false;
+    if (name == nullptr || done || !ready_) return;
+    done = true;
+    const auto item = itemRegistry().find(name);
+    if (!item || *item == Item::Air) return;
+    const ItemStack stack(*item, 1);
+    const EquipSlot slot = stack.type().equipSlot;
+    const int index = slot == EquipSlot::Head ? Inventory::kHead : slot == EquipSlot::Chest ? Inventory::kChest : slot == EquipSlot::Legs ? Inventory::kLegs : slot == EquipSlot::Feet ? Inventory::kFeet : -1;
+    if (index >= 0) inventory_.item(index) = stack;
+}
+
+bool GameSession::gliderUsable() {
+    const ItemStack& chest = inventory_.item(Inventory::kChest);
+    return !chest.isEmpty() && chest.type().name == "elytra" && chest.damage + 1 < chest.maxDamage();
+}
+
+// The glide as the game sees it each tick: every 20 ticks in the air the elytra lose a point (not in creative), a crash into a wall at speed hurts through armor, and a server is
+// told when the wings open.
+void GameSession::tickGlide() {
+    if (player_.gliderDamageDue) {
+        player_.gliderDamageDue = false;
+        ItemStack& chest = inventory_.item(Inventory::kChest);
+        if (!remote_ && !creative() && !chest.isEmpty()) chest.damage += 1;
+    }
+    if (const int wall = player_.takeFlyIntoWallDamage(); wall > 0 && !remote_ && survivalBars()) {
+        playWorldSound(fallDamageEvent(wall), SoundSource::Players, 1.0f, 1.0f);
+        hurt(static_cast<float>(wall), false, true);
+    }
+}
+
 void GameSession::tickBody() {
+    // ElytraAnimationState.tick: the wings go toward where they are held (folded, spread by the dive, or tucked in when crouching) by three tenths a tick.
+    elytraXO_ = elytraX_;
+    elytraYO_ = elytraY_;
+    elytraZO_ = elytraZ_;
+    {
+        float targetX = 0.2617994f, targetZ = -0.2617994f, targetY = 0.0f;
+        if (player_.fallFlying) {
+            float spread = 1.0f;
+            const double length = std::sqrt(player_.vx * player_.vx + player_.vy * player_.vy + player_.vz * player_.vz);
+            if (player_.vy < 0.0 && length > 0.0) spread = 1.0f - static_cast<float>(std::pow(-player_.vy / length, 1.5));
+            targetX = spread * 0.34906584f + (1.0f - spread) * targetX;
+            targetZ = spread * -1.5707964f + (1.0f - spread) * targetZ;
+        } else if (player_.sneaking) {
+            targetX = 0.6981317f;
+            targetZ = -0.7853982f;
+            targetY = 0.08726646f;
+        }
+        elytraX_ += (targetX - elytraX_) * 0.3f;
+        elytraY_ += (targetY - elytraY_) * 0.3f;
+        elytraZ_ += (targetZ - elytraZ_) * 0.3f;
+    }
     swimAmountOld_ = swimAmount_;  // Player.updateSwimAmount
     swimAmount_ = player_.isVisuallySwimming() ? std::min(1.0f, swimAmount_ + 0.09f) : std::max(0.0f, swimAmount_ - 0.09f);
     const double dx = player_.x - player_.xo, dz = player_.z - player_.zo;

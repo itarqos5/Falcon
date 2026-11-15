@@ -355,6 +355,11 @@ private:
     std::map<int, Item> thrownItems_;  // the entity types that are drawn as an item (an ender pearl, a snowball ...), by their number in the server's registry
     std::unique_ptr<MobRenderer> mobs_;  // the mobs of a server (and, with FALCON_TEST_MOBS, a row of them for a look)
     float walkPosition_ = 0.0f, walkSpeed_ = 0.0f, walkSpeedOld_ = 0.0f;  // WalkAnimationState
+    // ElytraAnimationState: where the wings of the player's own elytra are held (X, Y, Z angles) and where they were a tick ago.
+    float elytraX_ = 0.2617994f, elytraY_ = 0.0f, elytraZ_ = -0.2617994f, elytraXO_ = 0.2617994f, elytraYO_ = 0.0f, elytraZO_ = -0.2617994f;
+    void wearTestItem();                       // FALCON_TEST_WEAR=item: puts it on once the world is ready (a test aid, for looking at armor and elytra)
+    void tickGlide();                          // what the glide of the player asks of the game (wear on the elytra, a crash, a server told)
+    [[nodiscard]] bool gliderUsable();   // elytra are worn and can take one more point of wear (LivingEntity.canGlideUsing)
     float swimAmount_ = 0.0f, swimAmountOld_ = 0.0f;                        // Player.swimAmount: how far into the swimming pose (0 to 1)
     float bodyYaw_ = 0.0f, bodyYawOld_ = 0.0f;
     double hudTickAccumulator_ = 0.0;

@@ -249,6 +249,7 @@ public:
     void sendMovement(const MoveState& s);        // every tick: the packet the game would send (position, rotation, both or neither)
     void sendInput(int flags);                    // forward 1, backward 2, left 4, right 8, jump 16, shift 32, sprint 64: when it changes
     void sendSprint(bool on);
+    void sendFallFlying();                      // the player opens their elytra (ServerboundPlayerCommandPacket START_FALL_FLYING)
     void sendTickEnd();
     void sendPlayerLoaded();
     void sendChat(const std::string& text);

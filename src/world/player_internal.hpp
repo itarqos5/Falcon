@@ -116,7 +116,8 @@ struct Dims {
 inline Dims dimensionsOf(PlayerPose pose) {
     switch (pose) {
         case PlayerPose::Crouching: return {0.6f, 1.5f, 1.27f};
-        case PlayerPose::Swimming: return {0.6f, 0.6f, 0.4f};
+        case PlayerPose::Swimming:
+        case PlayerPose::FallFlying: return {0.6f, 0.6f, 0.4f};
         case PlayerPose::Standing: break;
     }
     return {0.6f, 1.8f, 1.62f};

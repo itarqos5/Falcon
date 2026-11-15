@@ -22,7 +22,7 @@ struct PlayerInput {
     bool sprint = false;
 };
 
-enum class PlayerPose : std::uint8_t { Standing, Crouching, Swimming };
+enum class PlayerPose : std::uint8_t { Standing, Crouching, Swimming, FallFlying };
 
 // The player's attributes (attributes.json, entities.minecraft:player); the doubles are the game's own, a float
 // attribute such as the 0.1f movement speed shows as its double value.
@@ -92,6 +92,26 @@ public:
     bool useItemCanSprint = false;
     int sprintWindow = 7;    // ticks within which a second tap of forward starts a sprint (0 turns it off)
     PlayerAttributes attributes;
+
+    // Gliding with elytra (Player.tryToStartFallFlying, LivingEntity.travelFallFlying). Before each tick the caller says whether a glider is worn and can still take a
+    // point of wear (LivingEntity.canGlideUsing); the player keeps the glide itself. A jump in the air starts it, landing (or a ladder) ends it.
+    bool gliderEquipped = false;
+    bool fallFlying = false;
+    int fallFlyTicks = 0;
+    bool gliderDamageDue = false;  // set when the worn glider has lost a point of durability (every 20 ticks in the air): the caller takes it and wears the item
+    bool startedGliding = false;   // set for the tick in which a jump started a glide (a server is told)
+    int rocketBoostTicks = 0;      // a firework rocket pushes the glide along (FireworkRocketEntity.tick): its ticks left
+    // The damage of a crash into a wall at speed (LivingEntity.handleFallFlyingCollisions); takeFlyIntoWallDamage() reads and clears it.
+    int flyIntoWallDamage = 0;
+    [[nodiscard]] int takeFlyIntoWallDamage() {
+        const int d = flyIntoWallDamage;
+        flyIntoWallDamage = 0;
+        return d;
+    }
+    [[nodiscard]] bool isFallFlying() const { return fallFlying; }
+    [[nodiscard]] bool canGlide() const { return !onGround && gliderEquipped; }  // (no levitation here, and the player is never a passenger of this body)
+    // Where the player looks as a vector (Entity.getLookAngle).
+    [[nodiscard]] std::array<double, 3> lookVector() const;
 
     // The fall damage the last landing would have dealt (0: none); takeFallDamage() reads and clears it.
     int lastFallDamage = 0;
@@ -210,6 +230,10 @@ private:
     [[nodiscard]] Vec3 handleOnClimbable(Vec3 v);
     void travel(Vec3 input);
     void travelInAir(Vec3 input);
+    void travelFallFlying(Vec3 input);
+    [[nodiscard]] Vec3 updateFallFlyingMovement(Vec3 movement);
+    void updateFallFlying();
+    [[nodiscard]] bool tryToStartFallFlying();
     void travelInFluid(Vec3 input);
     void travelInWater(Vec3 input, double gravity, bool falling, double yBefore);
     void travelInLava(Vec3 input, double gravity, bool falling, double yBefore);
