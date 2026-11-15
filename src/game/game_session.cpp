@@ -478,6 +478,7 @@ void GameSession::update(double dt, bool active, int framebufferWidth, int frame
 
     pumpRemote();  // what a server sent since the last frame
     pumpSkins();
+    openTestContainer();
     const int distance = renderDistance();
     renderer_.setBrightness(static_cast<float>(services_.options.gamma));
     renderer_.setGpuTiming(showDebug_ || benchmark_.running);

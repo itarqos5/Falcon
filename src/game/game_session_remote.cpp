@@ -94,6 +94,28 @@ std::map<int, std::string> mobTypeNumbers(const std::filesystem::path& dataRoot)
     return types;
 }
 
+// The names of the menu types by their number (registries.json), without the namespace: "generic_9x3", "furnace", ...
+std::vector<std::string> menuTypeNameList(const std::filesystem::path& dataRoot) {
+    std::vector<std::string> names;
+    std::ifstream in(dataRoot / "registries.json", std::ios::binary);
+    if (!in) return names;
+    const nlohmann::json doc = nlohmann::json::parse(in, nullptr, false);
+    if (!doc.is_object()) return names;
+    const auto registry = doc.find("minecraft:menu");
+    if (registry == doc.end()) return names;
+    const auto entries = registry->find("entries");
+    if (entries == registry->end()) return names;
+    for (auto it = entries->begin(); it != entries->end(); ++it) {
+        const int id = it.value().value("protocol_id", -1);
+        if (id < 0 || id > 1000) continue;
+        if (names.size() <= static_cast<std::size_t>(id)) names.resize(static_cast<std::size_t>(id) + 1);
+        std::string name = it.key();
+        if (name.compare(0, 10, "minecraft:") == 0) name.erase(0, 10);
+        names[static_cast<std::size_t>(id)] = std::move(name);
+    }
+    return names;
+}
+
 // The names of the sound events by their number (registries.json), without the namespace.
 std::vector<std::string> soundEventNames(const std::filesystem::path& dataRoot) {
     std::vector<std::string> names;
@@ -186,6 +208,7 @@ bool GameSession::connectRemote(const std::string& host, int port, const std::st
     if (mobs_) remote_->setMobTypes(mobTypeNumbers(dataRoot_));
     remote_->setComponentIds(componentIds(dataRoot_));
     remote_->setSoundNames(soundEventNames(dataRoot_));
+    menuTypeNames_ = menuTypeNameList(dataRoot_);
     physics_.reset();  // the server runs the world: no falling blocks, fire, redstone or random ticks of ours on its chunks
     redstone_.reset();
     renderer_.setRemote(true);
@@ -254,10 +277,57 @@ bool GameSession::connectRemote(const std::string& host, int port, const std::st
     // mode tells the server slot by slot instead); closing the menu is told too.
     inventoryMenu_->onClicked = [this](int slot, int button, ClickType type, const std::vector<std::pair<int, ItemStack>>& changed, const ItemStack& carried) {
         if (info_.gameType == 1 || !remote_ || !remote_->inPlay()) return;
-        remote_->sendContainerClick(slot, button, static_cast<int>(type), changed, carried);
+        remote_->sendContainerClick(0, slot, button, static_cast<int>(type), changed, carried);
     };
     inventoryMenu_->onRemoved = [this] {
         if (remote_ && remote_->inPlay()) remote_->sendContainerClose(0);
+    };
+    // A container that the server opens: if it is one that can be shown, a menu for it (whose clicks are told to the server) and a window; otherwise it is closed again at once.
+    h.openContainer = [this](int id, int menuType, const StyledText& title) {
+        RemoteMenuKind kind;
+        int rows = 0;
+        if (menuType < 0 || static_cast<std::size_t>(menuType) >= menuTypeNames_.size() || !remoteMenuKindOf(menuTypeNames_[static_cast<std::size_t>(menuType)], kind, rows)) {
+            if (remote_) remote_->sendContainerClose(id);
+            addChatMessage("\xC2\xA7" "7Falcon cannot show this kind of window yet.");
+            return;
+        }
+        remoteMenu_ = std::make_unique<RemoteMenu>(inventoryMenu_->player(), kind, rows, id);
+        remoteMenu_->onClicked = [this, id](int slot, int button, ClickType type, const std::vector<std::pair<int, ItemStack>>& changed, const ItemStack& carried) {
+            if (remote_ && remote_->inPlay()) remote_->sendContainerClick(id, slot, button, static_cast<int>(type), changed, carried);
+        };
+        remoteMenu_->onRemoved = [this, id] {
+            if (remote_ && remote_->inPlay()) remote_->sendContainerClose(id);
+            remoteMenuOpen_ = false;
+        };
+        remoteMenuTitle_ = plainText(title);
+        remoteMenuOpen_ = true;
+        containerOpenRequested_ = true;
+    };
+    h.containerContent = [this](int id, const std::vector<ItemStack>& items, const ItemStack& carried) {
+        if (!remoteMenuOpen_ || remoteMenu_->containerId() != id) return;
+        for (std::size_t i = 0; i < items.size(); ++i) {
+            const int inventorySlot = remoteMenu_->setFromServer(static_cast<int>(i), items[i]);
+            if (inventorySlot >= 0 && inventorySlot < 41) remoteSlots_[static_cast<std::size_t>(inventorySlot)] = items[i];
+        }
+        remoteMenu_->setCarried(carried);
+    };
+    h.containerSlot = [this](int id, int slot, const ItemStack& stack) {
+        if (!remoteMenuOpen_ || remoteMenu_->containerId() != id) return;
+        const int inventorySlot = remoteMenu_->setFromServer(slot, stack);
+        if (inventorySlot >= 0 && inventorySlot < 41) remoteSlots_[static_cast<std::size_t>(inventorySlot)] = stack;
+    };
+    h.containerData = [this](int id, int index, int value) {
+        if (remoteMenuOpen_ && remoteMenu_->containerId() == id) remoteMenu_->setData(index, value);
+    };
+    h.containerClose = [this](int id) {
+        if (remoteMenuOpen_ && remoteMenu_->containerId() == id) {
+            remoteMenuOpen_ = false;
+            containerCloseRequested_ = true;
+        }
+    };
+    h.cursor = [this](const ItemStack& stack) {
+        if (remoteMenuOpen_) remoteMenu_->setCarried(stack);
+        else inventoryMenu_->setCarried(stack);
     };
     h.selfFlags = [this](int flags) { selfOnFire_ = (flags & 1) != 0; };
     h.sound = [this](const std::string& event, int source, double x, double y, double z, float volume, float pitch) {
@@ -318,6 +388,30 @@ void GameSession::renderTestMobs(const std::array<double, 3>& camPos) {
         mobs_->render(renderer_.viewProjection(), camPos, type, mob);
         x += 1.6;
     }
+}
+
+// FALCON_TEST_CONTAINER=generic_9x3 (or furnace, crafting, hopper, generic_3x3, shulker_box, ...): once the world is ready a container of that kind opens with a few stacks in it
+// and its fire burning, as if a server had opened it (a test aid, to see the windows).
+void GameSession::openTestContainer() {
+    static const char* const kind = std::getenv("FALCON_TEST_CONTAINER");
+    static bool done = false;
+    if (kind == nullptr || done || !ready_ || remote_) return;
+    done = true;
+    RemoteMenuKind menuKind;
+    int rows = 0;
+    if (!remoteMenuKindOf(kind, menuKind, rows)) return;
+    remoteMenu_ = std::make_unique<RemoteMenu>(inventoryMenu_->player(), menuKind, rows, 1);
+    const char* const things[] = {"stone", "oak_planks", "diamond", "iron_ingot", "coal", "apple", "cobblestone", "stick", "torch"};
+    for (int i = 0; i < remoteMenu_->containerSlots() && i < 9; ++i) {
+        if (const auto item = itemRegistry().find(things[i])) remoteMenu_->setFromServer(i, ItemStack(*item, 8 + i * 7));
+    }
+    remoteMenu_->setData(0, 120);
+    remoteMenu_->setData(1, 200);
+    remoteMenu_->setData(2, 80);
+    remoteMenu_->setData(3, 200);
+    remoteMenuTitle_ = kind;
+    remoteMenuOpen_ = true;
+    containerOpenRequested_ = true;
 }
 
 void GameSession::pumpSkins() {

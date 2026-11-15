@@ -525,26 +525,35 @@ void MultiplayerClient::handlePlay(const Packet& p, RemoteHandler& h) {
         case 4: break;  // block_changed_ack
         case 18: {      // container_set_content: only the player's own inventory (container 0) is followed
             const int container = r.varint();
-            const int state = r.varint();
-            if (container == 0) menuStateId_ = state;
+            containerStates_[container] = r.varint();
             const int n = r.varint();
             bool known = true;
+            std::vector<ItemStack> items;
             for (int i = 0; i < n && r.ok && known; ++i) {
                 const ItemStack stack = readItemStack(r, componentIds_, known);
-                const int slot = inventorySlotOfMenu(i);
-                if (container == 0 && slot >= 0 && h.inventorySlot) h.inventorySlot(slot, stack);
+                if (container == 0) {
+                    const int slot = inventorySlotOfMenu(i);
+                    if (slot >= 0 && h.inventorySlot) h.inventorySlot(slot, stack);
+                } else {
+                    items.push_back(stack);
+                }
+            }
+            if (container != 0 && r.ok && h.containerContent) {
+                ItemStack carried;
+                if (known) carried = readItemStack(r, componentIds_, known);
+                h.containerContent(container, items, carried);
             }
             break;
         }
         case 20: {  // container_set_slot
             const int container = r.varint();
-            const int state = r.varint();
-            if (container == 0) menuStateId_ = state;
+            containerStates_[container] = r.varint();
             const int menuSlot = r.i16();
             bool known = true;
             const ItemStack stack = readItemStack(r, componentIds_, known);
             const int slot = inventorySlotOfMenu(menuSlot);
             if (r.ok && container == 0 && slot >= 0 && h.inventorySlot) h.inventorySlot(slot, stack);
+            if (r.ok && container > 0 && h.containerSlot) h.containerSlot(container, menuSlot, stack);
             break;
         }
         case 110: {  // set_player_inventory
@@ -584,9 +593,31 @@ void MultiplayerClient::handlePlay(const Packet& p, RemoteHandler& h) {
             if (r.ok && h.levelEvent) h.levelEvent(type, x, y, z, data);
             break;
         }
-        case 60: {  // open_screen: a chest, a furnace ...: Falcon cannot show it, so it is closed again at once
+        case 60: {  // open_screen: a chest, a furnace ...: the id of the container, the number of its menu type, its title
             const int container = r.varint();
-            if (r.ok) sendContainerClose(container);
+            const int type = r.varint();
+            const StyledText title = readComponent(r);
+            if (!r.ok) break;
+            if (h.openContainer) h.openContainer(container, type, title);
+            else sendContainerClose(container);
+            break;
+        }
+        case 17: {  // container_close: the server closes what it opened
+            const int container = r.varint();
+            if (r.ok && container > 0 && h.containerClose) h.containerClose(container);
+            break;
+        }
+        case 19: {  // container_set_data: a number a menu shows (a furnace's fire and progress)
+            const int container = r.varint();
+            const int index = r.i16();
+            const int value = r.i16();
+            if (r.ok && container > 0 && h.containerData) h.containerData(container, index, value);
+            break;
+        }
+        case 98: {  // set_cursor_item: what the server says the cursor holds
+            bool known = true;
+            const ItemStack stack = readItemStack(r, componentIds_, known);
+            if (r.ok && h.cursor) h.cursor(stack);
             break;
         }
         case 101: {  // set_entity_data: entries of (index, kind of value, value) up to 0xFF; what is read here is the flags every entity has (a player sneaks, burns) and the stack of an item
@@ -1051,11 +1082,11 @@ static void writeHashedStack(Writer& w, const ItemStack& stack) {
     w.varint(0);  // components removed
 }
 
-void MultiplayerClient::sendContainerClick(int slot, int button, int mode, const std::vector<std::pair<int, ItemStack>>& changed, const ItemStack& carried) {
+void MultiplayerClient::sendContainerClick(int containerId, int slot, int button, int mode, const std::vector<std::pair<int, ItemStack>>& changed, const ItemStack& carried) {
     if (phase_ != Phase::Play) return;
     Writer w;
-    w.varint(0);  // the player's own menu
-    w.varint(menuStateId_);
+    w.varint(containerId);
+    w.varint(containerStates_[containerId]);
     w.i16(slot);
     w.u8(button);
     w.varint(mode);

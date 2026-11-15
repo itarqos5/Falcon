@@ -106,6 +106,14 @@ struct RemoteHandler {
     std::function<void(const std::string& event, int source, double x, double y, double z, float volume, float pitch)> sound;  // a sound event ("block.stone.place") at a place
     std::function<void(int type, int x, int y, int z, int data)> levelEvent;                                                      // a world event (2001: a block is broken, `data` its state)
     std::function<void(int flags)> selfFlags;  // the flags every entity has, of the player: bit 0 on fire, bit 1 sneaking, bit 3 sprinting, bit 7 gliding
+    // A container that is not the player's own: the server opens one (its id, the number of its menu type in the registry, its title), says what its slots hold (the menu's own
+    // numbering: the container's slots, then the player's 27 and the hotbar), the numbers it shows (a furnace's fire), and closes it. `cursor` is the stack on the cursor.
+    std::function<void(int id, int menuType, const StyledText& title)> openContainer;
+    std::function<void(int id, const std::vector<ItemStack>& items, const ItemStack& carried)> containerContent;
+    std::function<void(int id, int slot, const ItemStack&)> containerSlot;
+    std::function<void(int id, int index, int value)> containerData;
+    std::function<void(int id)> containerClose;
+    std::function<void(const ItemStack&)> cursor;
     std::function<void(int slot)> heldSlot;                          // the server picks the hotbar slot in the hand
     std::function<void(const std::string&)> disconnect;
 };
@@ -178,8 +186,8 @@ public:
     void sendSwing();                                          // the arm swings (ServerboundPunchPacket: the main hand)
     void sendCreativeSlot(int inventorySlot, const ItemStack& stack);  // creative mode: this slot of the inventory now holds this
     void sendContainerClose(int containerId);
-    // A click in the player's own menu (container 0): the slot, the button, the kind (ClickType's number), the slots it changed with what they hold now, the stack on the cursor.
-    void sendContainerClick(int slot, int button, int mode, const std::vector<std::pair<int, ItemStack>>& changed, const ItemStack& carried);
+    // A click in a menu (container 0 is the player's own): the slot, the button, the kind (ClickType's number), the slots it changed with what they hold now, the stack on the cursor.
+    void sendContainerClick(int containerId, int slot, int button, int mode, const std::vector<std::pair<int, ItemStack>>& changed, const ItemStack& carried);
     void sendUseItem(float yaw, float pitch);  // the item in the hand is used (eaten, drawn, thrown)
     void sendAction(int action);               // ServerboundPlayerActionPacket without a block: 3 drop one, 4 drop all, 5 let go of a used item, 6 swap with the offhand
 
@@ -224,7 +232,7 @@ private:
     Uuid chatSessionId_{};
     int chatIndex_ = 0;  // the number of the next signed message in the chain
     LastSeenTracker lastSeen_;  // the signed messages of others that were seen (every message of ours says which)
-    int menuStateId_ = 0;  // the state of the player's menu as the server last said it (a click must carry it)
+    std::map<int, int> containerStates_;  // the state of each menu as the server last said it (a click must carry it)
     std::vector<std::string> soundNames_;
     int sequence_ = 0;
     int positionReminder_ = 0;

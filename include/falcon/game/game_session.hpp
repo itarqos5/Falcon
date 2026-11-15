@@ -10,6 +10,7 @@
 #include "falcon/net/multiplayer_client.hpp"
 #include "falcon/game/world_sounds.hpp"
 #include "falcon/platform/system_info.hpp"
+#include "falcon/game/remote_menu.hpp"
 #include "falcon/render/mob_renderer.hpp"
 #include "falcon/render/player_body.hpp"
 #include "falcon/world/item_entity.hpp"
@@ -88,6 +89,12 @@ public:
     // Plays on a server instead of in a world of this computer (the server must not check accounts: online-mode=false). False and `error` when it cannot be reached.
     bool connectRemote(const std::string& host, int port, const std::string& username, std::string& error);
     [[nodiscard]] bool isRemote() const { return remote_ != nullptr; }
+    // The container a server opened (a chest, a furnace ...): the menu, its title, and whether it is open. The main loop opens the window when consumeContainerOpen() says so, and
+    // closes it when the server does (consumeContainerClose()).
+    [[nodiscard]] RemoteMenu* remoteMenu() { return remoteMenu_.get(); }
+    [[nodiscard]] const std::string& remoteMenuTitle() const { return remoteMenuTitle_; }
+    [[nodiscard]] bool consumeContainerOpen() { return std::exchange(containerOpenRequested_, false); }
+    [[nodiscard]] bool consumeContainerClose() { return std::exchange(containerCloseRequested_, false); }
     [[nodiscard]] const std::string& remoteLost() const { return remoteLost_; }  // why the server connection ended, "" while it lasts
     // The game's commands (null when its command list is missing), and what the argument parsers and the suggestions need to know.
     [[nodiscard]] const CommandTree* commandTree() const { return commands_.get(); }
@@ -212,7 +219,8 @@ private:
     // the keys move the player; otherwise (a menu is open) the player only carries on with what they were doing.
     void tickPlayer(double seconds, bool steering);
     void tickFovModifier();
-    void pumpSkins();  // skins that finished downloading become textures
+    void pumpSkins();
+    void openTestContainer();  // FALCON_TEST_CONTAINER=generic_9x3 (a test aid): a container with a few things in it, opened here  // skins that finished downloading become textures
     void drawFireOverlay(GuiGraphics& g, int guiWidth, int guiHeight);
     // The 20 ticks a second of the HUD (the fading name of the held item).
     void tickHud(double seconds);
@@ -382,6 +390,10 @@ private:
     std::map<std::string, std::unique_ptr<Texture2D>> skinTextures_;                  // downloaded skins by their hash
     std::map<std::string, bool> skinSlim_;
     std::string localSkinHash_;                                                        // the skin of this player (empty: the plain Steve)
+    std::unique_ptr<RemoteMenu> remoteMenu_;  // the container a server opened (kept after it is closed, so that nothing points at a menu that is gone)
+    std::string remoteMenuTitle_;
+    std::vector<std::string> menuTypeNames_;  // the names of the menu types by their number in the server's registry
+    bool remoteMenuOpen_ = false, containerOpenRequested_ = false, containerCloseRequested_ = false;
     bool selfOnFire_ = false;                  // the server says the player burns
     int lastHeldSent_ = -1;                    // the hotbar slot the server knows is in the hand
     bool usingRemote_ = false;                 // an item is being used (eaten, drawn) on a server: the release must be told

@@ -140,6 +140,56 @@ void test_menu_click_hook() {
     CHECK(closed == 1);
 }
 
+// The window of a container a server opened: its slots then the player's, the kinds that can be shown, clicks played out by the menu's rules and told on, a shift-click that
+// goes the right way, and what the server says about a slot.
+void test_remote_menu() {
+    RemoteMenuKind kind;
+    int rows = 0;
+    CHECK(remoteMenuKindOf("generic_9x3", kind, rows) && kind == RemoteMenuKind::Chest && rows == 3);
+    CHECK(remoteMenuKindOf("generic_9x6", kind, rows) && rows == 6);
+    CHECK(remoteMenuKindOf("furnace", kind, rows) && kind == RemoteMenuKind::Furnace);
+    CHECK(remoteMenuKindOf("hopper", kind, rows) && kind == RemoteMenuKind::Hopper);
+    CHECK(!remoteMenuKindOf("anvil", kind, rows) && !remoteMenuKindOf("generic_9x7", kind, rows) && !remoteMenuKindOf("", kind, rows));
+
+    Inventory inventory;
+    MenuPlayer player;
+    player.inventory = &inventory;
+    RemoteMenu chest(player, RemoteMenuKind::Chest, 3, 7);
+    CHECK(chest.containerId() == 7 && chest.containerSlots() == 27 && chest.slotCount() == 27 + 36 && chest.imageHeight() == 168);
+    CHECK(chest.slot(0).x == 8 && chest.slot(0).y == 18 && chest.slot(26).x == 8 + 8 * 18 && chest.slot(26).y == 18 + 2 * 18);
+    CHECK(chest.slot(27).y == 85 && chest.slot(27 + 27).y == 85 + 58);  // the inventory's first row, and the hotbar 58 below it
+    // the server fills a slot of the container and one of the player's (menu slot 27 is the inventory's slot 9; 54 the hotbar's first)
+    const Item stone = *itemRegistry().find("stone");
+    CHECK(chest.setFromServer(3, ItemStack(stone, 5)) == -1);
+    CHECK(chest.setFromServer(27, ItemStack(stone, 2)) == 9);
+    CHECK(chest.setFromServer(54, ItemStack(stone, 3)) == 0);
+    CHECK(inventory.item(9).count == 2 && inventory.item(0).count == 3);
+    int told = 0;
+    std::vector<std::pair<int, ItemStack>> changed;
+    chest.onClicked = [&](int, int, ClickType, const std::vector<std::pair<int, ItemStack>>& c, const ItemStack&) {
+        ++told;
+        changed = c;
+    };
+    chest.clicked(3, 0, ClickType::Pickup);  // pick the stack up
+    CHECK(told == 1 && chest.carried().count == 5 && !chest.slot(3).hasItem());
+    CHECK(changed.size() == 1 && changed[0].first == 3);
+    chest.clicked(4, 0, ClickType::Pickup);  // put it down in the next slot
+    CHECK(chest.slot(4).getItem().count == 5 && chest.carried().isEmpty());
+    chest.clicked(4, 0, ClickType::QuickMove);  // shift-click: into the inventory; the stack of the same item (hotbar slot 0, 3 of them) is joined first
+    CHECK(!chest.slot(4).hasItem() && inventory.item(0).count == 8);
+    chest.clicked(54, 0, ClickType::QuickMove);  // from the inventory into the chest: no stack of it there, so the first empty slot
+    CHECK(!inventory.item(0).count && chest.slot(0).getItem().count == 8);
+
+    RemoteMenu furnace(player, RemoteMenuKind::Furnace, 0, 8);
+    CHECK(furnace.containerSlots() == 3 && furnace.slotCount() == 3 + 36 && furnace.slot(2).x == 116 && furnace.slot(2).y == 35);
+    furnace.setFromServer(2, ItemStack(stone, 4));
+    CHECK(!furnace.slot(2).mayPlace(ItemStack(stone, 1)));  // nothing is put into the output
+    furnace.setData(2, 90);
+    CHECK(furnace.data(2) == 90 && furnace.data(7) == 0);
+    RemoteMenu crafting(player, RemoteMenuKind::Crafting, 0, 9);
+    CHECK(crafting.containerSlots() == 10 && crafting.slot(0).x == 124 && crafting.slot(1).x == 30 && crafting.slot(9).x == 30 + 2 * 18 && crafting.slot(9).y == 17 + 2 * 18);
+}
+
 void test_menu_pickup_and_place() {
     {  // left click picks up the whole stack, left click on an empty slot puts it all down
         Rig r;

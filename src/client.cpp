@@ -26,6 +26,7 @@
 #include "falcon/game/death_screen.hpp"
 #include "falcon/game/disconnected_screen.hpp"
 #include "falcon/game/join_multiplayer_screen.hpp"
+#include "falcon/game/remote_container_screen.hpp"
 #include "falcon/gfx/frame_queue.hpp"
 #include "falcon/game/in_game_screen.hpp"
 #include "falcon/game/lighting_audit.hpp"
@@ -735,6 +736,11 @@ int Client::run() {
             const bool keepTicking = !steering && screens.back()->keepsWorldTicking();
             session->update(static_cast<double>(deltaTicks) * 0.05, steering, fbW, fbH, keepTicking);
             if (session->consumeDeathRequest()) navigator.push(std::make_unique<DeathScreen>(navigator, services));  // "You Died!"
+            if (session->consumeContainerOpen() && session->remoteMenu() != nullptr) {  // a chest, a furnace ... that the server opened
+                screens.push_back(std::make_unique<RemoteContainerScreen>(navigator, services, *session->remoteMenu(), session->remoteMenuTitle()));
+                screens.back()->resize(guiWidth, guiHeight);
+            }
+            if (session->consumeContainerClose() && dynamic_cast<RemoteContainerScreen*>(screens.back().get()) != nullptr) navigator.pop();  // the server closed it
             if (session->isRemote() && !session->remoteLost().empty() && !quitWorldRequested) {  // the server is gone (or never let the player in)
                 disconnected = std::make_pair(std::string(session->ready() ? "disconnect.lost" : "connect.failed"), session->remoteLost());
                 quitWorldRequested = true;

@@ -10,6 +10,7 @@
 #include "falcon/game/creative_inventory.hpp"
 #include "falcon/game/creative_tabs.hpp"
 #include "falcon/game/hotbar_hud.hpp"
+#include "falcon/game/remote_menu.hpp"
 #include "falcon/game/item_names.hpp"
 #include "falcon/render/item_icons.hpp"
 #include "falcon/render/player_preview.hpp"
@@ -122,6 +123,7 @@ void test_menu_double_click();
 void test_menu_crafting();
 void test_menu_misc();
 void test_menu_click_hook();
+void test_remote_menu();
 std::string craft(const RecipeManager& recipes, int w, int h, const std::vector<ItemStack>& grid);
 void test_recipes_minimal();
 void test_block_support_real(const std::filesystem::path& dataDir, const BlockRegistry& blocks);
