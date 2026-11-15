@@ -217,6 +217,8 @@ target_link_libraries(falcon_ui
 # ---------------------------------------------------------------------------
 add_library(falcon_core
     src/client.cpp
+    src/client_options.cpp
+    src/client_audio.cpp
     src/resource_reloader.cpp
     src/packs/pack_repository.cpp
     src/packs/pack_selection_model.cpp
