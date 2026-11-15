@@ -629,3 +629,8 @@ atlas. Long button labels are cut with "..." instead of scrolling.
 Incompatible packs show the red warning row but selecting one skips the game's confirmation
 dialog; pack overlays and `pack.mcmeta` filters are not read; dropping files onto the window to add
 packs is still to do. Only `en_us` exists (no language picker).
+
+## License
+
+Falcon is free software under the [GNU Lesser General Public License, version 3](LICENSE) (LGPL-3.0). It contains no Minecraft assets or game code: it reads the files of a copy of
+the game that the player owns. Minecraft is a trademark of Mojang AB / Microsoft; Falcon is not affiliated with them.
