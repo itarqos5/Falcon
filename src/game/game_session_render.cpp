@@ -191,7 +191,7 @@ void GameSession::refreshSystemLines() {
     gpuLines_.push_back(format("Display: %dx%d (%s)", framebufferWidth_, framebufferHeight_, vendor.c_str()));
     gpuLines_.push_back(renderer);
     if (const auto adapter = findGpuAdapter(renderer); adapter && adapter->dedicatedBytes > 0) gpuLines_.push_back("Video memory: " + formatByteSize(adapter->dedicatedBytes));
-    gpuLines_.push_back("OpenGL " + version);
+    gpuLines_.push_back(version.rfind("Vulkan", 0) == 0 ? version : "OpenGL " + version);
 }
 
 // The right-hand side (vanilla's too): the program, the PC, the screen and the card, and the block looked at.

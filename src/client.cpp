@@ -252,17 +252,16 @@ int Client::run() {
     // whatever the person is doing. --background does the same for any other run. A normal run starts
     // hidden too and is shown with its first finished frame, so nothing blank is ever on screen.
     const bool background = options_.background || options_.capturePath.has_value();
-    Window window(options_.width, options_.height, "Falcon", background, /*startHidden=*/true, options_.borderless);
+    Window window(options_.width, options_.height, "Falcon", background, /*startHidden=*/true, options_.borderless, options_.graphicsApi.value_or(gameOptions.graphicsApi));
     memStage("window + GL context");
     window.setIconFromExecutable();  // the Falcon icon linked into the exe
     memStage("window icon");
     // The Graphics API setting: what was chosen, and what the game really draws with (only OpenGL can draw it so far).
     {
-        std::string apiNote;
-        const GraphicsApi activeApi = effectiveGraphicsApi(gameOptions.graphicsApi, &apiNote);
-        std::printf("[falcon] graphics API: %s%s%s\n", std::string(graphicsApiId(activeApi)).c_str(), apiNote.empty() ? "" : " - ", apiNote.c_str());
+        const std::string& apiNote = window.graphicsApiNote();
+        std::printf("[falcon] graphics API: %s%s%s\n", std::string(graphicsApiId(window.graphicsApi())).c_str(), apiNote.empty() ? "" : " - ", apiNote.c_str());
     }
-    std::printf("[falcon] OpenGL %s on %s\n", reinterpret_cast<const char*>(gl::GetString(gl::VERSION)),
+    std::printf("[falcon] %s%s on %s\n", window.graphicsApi() == GraphicsApi::Vulkan ? "" : "OpenGL ", reinterpret_cast<const char*>(gl::GetString(gl::VERSION)),
                 reinterpret_cast<const char*>(gl::GetString(gl::RENDERER)));
 
     {

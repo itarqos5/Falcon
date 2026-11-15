@@ -89,6 +89,7 @@ std::string usageText() {
            "  --packs <ids>@<s>       Select resource packs (comma-separated ids, lowest priority first, e.g.\n"
            "                          high_contrast or file/MyPack.zip) after <s> seconds, as the packs screen would\n"
            "  --background            Hidden, unfocused window (implied by --capture): never pops up over other apps\n"
+           "  --graphics-api <api>    opengl or vulkan, for this run (instead of the Graphics API setting; OpenGL is used when Vulkan cannot be)\n"
            "  --mem-report            Print the process's RAM use after each loading step\n"
            "  --play <folder>         Open this world of <game dir>/saves right away\n"
            "  --cam X,Y,Z,YAW,PITCH   Put the player there and let them fly (for screenshots)\n"
@@ -237,6 +238,10 @@ ClientOptions parseOptions(int argc, const char* const* argv) {
             o.packs.push_back(std::move(selection));
         } else if (arg == "--background") {
             o.background = true;
+        } else if (arg == "--graphics-api") {
+            const std::string v = nextValue(i, argc, argv);
+            if (v != "opengl" && v != "vulkan") throw std::invalid_argument("--graphics-api expects opengl or vulkan");
+            o.graphicsApi = parseGraphicsApi(v);
         } else if (arg == "--mem-report") {
             o.memReport = true;
         } else if (arg == "--music-toast") {

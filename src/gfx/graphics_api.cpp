@@ -1,5 +1,9 @@
 #include "falcon/gfx/graphics_api.hpp"
 
+#ifdef FALCON_HAS_VULKAN
+#include "falcon/vulkan/vulkan_backend.hpp"
+#endif
+
 namespace falcon {
 
 std::string_view graphicsApiId(GraphicsApi api) {
@@ -24,7 +28,14 @@ std::string_view graphicsApiTranslationKey(GraphicsApi api) {
     return "options.graphicsApi.opengl";
 }
 
-bool graphicsApiRenders(GraphicsApi api) { return api == GraphicsApi::OpenGL; }
+bool graphicsApiRenders(GraphicsApi api) {
+    if (api == GraphicsApi::OpenGL) return true;
+#ifdef FALCON_HAS_VULKAN
+    return vulkan::compiledIn();
+#else
+    return false;
+#endif
+}
 
 GraphicsApi effectiveGraphicsApi(GraphicsApi requested, std::string* note) {
     if (graphicsApiRenders(requested)) {
@@ -32,7 +43,7 @@ GraphicsApi effectiveGraphicsApi(GraphicsApi requested, std::string* note) {
         return requested;
     }
     if (note != nullptr) {
-        *note = "the " + std::string(graphicsApiId(requested)) + " renderer is not built yet: drawing with opengl";
+        *note = "this build has no " + std::string(graphicsApiId(requested)) + " renderer: drawing with opengl";
     }
     return GraphicsApi::OpenGL;
 }
@@ -42,8 +53,12 @@ std::string graphicsApiTooltip(GraphicsApi api) {
     switch (api) {
         case GraphicsApi::OpenGL: break;
         case GraphicsApi::Vulkan:
-            text += "\n\nNot available in Falcon yet: the Vulkan renderer is still to be written, so the game keeps drawing with OpenGL "
-                    "(your choice is remembered).";
+            if (graphicsApiRenders(api)) {
+                text += "\n\nNeeds a graphics card and driver with Vulkan 1.3. When this PC has none, or Vulkan does not start, the game draws with OpenGL instead "
+                        "(the log says why).";
+            } else {
+                text += "\n\nThis build has no Vulkan renderer, so the game draws with OpenGL (your choice is remembered).";
+            }
             break;
     }
     return text;

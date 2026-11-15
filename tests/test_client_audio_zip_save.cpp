@@ -479,12 +479,17 @@ void test_graphics_api_setting() {
     CHECK(falcon::parseGraphicsApi("default") == GraphicsApi::OpenGL && falcon::parseGraphicsApi("nonsense", GraphicsApi::Vulkan) == GraphicsApi::Vulkan);  // not a choice any more
     CHECK(falcon::graphicsApiTranslationKey(GraphicsApi::OpenGL) == "options.graphicsApi.opengl" && falcon::graphicsApiTranslationKey(GraphicsApi::Vulkan) == "options.graphicsApi.vulkan");
     CHECK(falcon::kGraphicsApiCount == 2);
-    // Only OpenGL can draw the game today: asking for Vulkan is remembered but OpenGL is what runs, and the reason is said.
+    // A build that has the Vulkan renderer can be asked for it (whether this PC can run it is found when the window is made); one without it remembers the choice but draws with OpenGL, and says so.
     std::string note = "stale";
-    CHECK(falcon::graphicsApiRenders(GraphicsApi::OpenGL) && !falcon::graphicsApiRenders(GraphicsApi::Vulkan));
+#ifdef FALCON_HAS_VULKAN
+    const bool vulkanBuilt = true;
+#else
+    const bool vulkanBuilt = false;
+#endif
+    CHECK(falcon::graphicsApiRenders(GraphicsApi::OpenGL) && falcon::graphicsApiRenders(GraphicsApi::Vulkan) == vulkanBuilt);
     CHECK(falcon::effectiveGraphicsApi(GraphicsApi::OpenGL, &note) == GraphicsApi::OpenGL && note.empty());
-    CHECK(falcon::effectiveGraphicsApi(GraphicsApi::Vulkan, &note) == GraphicsApi::OpenGL && note.find("vulkan") != std::string::npos);
-    CHECK(falcon::effectiveGraphicsApi(GraphicsApi::Vulkan) == GraphicsApi::OpenGL);  // (also without a note to fill)
+    CHECK(falcon::effectiveGraphicsApi(GraphicsApi::Vulkan, &note) == (vulkanBuilt ? GraphicsApi::Vulkan : GraphicsApi::OpenGL) && (vulkanBuilt ? note.empty() : note.find("vulkan") != std::string::npos));
+    CHECK(falcon::effectiveGraphicsApi(GraphicsApi::Vulkan) == (vulkanBuilt ? GraphicsApi::Vulkan : GraphicsApi::OpenGL));  // (also without a note to fill)
     CHECK(falcon::graphicsApiTooltip(GraphicsApi::Vulkan).find("OpenGL") != std::string::npos && falcon::graphicsApiTooltip(GraphicsApi::OpenGL).find("Not available") == std::string::npos);
 
     // The option: OpenGL by default, saved by name, read back.

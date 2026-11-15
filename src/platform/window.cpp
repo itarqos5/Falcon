@@ -2,6 +2,9 @@
 
 #include "falcon/gfx/gl.hpp"
 #include "falcon/platform/dialog.hpp"
+#ifdef FALCON_HAS_VULKAN
+#include "falcon/vulkan/vulkan_backend.hpp"
+#endif
 
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
@@ -79,7 +82,7 @@ void useDarkTitleBar([[maybe_unused]] GLFWwindow* window) {
 
 }  // namespace
 
-Window::Window(int width, int height, const std::string& title, bool background, bool startHidden, bool borderless)
+Window::Window(int width, int height, const std::string& title, bool background, bool startHidden, bool borderless, GraphicsApi api)
     : background_(background), borderless_(borderless && !background) {
     glfwSetErrorCallback(onGlfwError);
     if (glfwInit() == GLFW_FALSE) throw std::runtime_error("failed to initialise GLFW");
@@ -95,8 +98,6 @@ Window::Window(int width, int height, const std::string& title, bool background,
     glfwWindowHintString(GLFW_X11_INSTANCE_NAME, "falcon");
     glfwWindowHintString(GLFW_WAYLAND_APP_ID, "falcon");
 #endif
-    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-    glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GLFW_TRUE);
     if (startHidden && !background) glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
     if (borderless_) glfwWindowHint(GLFW_DECORATED, GLFW_FALSE);
     if (background) {  // never appears, never takes focus from the person's game
@@ -105,29 +106,59 @@ Window::Window(int width, int height, const std::string& title, bool background,
         glfwWindowHint(GLFW_FOCUS_ON_SHOW, GLFW_FALSE);
     }
 
-    // OpenGL 4.5 first: its multi-draw-indirect lets the world be drawn in a few calls instead of thousands. Everything the game uses is
-    // part of 3.3 core, so a graphics driver that cannot do 4.5 gets a 3.3 context and the game draws sections one by one (FALCON_GL33
-    // asks for that on purpose, to compare the two).
-    static const bool only33 = std::getenv("FALCON_GL33") != nullptr;
     handle_ = nullptr;
-    for (const auto& [major, minor] : {std::pair<int, int>{4, 5}, std::pair<int, int>{3, 3}}) {
-        if (only33 && major != 3) continue;
-        glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, major);
-        glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, minor);
-        handle_ = glfwCreateWindow(width, height, title.c_str(), nullptr, nullptr);
-        if (handle_ != nullptr) break;
+    // Vulkan, when it was chosen and this PC can do it: a window without an OpenGL context, with the Vulkan renderer put in the place of OpenGL (src/vulkan/). Anything that goes
+    // wrong makes an OpenGL window instead, and the reason is kept for the log.
+    if (api == GraphicsApi::Vulkan) {
+#ifdef FALCON_HAS_VULKAN
+        std::string reason;
+        if (!vulkan::usable(&reason)) {
+            apiNote_ = "vulkan cannot be used (" + reason + "): drawing with opengl";
+        } else {
+            glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+            handle_ = glfwCreateWindow(width, height, title.c_str(), nullptr, nullptr);
+            if (handle_ != nullptr && vulkan::start(handle_, !background, !background, reason)) {
+                api_ = GraphicsApi::Vulkan;
+            } else {
+                if (handle_ != nullptr) glfwDestroyWindow(handle_);
+                handle_ = nullptr;
+                apiNote_ = "vulkan could not be started (" + reason + "): drawing with opengl";
+            }
+        }
+#else
+        apiNote_ = "this build has no vulkan renderer: drawing with opengl";
+#endif
     }
+
     if (handle_ == nullptr) {
-        glfwTerminate();
-        throw std::runtime_error("failed to create a window with an OpenGL 3.3 core context");
+        glfwWindowHint(GLFW_CLIENT_API, GLFW_OPENGL_API);
+        glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+        glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GLFW_TRUE);
+        // OpenGL 4.5 first: its multi-draw-indirect lets the world be drawn in a few calls instead of thousands. Everything the game uses is
+        // part of 3.3 core, so a graphics driver that cannot do 4.5 gets a 3.3 context and the game draws sections one by one (FALCON_GL33
+        // asks for that on purpose, to compare the two).
+        static const bool only33 = std::getenv("FALCON_GL33") != nullptr;
+        for (const auto& [major, minor] : {std::pair<int, int>{4, 5}, std::pair<int, int>{3, 3}}) {
+            if (only33 && major != 3) continue;
+            glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, major);
+            glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, minor);
+            handle_ = glfwCreateWindow(width, height, title.c_str(), nullptr, nullptr);
+            if (handle_ != nullptr) break;
+        }
+        if (handle_ == nullptr) {
+            glfwTerminate();
+            throw std::runtime_error("failed to create a window with an OpenGL 3.3 core context");
+        }
     }
     useDarkTitleBar(handle_);  // before the window is first shown, so the title bar never flashes light
 #ifdef _WIN32
     if (borderless_) makeBorderless(glfwGetWin32Window(handle_));
 #endif
-    glfwMakeContextCurrent(handle_);
-    glfwSwapInterval(background ? 0 : 1);
-    gl::load();
+    if (api_ == GraphicsApi::OpenGL) {
+        glfwMakeContextCurrent(handle_);
+        glfwSwapInterval(background ? 0 : 1);
+        gl::load();
+    }
 
     glfwSetWindowUserPointer(handle_, this);
     glfwSetMouseButtonCallback(handle_, [](GLFWwindow* w, int button, int action, int) {
@@ -182,12 +213,25 @@ void Window::setFullscreen(bool fullscreen) {
 #ifdef _WIN32
     if (borderless_) g_dragStrip = !fullscreen;  // (no title bar to grab while the window is fullscreen)
 #endif
-    glfwSwapInterval(vsync_ ? 1 : 0);  // a new surface forgets the swap interval
+    if (api_ == GraphicsApi::Vulkan) {
+#ifdef FALCON_HAS_VULKAN
+        vulkan::resized();  // (the swapchain is made again for the new window)
+#endif
+    } else {
+        glfwSwapInterval(vsync_ ? 1 : 0);  // a new surface forgets the swap interval
+    }
 }
 
 void Window::setVsync(bool vsync) {
     vsync_ = vsync;
-    if (!background_) glfwSwapInterval(vsync ? 1 : 0);
+    if (background_) return;
+    if (api_ == GraphicsApi::Vulkan) {
+#ifdef FALCON_HAS_VULKAN
+        vulkan::setVsync(vsync);
+#endif
+    } else {
+        glfwSwapInterval(vsync ? 1 : 0);
+    }
 }
 
 std::vector<std::string> Window::videoModes() const {
@@ -209,6 +253,9 @@ Window::~Window() {
     for (GLFWcursor* cursor : cursors_) {
         if (cursor != nullptr) glfwDestroyCursor(cursor);
     }
+#ifdef FALCON_HAS_VULKAN
+    if (api_ == GraphicsApi::Vulkan) vulkan::stop();  // (before the window it shows frames in goes)
+#endif
     if (handle_ != nullptr) glfwDestroyWindow(handle_);
     glfwTerminate();
 #ifdef _WIN32
@@ -219,7 +266,15 @@ Window::~Window() {
 bool Window::shouldClose() const { return glfwWindowShouldClose(handle_) != 0; }
 void Window::requestClose() { glfwSetWindowShouldClose(handle_, GLFW_TRUE); }
 void Window::pollEvents() { glfwPollEvents(); }
-void Window::swapBuffers() { glfwSwapBuffers(handle_); }
+void Window::swapBuffers() {
+    if (api_ == GraphicsApi::Vulkan) {
+#ifdef FALCON_HAS_VULKAN
+        vulkan::present();
+#endif
+        return;
+    }
+    glfwSwapBuffers(handle_);
+}
 
 void Window::framebufferSize(int& width, int& height) const {
     glfwGetFramebufferSize(handle_, &width, &height);

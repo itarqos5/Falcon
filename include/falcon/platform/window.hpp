@@ -1,6 +1,7 @@
 #pragma once
 
 #include "falcon/assets/image.hpp"
+#include "falcon/gfx/graphics_api.hpp"
 #include "falcon/platform/cursor.hpp"
 
 #include <array>
@@ -23,7 +24,9 @@ public:
     // `startHidden` creates the window invisible, so nothing blank is shown while the game loads;
     // call show() once the first frame has been drawn.
     // `borderless`: no title bar and no frame at all; the top edge of the window moves it (Windows). Not for background windows.
-    Window(int width, int height, const std::string& title, bool background = false, bool startHidden = false, bool borderless = false);
+    // `api` is the graphics API the player chose. When it cannot be used (no Vulkan on this PC, say) the window is made for OpenGL; graphicsApi() says which it is, and
+    // graphicsApiNote() why when the two differ.
+    Window(int width, int height, const std::string& title, bool background = false, bool startHidden = false, bool borderless = false, GraphicsApi api = GraphicsApi::OpenGL);
     void show();
     ~Window();
     Window(const Window&) = delete;
@@ -54,6 +57,9 @@ public:
     std::function<void(double xOffset, double yOffset)> onScroll;
 
     [[nodiscard]] bool background() const { return background_; }
+    // What the game really draws with, and (empty when it is what was asked for) why it is not.
+    [[nodiscard]] GraphicsApi graphicsApi() const { return api_; }
+    [[nodiscard]] const std::string& graphicsApiNote() const { return apiNote_; }
 
     // Fullscreen on the primary monitor (the window's old size and place are restored when leaving
     // it). Background windows never go fullscreen.
@@ -87,6 +93,8 @@ public:
 
 private:
     GLFWwindow* handle_ = nullptr;
+    GraphicsApi api_ = GraphicsApi::OpenGL;
+    std::string apiNote_;
     bool background_ = false;
     bool borderless_ = false;
     std::array<bool, 349> simKeys_{};

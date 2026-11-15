@@ -1,5 +1,7 @@
 #pragma once
 
+#include "falcon/gfx/graphics_api.hpp"
+
 #include <array>
 #include <filesystem>
 #include <optional>
@@ -92,6 +94,7 @@ struct ClientOptions {
     bool captureLoading = false;                       // --capture-loading: capture without waiting for the world (the loading screen)
     std::vector<std::string> edits;                    // --edit X,Y,Z,BLOCK (repeatable): change a block once the world is ready
     bool background = false;                           // --background: hidden, unfocused window
+    std::optional<GraphicsApi> graphicsApi;            // --graphics-api opengl|vulkan: for this run, instead of the Graphics API setting
     bool memReport = false;                            // --mem-report: print RAM use after each loading step
     bool musicToast = false;                           // --music-toast: show the "now playing" toast
     bool mute = false;                                 // --mute: no sound output
