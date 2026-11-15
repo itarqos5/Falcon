@@ -9,6 +9,7 @@
 #include <array>
 #include <cstdint>
 #include <filesystem>
+#include <map>
 #include <mutex>
 #include <string>
 #include <unordered_map>
@@ -63,6 +64,8 @@ struct WorldSave {
     bool hasPlayer = false;
     SavedPlayer player;
     std::vector<ItemEntity> items;
+    std::map<std::string, std::string> gameRules;  // the game rules that differ from their defaults (/gamerule)
+    int difficulty = -1;                           // -1: not stored
 };
 
 // An item stack as NBT ({id, count, damage, name, components}) and back (an item this game does not know gives an empty stack).

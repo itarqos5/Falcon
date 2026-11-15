@@ -300,6 +300,11 @@ void GameSession::loadSave() {
         inventory_.setSelected(p.selectedSlot);
     }
     for (const ItemEntity& e : saved.items) itemEntities_.items().push_back(e);
+    for (const auto& [rule, value] : saved.gameRules) {  // /gamerule settings come back and take effect again
+        gameRules_[rule] = value;
+        applyGameRule(rule, value);
+    }
+    if (saved.difficulty >= 0 && saved.difficulty <= 3) difficulty_ = saved.difficulty;
 }
 
 void GameSession::save() {
@@ -326,6 +331,8 @@ void GameSession::save() {
         if (!inventory_.item(slot).isEmpty()) p.inventory.emplace_back(slot, inventory_.item(slot));
     }
     out.items = itemEntities_.items();
+    out.gameRules = gameRules_;
+    out.difficulty = difficulty_;
     const std::string error = writeWorldSave(savePath_, out, *edits_, *registry_);
     if (!error.empty()) {
         std::printf("[falcon] could not save the world: %s\n", error.c_str());

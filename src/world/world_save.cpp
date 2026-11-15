@@ -188,6 +188,12 @@ std::string writeWorldSave(const std::filesystem::path& file, const WorldSave& s
         items.push_back(std::move(t));
     }
     root.put("items", NbtTag::ofList(std::move(items)));
+    {
+        NbtTag rules = NbtTag::compound();
+        for (const auto& [name, value] : save.gameRules) rules.put(name, NbtTag::ofString(value));
+        root.put("gameRules", std::move(rules));
+        root.put("difficulty", integer(save.difficulty));
+    }
     root.put("edits", edits.toNbt(registry));
 
     const std::vector<unsigned char> bytes = gzipStored(serializeNbt(root, ""));
@@ -243,6 +249,10 @@ bool readWorldSave(const std::filesystem::path& file, WorldSave& save, WorldEdit
                 }
             }
         }
+        if (const NbtTag* rules = root->get("gameRules"); rules != nullptr && rules->type == NbtTag::Type::Compound) {
+            for (const auto& [name, value] : rules->fields) loaded.gameRules[name] = value.text;
+        }
+        loaded.difficulty = static_cast<int>(root->getInt("difficulty", -1));
         if (const NbtTag* items = root->get("items"); items != nullptr) {
             for (const NbtTag& t : items->items) {
                 ItemStack stack = stackFromNbt(t);
