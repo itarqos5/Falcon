@@ -175,11 +175,18 @@ void MultiplayerClient::pump(RemoteHandler& h) {
     Packet p;
     int budget = 4000;
     while (phase_ != Phase::Closed && budget-- > 0 && connection_.poll(p)) {
-        switch (phase_) {
-            case Phase::Login: handleLogin(p, h); break;
-            case Phase::Configuration: handleConfiguration(p, h); break;
-            case Phase::Play: handlePlay(p, h); break;
-            default: break;
+        const Phase before = phase_;
+        try {
+            switch (phase_) {
+                case Phase::Login: handleLogin(p, h); break;
+                case Phase::Configuration: handleConfiguration(p, h); break;
+                case Phase::Play: handlePlay(p, h); break;
+                default: break;
+            }
+        } catch (const std::exception& e) {  // a packet that cannot be dealt with ends the connection with the reason, not the game
+            const char* where = before == Phase::Login ? "login" : before == Phase::Configuration ? "configuration" : "play";
+            std::fprintf(stderr, "[falcon] packet %d of the %s phase threw: %s\n", p.id, where, e.what());
+            fail(std::string("Falcon could not deal with a packet from the server (number ") + std::to_string(p.id) + " in the " + where + " phase: " + e.what() + ")", &h);
         }
     }
     if (phase_ != Phase::Closed && !connection_.open()) {
