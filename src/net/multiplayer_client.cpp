@@ -421,7 +421,8 @@ void MultiplayerClient::handlePlay(const Packet& p, RemoteHandler& h) {
         case 4: break;  // block_changed_ack
         case 18: {      // container_set_content: only the player's own inventory (container 0) is followed
             const int container = r.varint();
-            r.varint();  // the state id
+            const int state = r.varint();
+            if (container == 0) menuStateId_ = state;
             const int n = r.varint();
             bool known = true;
             for (int i = 0; i < n && r.ok && known; ++i) {
@@ -433,7 +434,8 @@ void MultiplayerClient::handlePlay(const Packet& p, RemoteHandler& h) {
         }
         case 20: {  // container_set_slot
             const int container = r.varint();
-            r.varint();  // the state id
+            const int state = r.varint();
+            if (container == 0) menuStateId_ = state;
             const int menuSlot = r.i16();
             bool known = true;
             const ItemStack stack = readItemStack(r, componentIds_, known);
@@ -895,6 +897,37 @@ void MultiplayerClient::sendAction(int action) {
     w.u8(0);
     w.varint(0);
     connection_.send(41, w.data);
+}
+
+// HashedStack: whether there is one, then its item, its count and the hashes of the components that differ from the item's own. The hashes are not worked out here (a
+// stack with components is told without them and the server answers with what it really holds).
+static void writeHashedStack(Writer& w, const ItemStack& stack) {
+    if (stack.isEmpty()) {
+        w.boolean(false);
+        return;
+    }
+    w.boolean(true);
+    w.varint(static_cast<int>(stack.item));
+    w.varint(stack.count);
+    w.varint(0);  // components added
+    w.varint(0);  // components removed
+}
+
+void MultiplayerClient::sendContainerClick(int slot, int button, int mode, const std::vector<std::pair<int, ItemStack>>& changed, const ItemStack& carried) {
+    if (phase_ != Phase::Play) return;
+    Writer w;
+    w.varint(0);  // the player's own menu
+    w.varint(menuStateId_);
+    w.i16(slot);
+    w.u8(button);
+    w.varint(mode);
+    w.varint(static_cast<int>(changed.size()));
+    for (const auto& [index, stack] : changed) {
+        w.i16(index);
+        writeHashedStack(w, stack);
+    }
+    writeHashedStack(w, carried);
+    connection_.send(18, w.data);
 }
 
 void MultiplayerClient::sendContainerClose(int containerId) {

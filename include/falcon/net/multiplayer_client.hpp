@@ -150,6 +150,8 @@ public:
     void sendSwing();                                          // the arm swings (ServerboundPunchPacket: the main hand)
     void sendCreativeSlot(int inventorySlot, const ItemStack& stack);  // creative mode: this slot of the inventory now holds this
     void sendContainerClose(int containerId);
+    // A click in the player's own menu (container 0): the slot, the button, the kind (ClickType's number), the slots it changed with what they hold now, the stack on the cursor.
+    void sendContainerClick(int slot, int button, int mode, const std::vector<std::pair<int, ItemStack>>& changed, const ItemStack& carried);
     void sendUseItem(float yaw, float pitch);  // the item in the hand is used (eaten, drawn, thrown)
     void sendAction(int action);               // ServerboundPlayerActionPacket without a block: 3 drop one, 4 drop all, 5 let go of a used item, 6 swap with the offhand
 
@@ -171,6 +173,7 @@ private:
     int itemType_ = -1;    // and of an item
     std::map<int, RemoteItem> items_;
     ComponentIds componentIds_;
+    int menuStateId_ = 0;  // the state of the player's menu as the server last said it (a click must carry it)
     std::vector<std::string> soundNames_;
     int sequence_ = 0;
     int positionReminder_ = 0;

@@ -137,7 +137,9 @@ GameSession::GameSession(ScreenServices& services, const ResourceManager& resour
     MenuPlayer menuPlayer;
     menuPlayer.inventory = &inventory_;
     menuPlayer.infiniteMaterials = info.gameType == 1;
-    menuPlayer.dropHook = [this](const ItemStack& thrown) { dropFromPlayer(thrown); };  // (Player.drop: a click outside the menu throws it)
+    menuPlayer.dropHook = [this](const ItemStack& thrown) {
+        if (!remote_) dropFromPlayer(thrown);  // (on a server the click is told to it and it throws the item)
+    };  // (Player.drop: a click outside the menu throws it)
     inventoryMenu_ = std::make_unique<InventoryMenu>(menuPlayer);
     waterFogs_ = WaterFogTable::load(resources.dataRoot());  // the biomes' water fog colours (data/.../worldgen/biome)
     {

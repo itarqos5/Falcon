@@ -139,7 +139,7 @@ void GameSession::syncCreativeSlots() {
             remote_->sendCreativeSlot(slot, now);
             known = now;
         } else {
-            inventory_.item(slot) = known;  // (in the other modes the server alone changes the inventory: what was moved here snaps back)
+            known = now;  // (in the other modes a click is told to the server when it is made; what differs is corrected by what the server sends)
         }
     }
 }
@@ -213,6 +213,15 @@ bool GameSession::connectRemote(const std::string& host, int port, const std::st
         if (slot < 0 || slot >= 41) return;
         inventory_.item(slot) = stack;
         remoteSlots_[static_cast<std::size_t>(slot)] = stack;  // (the server knows it: nothing to tell back)
+    };
+    // The player's own menu: a click in survival or adventure is played out here at once and told to the server, which does the same and corrects what differs (creative
+    // mode tells the server slot by slot instead); closing the menu is told too.
+    inventoryMenu_->onClicked = [this](int slot, int button, ClickType type, const std::vector<std::pair<int, ItemStack>>& changed, const ItemStack& carried) {
+        if (info_.gameType == 1 || !remote_ || !remote_->inPlay()) return;
+        remote_->sendContainerClick(slot, button, static_cast<int>(type), changed, carried);
+    };
+    inventoryMenu_->onRemoved = [this] {
+        if (remote_ && remote_->inPlay()) remote_->sendContainerClose(0);
     };
     h.selfFlags = [this](int flags) { selfOnFire_ = (flags & 1) != 0; };
     h.sound = [this](const std::string& event, int source, double x, double y, double z, float volume, float pitch) {
