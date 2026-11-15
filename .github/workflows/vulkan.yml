@@ -1,0 +1,118 @@
+# The Vulkan renderer on Linux, in software (lavapipe, Mesa's Vulkan on the CPU) with the Khronos validation layer on: the shaders are compiled, the game is built, and the title
+# screen and a world are drawn once with OpenGL and once with Vulkan; the pictures and how far apart they are are kept as artifacts.
+name: Vulkan
+
+on:
+  push:
+    branches: [vulkan]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  vulkan:
+    runs-on: ubuntu-22.04
+    env:
+      CC: gcc-12
+      CXX: g++-12
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            g++-12 cmake ninja-build ccache pkg-config libssl-dev \
+            libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libxext-dev \
+            libxkbcommon-dev libwayland-dev wayland-protocols extra-cmake-modules \
+            libgl1-mesa-dev libgl1-mesa-dri xvfb \
+            libgtk-3-dev libwebkit2gtk-4.1-dev \
+            glslang-tools mesa-vulkan-drivers vulkan-validationlayers libvulkan1 vulkan-tools
+
+      - uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: vulkan-${{ github.sha }}
+          restore-keys: |
+            vulkan-
+            linux-
+
+      - name: Compile the Vulkan shaders
+        run: |
+          glslangValidator --version | head -2
+          node tools/compile_vk_shaders.mjs
+          mkdir -p artifacts
+          cp src/vulkan/spirv_data.cpp artifacts/spirv_data.cpp
+
+      - name: Configure
+        run: cmake --preset release -DFALCON_STATIC_OPENSSL=ON -DFALCON_BUILD_LAUNCHER=ON
+
+      - name: Build
+        run: |
+          cmake --build --preset release -j 4 -- -k 0
+          cmake --build build --target falcon_make_world falcon_image_diff falcon_tests -j 4 -- -k 0
+          cmake --build --preset launcher -j 4 -- -k 0
+
+      - name: Unit tests
+        run: xvfb-run -a build/tests/falcon_tests
+
+      - name: The Vulkan device
+        env:
+          VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+        run: vulkaninfo --summary 2>&1 | head -40
+
+      - name: Download the game's files
+        run: |
+          dist-launcher/FalconLauncher --selftest-install "$RUNNER_TEMP/game" || true
+          cat "$RUNNER_TEMP/game/selftest-install.txt"
+
+      - name: The title screen, with OpenGL and with Vulkan
+        continue-on-error: true
+        env:
+          VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+          FALCON_VK_VALIDATION: '1'
+          LIBGL_ALWAYS_SOFTWARE: '1'
+        run: |
+          mkdir -p shots "$RUNNER_TEMP/scratch"
+          for api in opengl vulkan; do
+            echo "=== $api"
+            timeout 240 xvfb-run -a -s "-screen 0 1280x800x24" build/Falcon --assets "$RUNNER_TEMP/game/26.3/assets" --data "$RUNNER_TEMP/game/26.3" --game-dir "$RUNNER_TEMP/scratch" \
+              --mute --size 1280x720 --seed 1 --graphics-api $api --capture shots/title-$api.png --capture-after 5 > shots/title-$api.log 2>&1
+            echo "exit code $?"
+            tail -25 shots/title-$api.log
+          done
+          build/tests/falcon_image_diff shots/title-opengl.png shots/title-vulkan.png "" shots/title-diff.png
+
+      - name: A world, with OpenGL and with Vulkan
+        continue-on-error: true
+        env:
+          VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+          FALCON_VK_VALIDATION: '1'
+          LIBGL_ALWAYS_SOFTWARE: '1'
+        run: |
+          build/tests/falcon_make_world "$RUNNER_TEMP/scratch/saves" "New World" 12345 creative
+          for api in opengl vulkan; do
+            echo "=== $api"
+            timeout 300 xvfb-run -a -s "-screen 0 1280x800x24" build/Falcon --assets "$RUNNER_TEMP/game/26.3/assets" --data "$RUNNER_TEMP/game/26.3" --game-dir "$RUNNER_TEMP/scratch" \
+              --play "New World" --mute --render-distance 8@0.5 --gamemode creative --cam 96.5,72,73.5,-35,12 --size 1280x720 --graphics-api $api \
+              --capture shots/world-$api.png --capture-after 12 > shots/world-$api.log 2>&1
+            echo "exit code $?"
+            tail -30 shots/world-$api.log
+          done
+          build/tests/falcon_image_diff shots/world-opengl.png shots/world-vulkan.png "" shots/world-diff.png
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: vulkan-shots
+          path: shots
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: vulkan-shaders
+          path: artifacts
+          if-no-files-found: ignore
+          retention-days: 7
