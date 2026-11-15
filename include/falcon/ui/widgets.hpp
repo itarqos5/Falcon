@@ -174,6 +174,7 @@ public:
     EditBox(const Font& font, int px, int py, int w, int h, std::string hint, std::size_t maxLength = 32);
 
     std::function<void(const std::string& text)> onChange;
+    bool bordered = true;  // false: no frame is drawn, and the text starts at the edge (the anvil's name box is on a picture of its own)
     [[nodiscard]] std::string text() const;
     void setText(const std::string& utf8);
 

@@ -13,6 +13,29 @@ public:
     [[nodiscard]] bool mayPlace(const ItemStack&) const override { return false; }
 };
 
+// An anvil's result: it can be taken when the player has the levels it costs (or builds freely).
+class AnvilResultSlot final : public Slot {
+public:
+    AnvilResultSlot(Container& owner, int slotNumber, int px, int py, const RemoteMenu& menu) : Slot(owner, slotNumber, px, py), menu_(menu) {}
+    [[nodiscard]] bool mayPlace(const ItemStack&) const override { return false; }
+    [[nodiscard]] bool mayPickup(const MenuPlayer& player) const override { return player.infiniteMaterials || (menu_.experienceLevel && menu_.experienceLevel() >= menu_.data(0) && menu_.data(0) > 0); }
+
+private:
+    const RemoteMenu& menu_;
+};
+
+// An enchanting table's slots: the thing to enchant (one at a time) and the lapis (nothing else goes there).
+class OneItemSlot final : public Slot {
+public:
+    using Slot::Slot;
+    [[nodiscard]] int maxStackSize() const override { return 1; }
+};
+class LapisSlot final : public Slot {
+public:
+    using Slot::Slot;
+    [[nodiscard]] bool mayPlace(const ItemStack& stack) const override { return !stack.isEmpty() && stack.type().name == "lapis_lazuli"; }
+};
+
 }  // namespace
 
 bool remoteMenuKindOf(const std::string& typeName, RemoteMenuKind& kind, int& rows) {
@@ -29,6 +52,8 @@ bool remoteMenuKindOf(const std::string& typeName, RemoteMenuKind& kind, int& ro
     if (typeName == "blast_furnace") { kind = RemoteMenuKind::BlastFurnace; return true; }
     if (typeName == "smoker") { kind = RemoteMenuKind::Smoker; return true; }
     if (typeName == "crafting") { kind = RemoteMenuKind::Crafting; return true; }
+    if (typeName == "anvil") { kind = RemoteMenuKind::Anvil; return true; }
+    if (typeName == "enchantment") { kind = RemoteMenuKind::Enchanting; return true; }
     return false;
 }
 
@@ -73,6 +98,19 @@ RemoteMenu::RemoteMenu(MenuPlayer player, RemoteMenuKind kind, int rows, int con
             addSlot(std::make_unique<Slot>(container_, 0, 56, 17));            // what is cooked
             addSlot(std::make_unique<Slot>(container_, 1, 56, 53));            // the fuel
             addSlot(std::make_unique<ResultOnlySlot>(container_, 2, 116, 35));  // what comes out
+            break;
+        case RemoteMenuKind::Anvil:  // AnvilMenu: the thing, what is added to it, and the result
+            containerSlots_ = 3;
+            container_ = SimpleContainer(containerSlots_);
+            addSlot(std::make_unique<Slot>(container_, 0, 27, 47));
+            addSlot(std::make_unique<Slot>(container_, 1, 76, 47));
+            addSlot(std::make_unique<AnvilResultSlot>(container_, 2, 134, 47, *this));
+            break;
+        case RemoteMenuKind::Enchanting:  // EnchantmentMenu: the thing and the lapis
+            containerSlots_ = 2;
+            container_ = SimpleContainer(containerSlots_);
+            addSlot(std::make_unique<OneItemSlot>(container_, 0, 15, 47));
+            addSlot(std::make_unique<LapisSlot>(container_, 1, 35, 47));
             break;
         case RemoteMenuKind::Crafting:
             containerSlots_ = 10;

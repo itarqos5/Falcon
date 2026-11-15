@@ -149,7 +149,7 @@ void test_remote_menu() {
     CHECK(remoteMenuKindOf("generic_9x6", kind, rows) && rows == 6);
     CHECK(remoteMenuKindOf("furnace", kind, rows) && kind == RemoteMenuKind::Furnace);
     CHECK(remoteMenuKindOf("hopper", kind, rows) && kind == RemoteMenuKind::Hopper);
-    CHECK(!remoteMenuKindOf("anvil", kind, rows) && !remoteMenuKindOf("generic_9x7", kind, rows) && !remoteMenuKindOf("", kind, rows));
+    CHECK(!remoteMenuKindOf("brewing_stand", kind, rows) && !remoteMenuKindOf("generic_9x7", kind, rows) && !remoteMenuKindOf("", kind, rows));
 
     Inventory inventory;
     MenuPlayer player;
@@ -186,6 +186,27 @@ void test_remote_menu() {
     CHECK(!furnace.slot(2).mayPlace(ItemStack(stone, 1)));  // nothing is put into the output
     furnace.setData(2, 90);
     CHECK(furnace.data(2) == 90 && furnace.data(7) == 0);
+    {  // an anvil: the result can be taken only with the levels it costs; an enchanting table: the lapis slot takes lapis only and the other one thing
+        CHECK(remoteMenuKindOf("anvil", kind, rows) && kind == RemoteMenuKind::Anvil && remoteMenuKindOf("enchantment", kind, rows) && kind == RemoteMenuKind::Enchanting);
+        RemoteMenu anvil(player, RemoteMenuKind::Anvil, 0, 10);
+        CHECK(anvil.containerSlots() == 3 && anvil.slot(0).x == 27 && anvil.slot(1).x == 76 && anvil.slot(2).x == 134 && anvil.slot(2).y == 47);
+        int level = 3;
+        anvil.experienceLevel = [&level] { return level; };
+        anvil.setData(0, 5);
+        CHECK(!anvil.slot(2).mayPickup(anvil.player()));  // three levels, five wanted
+        level = 5;
+        CHECK(anvil.slot(2).mayPickup(anvil.player()));
+        anvil.setData(0, 0);
+        CHECK(!anvil.slot(2).mayPickup(anvil.player()));  // nothing to take
+        CHECK(!anvil.slot(2).mayPlace(ItemStack(stone, 1)));
+        RemoteMenu enchanting(player, RemoteMenuKind::Enchanting, 0, 11);
+        CHECK(enchanting.containerSlots() == 2 && enchanting.slot(0).x == 15 && enchanting.slot(1).x == 35 && enchanting.slot(0).maxStackSize() == 1);
+        CHECK(!enchanting.slot(1).mayPlace(ItemStack(stone, 1)));
+        const auto lapis = itemRegistry().find("lapis_lazuli");  // (the registry of these tests may be a small one that has no lapis)
+        if (lapis) CHECK(enchanting.slot(1).mayPlace(ItemStack(*lapis, 3)));
+        enchanting.setData(9, 4);
+        CHECK(enchanting.data(9) == 4 && enchanting.data(11) == 0);
+    }
     RemoteMenu crafting(player, RemoteMenuKind::Crafting, 0, 9);
     CHECK(crafting.containerSlots() == 10 && crafting.slot(0).x == 124 && crafting.slot(1).x == 30 && crafting.slot(9).x == 30 + 2 * 18 && crafting.slot(9).y == 17 + 2 * 18);
 }

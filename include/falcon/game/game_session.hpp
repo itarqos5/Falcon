@@ -93,6 +93,8 @@ public:
     // closes it when the server does (consumeContainerClose()).
     [[nodiscard]] RemoteMenu* remoteMenu() { return remoteMenu_.get(); }
     [[nodiscard]] const std::string& remoteMenuTitle() const { return remoteMenuTitle_; }
+    // "Sharpness III" for the enchantment with this number in the server's registry and this level (what an enchanting table's clue says).
+    [[nodiscard]] std::string enchantmentName(int id, int level) const;
     [[nodiscard]] bool consumeContainerOpen() { return std::exchange(containerOpenRequested_, false); }
     [[nodiscard]] bool consumeContainerClose() { return std::exchange(containerCloseRequested_, false); }
     [[nodiscard]] const std::string& remoteLost() const { return remoteLost_; }  // why the server connection ended, "" while it lasts

@@ -325,6 +325,13 @@ bool GameSession::connectRemote(const std::string& host, int port, const std::st
             if (remote_ && remote_->inPlay()) remote_->sendContainerClose(id);
             remoteMenuOpen_ = false;
         };
+        remoteMenu_->experienceLevel = [this] { return vitals_.level; };
+        remoteMenu_->onRename = [this](const std::string& name) {
+            if (remote_ && remote_->inPlay()) remote_->sendRenameItem(name);
+        };
+        remoteMenu_->onButton = [this, id](int button) {
+            if (remote_ && remote_->inPlay()) remote_->sendContainerButton(id, button);
+        };
         remoteMenuTitle_ = plainText(title);
         remoteMenuOpen_ = true;
         containerOpenRequested_ = true;
@@ -484,6 +491,16 @@ void GameSession::renderTestMobs(const std::array<double, 3>& camPos) {
     }
 }
 
+std::string GameSession::enchantmentName(int id, int level) const {
+    const std::string* name = remote_ ? remote_->enchantmentName(id) : nullptr;
+    if (name == nullptr) return "?";
+    std::string path = *name;
+    if (path.compare(0, 10, "minecraft:") == 0) path.erase(0, 10);
+    std::string text = services_.language.get("enchantment.minecraft." + path);
+    if (level != 1 || path == "channeling") text += " " + services_.language.get("enchantment.level." + std::to_string(level));
+    return text;
+}
+
 // FALCON_TEST_CONTAINER=generic_9x3 (or furnace, crafting, hopper, generic_3x3, shulker_box, ...): once the world is ready a container of that kind opens with a few stacks in it
 // and its fire burning, as if a server had opened it (a test aid, to see the windows).
 void GameSession::openTestContainer() {
@@ -503,6 +520,12 @@ void GameSession::openTestContainer() {
     remoteMenu_->setData(1, 200);
     remoteMenu_->setData(2, 80);
     remoteMenu_->setData(3, 200);
+    if (menuKind == RemoteMenuKind::Anvil) remoteMenu_->setData(0, 7);  // what putting these together costs
+    if (menuKind == RemoteMenuKind::Enchanting) {
+        remoteMenu_->setData(0, 5);
+        remoteMenu_->setData(1, 15);
+        remoteMenu_->setData(2, 30);
+    }
     remoteMenuTitle_ = kind;
     remoteMenuOpen_ = true;
     containerOpenRequested_ = true;

@@ -238,10 +238,11 @@ void EditBox::charTyped(unsigned int codePoint) {
 }
 
 void EditBox::renderContents(GuiGraphics& graphics) {
-    graphics.blitSprite(focused ? "widget/text_field_highlighted" : "widget/text_field", x, y, width,
-                        height, argbWhite(alpha));
-    const int textX = x + 4;
-    const int textY = y + (height - 8) / 2;
+    if (bordered) {
+        graphics.blitSprite(focused ? "widget/text_field_highlighted" : "widget/text_field", x, y, width, height, argbWhite(alpha));
+    }
+    const int textX = bordered ? x + 4 : x;
+    const int textY = bordered ? y + (height - 8) / 2 : y;
     constexpr std::uint32_t kTextColor = 0xFFE0E0E0u;  // EditBox.DEFAULT_TEXT_COLOR
     constexpr std::uint32_t kHintColor = 0xFFAAAAAAu;  // ChatFormatting.GRAY
 

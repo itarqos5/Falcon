@@ -737,7 +737,9 @@ int Client::run() {
             session->update(static_cast<double>(deltaTicks) * 0.05, steering, fbW, fbH, keepTicking);
             if (session->consumeDeathRequest()) navigator.push(std::make_unique<DeathScreen>(navigator, services));  // "You Died!"
             if (session->consumeContainerOpen() && session->remoteMenu() != nullptr) {  // a chest, a furnace ... that the server opened
-                screens.push_back(std::make_unique<RemoteContainerScreen>(navigator, services, *session->remoteMenu(), session->remoteMenuTitle()));
+                auto containerScreen = std::make_unique<RemoteContainerScreen>(navigator, services, *session->remoteMenu(), session->remoteMenuTitle());
+                containerScreen->enchantmentName = [&session](int id, int level) { return session ? session->enchantmentName(id, level) : std::string(); };
+                screens.push_back(std::move(containerScreen));
                 screens.back()->resize(guiWidth, guiHeight);
             }
             if (session->consumeContainerClose() && dynamic_cast<RemoteContainerScreen*>(screens.back().get()) != nullptr) navigator.pop();  // the server closed it

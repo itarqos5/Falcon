@@ -339,10 +339,12 @@ void MultiplayerClient::handleConfiguration(const Packet& p, RemoteHandler& h) {
         case 7: {  // registry_data: of the registries, the painting variants (name and size of each, in the order of their numbers) are kept
             const std::string registry = r.string();
             const int n = r.varint();
-            const bool paintings = registry == "minecraft:painting_variant";
+            const bool paintings = registry == "minecraft:painting_variant", enchantments = registry == "minecraft:enchantment";
             if (paintings) paintingVariants_.clear();
+            if (enchantments) enchantments_.clear();
             for (int i = 0; i < n && r.ok; ++i) {
-                (void)r.string();  // the entry's own name
+                const std::string entryName = r.string();
+                if (enchantments) enchantments_.push_back(entryName);
                 NbtTag data;
                 const bool hasData = r.boolean();
                 if (hasData) data = readNetworkNbt(r);
@@ -1222,6 +1224,21 @@ void MultiplayerClient::sendContainerClick(int containerId, int slot, int button
     }
     writeHashedStack(w, carried);
     connection_.send(18, w.data);
+}
+
+void MultiplayerClient::sendContainerButton(int containerId, int button) {
+    if (phase_ != Phase::Play) return;
+    Writer w;
+    w.varint(containerId);
+    w.varint(button);
+    connection_.send(17, w.data);
+}
+
+void MultiplayerClient::sendRenameItem(const std::string& name) {
+    if (phase_ != Phase::Play) return;
+    Writer w;
+    w.string(name);
+    connection_.send(49, w.data);
 }
 
 void MultiplayerClient::sendContainerClose(int containerId) {

@@ -155,6 +155,8 @@ public:
     [[nodiscard]] bool isPlayerEntity(const RemotePlayer& e) const { return e.type == playerType_; }
     // The entity types that fly (arrows, thrown things) with their gravity and drag per tick: between the server's positions they go by their velocity, as on the real client.
     void setProjectileTypes(std::map<int, std::pair<float, float>> physics) { projectilePhysics_ = std::move(physics); }
+    // The names of the registry's enchantments, by number ("minecraft:sharpness"): for the clue of an enchanting table.
+    [[nodiscard]] const std::string* enchantmentName(int id) const { return id >= 0 && static_cast<std::size_t>(id) < enchantments_.size() ? &enchantments_[static_cast<std::size_t>(id)] : nullptr; }
     [[nodiscard]] const PaintingVariantInfo* paintingVariant(int id) const { return id >= 0 && static_cast<std::size_t>(id) < paintingVariants_.size() ? &paintingVariants_[static_cast<std::size_t>(id)] : nullptr; }
     [[nodiscard]] const std::string* mobName(int type) const {
         const auto it = mobTypes_.find(type);
@@ -205,6 +207,8 @@ public:
     void sendSwing();                                          // the arm swings (ServerboundPunchPacket: the main hand)
     void sendCreativeSlot(int inventorySlot, const ItemStack& stack);  // creative mode: this slot of the inventory now holds this
     void sendContainerClose(int containerId);
+    void sendContainerButton(int containerId, int button);  // a button of a menu (an enchanting table's three offers)
+    void sendRenameItem(const std::string& name);           // what is typed into an anvil's name box
     // A click in a menu (container 0 is the player's own): the slot, the button, the kind (ClickType's number), the slots it changed with what they hold now, the stack on the cursor.
     void sendContainerClick(int containerId, int slot, int button, int mode, const std::vector<std::pair<int, ItemStack>>& changed, const ItemStack& carried);
     void sendUseItem(float yaw, float pitch);  // the item in the hand is used (eaten, drawn, thrown)
@@ -232,6 +236,7 @@ private:
     std::map<int, std::string> mobTypes_;
     std::map<int, std::pair<float, float>> projectilePhysics_;
     std::vector<PaintingVariantInfo> paintingVariants_;
+    std::vector<std::string> enchantments_;
     std::map<int, RemoteItem> items_;
     ComponentIds componentIds_;
     SkinFetcher skins_;
