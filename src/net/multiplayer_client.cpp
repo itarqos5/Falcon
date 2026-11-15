@@ -30,13 +30,21 @@ void unpackBlockPos(std::int64_t v, int& x, int& y, int& z) {
 
 float angleOf(int byteValue) { return static_cast<float>(byteValue) * 360.0f / 256.0f; }
 
-// An LpVec3 (the velocity of a new entity): one byte for nothing at all, else six bytes and maybe a VarInt more.
-void skipLpVec3(Reader& r) {
-    const int lowest = r.u8();
+// An LpVec3 as it is: the velocity of an entity (LpVec3.read): a byte that is 0 for no movement, else six bytes (three values of 15 bits that are fractions of a scale) and when
+// bit 2 of the first byte is set a VarInt that makes the scale bigger.
+void readLpVec3(Reader& r, double& x, double& y, double& z) {
+    x = y = z = 0.0;
+    const std::uint32_t lowest = static_cast<std::uint32_t>(r.u8());
     if (lowest == 0) return;
-    r.u8();
-    r.i32();
-    if ((lowest & 4) == 4) r.varint();
+    const std::uint32_t middle = static_cast<std::uint32_t>(r.u8());
+    const std::uint64_t highest = static_cast<std::uint32_t>(r.i32());
+    const std::uint64_t buffer = (highest << 16) | (middle << 8) | lowest;
+    std::uint64_t scale = lowest & 3u;
+    if ((lowest & 4u) == 4u) scale |= (static_cast<std::uint64_t>(static_cast<std::uint32_t>(r.varint())) & 0xFFFFFFFFull) << 2;
+    const auto unpack = [](std::uint64_t value) { return std::min(static_cast<double>(value & 32767ull), 32766.0) * 2.0 / 32766.0 - 1.0; };
+    x = unpack(buffer >> 3) * static_cast<double>(scale);
+    y = unpack(buffer >> 18) * static_cast<double>(scale);
+    z = unpack(buffer >> 33) * static_cast<double>(scale);
 }
 
 std::uint32_t formattingColor(int index) {
@@ -95,6 +103,7 @@ bool skipEntityDataValue(int serializer, Reader& r) {
         case 15: r.varint(); return r.ok;                                       // optional block state
         case 19: r.varint(); return r.ok;                                       // optional unsigned int
         case 20: r.varint(); return r.ok;                                       // pose
+        case 34: r.varint(); return r.ok;                                       // painting variant
         default: return false;
     }
 }
@@ -327,6 +336,26 @@ void MultiplayerClient::handleConfiguration(const Packet& p, RemoteHandler& h) {
             connection_.send(5, w.data);
             break;
         }
+        case 7: {  // registry_data: of the registries, the painting variants (name and size of each, in the order of their numbers) are kept
+            const std::string registry = r.string();
+            const int n = r.varint();
+            const bool paintings = registry == "minecraft:painting_variant";
+            if (paintings) paintingVariants_.clear();
+            for (int i = 0; i < n && r.ok; ++i) {
+                (void)r.string();  // the entry's own name
+                NbtTag data;
+                const bool hasData = r.boolean();
+                if (hasData) data = readNetworkNbt(r);
+                if (paintings && r.ok) {
+                    PaintingVariantInfo info;
+                    info.asset = data.getString("asset_id");
+                    info.width = static_cast<int>(data.getInt("width", 1));
+                    info.height = static_cast<int>(data.getInt("height", 1));
+                    paintingVariants_.push_back(info);
+                }
+            }
+            break;
+        }
         case 15: {  // select_known_packs: none are known here, so the registries come in full
             Writer w;
             w.varint(0);
@@ -433,6 +462,20 @@ void MultiplayerClient::tickPlayers() {
             if (p.swing >= 1.0f) p.swing = 0.0f;
         }
     }
+    for (auto& [id, e] : players_) {  // what flies goes by its velocity (Projectile.tick without the world: no collisions, the server corrects the place)
+        const auto physics = projectilePhysics_.find(e.type);
+        if (physics == projectilePhysics_.end()) continue;
+        if (e.vx == 0.0 && e.vy == 0.0 && e.vz == 0.0) continue;
+        e.x += e.vx;
+        e.y += e.vy;
+        e.z += e.vz;
+        e.vx *= static_cast<double>(physics->second.second);
+        e.vy = e.vy * static_cast<double>(physics->second.second) - static_cast<double>(physics->second.first);
+        e.vz *= static_cast<double>(physics->second.second);
+        const double horizontal = std::sqrt(e.vx * e.vx + e.vz * e.vz);  // it points the way it goes
+        e.yaw = static_cast<float>(std::atan2(e.vx, e.vz) * 57.29577951308232);
+        e.pitch = static_cast<float>(std::atan2(e.vy, horizontal) * 57.29577951308232);
+    }
 }
 
 void MultiplayerClient::handlePlay(const Packet& p, RemoteHandler& h) {
@@ -523,6 +566,10 @@ void MultiplayerClient::handlePlay(const Packet& p, RemoteHandler& h) {
             break;
         }
         case 4: break;  // block_changed_ack
+        case 16: {      // commands: the command tree (only to know which arguments are messages)
+            if (!commands_.read(r)) std::printf("[falcon] the server's command tree could not be read: commands with messages go unsigned\n");
+            break;
+        }
         case 18: {      // container_set_content: only the player's own inventory (container 0) is followed
             const int container = r.varint();
             containerStates_[container] = r.varint();
@@ -566,10 +613,6 @@ void MultiplayerClient::handlePlay(const Packet& p, RemoteHandler& h) {
         case 107: {  // set_held_slot
             const int slot = r.varint();
             if (r.ok && slot >= 0 && slot < 9 && h.heldSlot) h.heldSlot(slot);
-        case 16: {      // commands: the command tree (only to know which arguments are messages)
-            if (!commands_.read(r)) std::printf("[falcon] the server's command tree could not be read: commands with messages go unsigned\n");
-            break;
-        }
             break;
         }
         case 119: {  // sound: an event at a place (the position is in eighths of a block)
@@ -634,6 +677,9 @@ void MultiplayerClient::handlePlay(const Packet& p, RemoteHandler& h) {
                     const int flags = r.u8();
                     if (const auto it = players_.find(entity); it != players_.end() && r.ok) it->second.sneaking = (flags & 2) != 0;
                     if (entity == selfEntity_ && r.ok && h.selfFlags) h.selfFlags(flags);
+                } else if (serializer == 34) {  // a painting's variant: a holder of the registry (its number plus one; 0 would be the data written out, which is not read)
+                    const int holder = r.varint();
+                    if (const auto it = players_.find(entity); it != players_.end() && r.ok && holder > 0) it->second.variant = holder - 1;
                 } else if (serializer == 7) {  // an item stack (the item of an item entity is entry 8)
                     bool known = true;
                     const ItemStack stack = readItemStack(r, componentIds_, known);
@@ -797,10 +843,11 @@ void MultiplayerClient::handlePlay(const Packet& p, RemoteHandler& h) {
             pl.x = pl.xo = r.f64();
             pl.y = pl.yo = r.f64();
             pl.z = pl.zo = r.f64();
-            skipLpVec3(r);
+            readLpVec3(r, pl.vx, pl.vy, pl.vz);
             pl.pitch = pl.pitchO = angleOf(r.i8());
             pl.yaw = pl.yawO = angleOf(r.i8());
             pl.headYaw = pl.headYawO = angleOf(r.i8());
+            pl.data = r.varint();
             pl.type = type;
             if (r.ok && type == playerType_ && id != selfEntity_) players_[id] = pl;
             else if (r.ok && mobTypes_.count(type) != 0) players_[id] = pl;  // a mob that can be drawn: followed the same way
@@ -820,6 +867,17 @@ void MultiplayerClient::handlePlay(const Packet& p, RemoteHandler& h) {
                 const int gone = r.varint();
                 players_.erase(gone);
                 items_.erase(gone);
+            }
+            break;
+        }
+        case 103: {  // set_entity_motion: the velocity of an entity
+            const int id = r.varint();
+            double vx, vy, vz;
+            readLpVec3(r, vx, vy, vz);
+            if (const auto it = players_.find(id); it != players_.end() && r.ok) {
+                it->second.vx = vx;
+                it->second.vy = vy;
+                it->second.vz = vz;
             }
             break;
         }
@@ -991,8 +1049,54 @@ void MultiplayerClient::sendChat(const std::string& text) {
     connection_.send(9, w.data);
 }
 
+// A command: when it has message arguments (/msg, /say, /me ...), and there is a chat session, they are signed the way a chat message is (ServerboundChatCommandSignedPacket: the
+// command, the time, the salt, a signature for each message argument and which messages of others were seen); otherwise the command goes as it is.
 void MultiplayerClient::sendCommand(const std::string& text) {
     if (phase_ != Phase::Play) return;
+    const std::vector<SignableArgument> arguments = commands_.signableArguments(text);
+    if (!arguments.empty() && chatSessionSent_ && haveChatKeys_) {
+        const std::int64_t millis = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+        std::uint8_t random[8];
+        if (randomBytes(random, sizeof random)) {
+            std::int64_t salt = 0;
+            for (const std::uint8_t b : random) salt = (salt << 8) | b;
+            const LastSeenTracker::Update seen = lastSeen_.generateAndApplyUpdate();
+            std::vector<std::pair<std::string, Bytes>> signatures;
+            int index = chatIndex_;
+            bool signedAll = true;
+            for (const SignableArgument& argument : arguments) {  // each message argument is a message of the chain
+                Bytes signature;
+                std::string error;
+                const Bytes payload = chatSignaturePayload(selfId_, chatSessionId_, index, salt, millis / 1000, argument.value, seen.seen);
+                if (!rsaSign(chatKeys_.privateKey, payload, signature, error)) {
+                    std::printf("[falcon] a command could not be signed: %s\n", error.c_str());
+                    signedAll = false;
+                    break;
+                }
+                signatures.emplace_back(argument.name, std::move(signature));
+                ++index;
+            }
+            if (signedAll) {
+                chatIndex_ = index;
+                Writer w;
+                w.string(text);
+                w.i64(millis);
+                w.i64(salt);
+                w.varint(static_cast<std::int32_t>(signatures.size()));
+                for (const auto& [name, signature] : signatures) {
+                    w.string(name);
+                    w.raw(signature);
+                }
+                w.varint(seen.offset);
+                w.u8(static_cast<int>(seen.acknowledged & 0xFF));
+                w.u8(static_cast<int>((seen.acknowledged >> 8) & 0xFF));
+                w.u8(static_cast<int>((seen.acknowledged >> 16) & 0xFF));
+                w.u8(seen.checksum);
+                connection_.send(8, w.data);
+                return;
+            }
+        }
+    }
     Writer w;
     w.string(text);
     connection_.send(7, w.data);
@@ -1049,54 +1153,8 @@ void MultiplayerClient::sendCreativeSlot(int inventorySlot, const ItemStack& sta
     w.i16(menuSlot);
     writeItemStack(w, stack);
     connection_.send(57, w.data);
-// A command: when it has message arguments (/msg, /say, /me ...), and there is a chat session, they are signed the way a chat message is (ServerboundChatCommandSignedPacket: the
-// command, the time, the salt, a signature for each message argument and which messages of others were seen); otherwise the command goes as it is.
 }
 
-    const std::vector<SignableArgument> arguments = commands_.signableArguments(text);
-    if (!arguments.empty() && chatSessionSent_ && haveChatKeys_) {
-        const std::int64_t millis = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
-        std::uint8_t random[8];
-        if (randomBytes(random, sizeof random)) {
-            std::int64_t salt = 0;
-            for (const std::uint8_t b : random) salt = (salt << 8) | b;
-            const LastSeenTracker::Update seen = lastSeen_.generateAndApplyUpdate();
-            std::vector<std::pair<std::string, Bytes>> signatures;
-            int index = chatIndex_;
-            bool signedAll = true;
-            for (const SignableArgument& argument : arguments) {  // each message argument is a message of the chain
-                Bytes signature;
-                std::string error;
-                const Bytes payload = chatSignaturePayload(selfId_, chatSessionId_, index, salt, millis / 1000, argument.value, seen.seen);
-                if (!rsaSign(chatKeys_.privateKey, payload, signature, error)) {
-                    std::printf("[falcon] a command could not be signed: %s\n", error.c_str());
-                    signedAll = false;
-                    break;
-                }
-                signatures.emplace_back(argument.name, std::move(signature));
-                ++index;
-            }
-            if (signedAll) {
-                chatIndex_ = index;
-                Writer w;
-                w.string(text);
-                w.i64(millis);
-                w.i64(salt);
-                w.varint(static_cast<std::int32_t>(signatures.size()));
-                for (const auto& [name, signature] : signatures) {
-                    w.string(name);
-                    w.raw(signature);
-                }
-                w.varint(seen.offset);
-                w.u8(static_cast<int>(seen.acknowledged & 0xFF));
-                w.u8(static_cast<int>((seen.acknowledged >> 8) & 0xFF));
-                w.u8(static_cast<int>((seen.acknowledged >> 16) & 0xFF));
-                w.u8(seen.checksum);
-                connection_.send(8, w.data);
-                return;
-            }
-        }
-    }
 void MultiplayerClient::sendUseItem(float yaw, float pitch) {
     if (phase_ != Phase::Play) return;
     Writer w;

@@ -44,10 +44,17 @@ public:
     // Whether mobs of this type ("zombie", without the namespace) can be drawn.
     [[nodiscard]] static bool supports(const std::string& type);
     [[nodiscard]] static std::vector<std::string> supportedTypes();
+    // The box of a type in blocks (width and depth, height); false for a type that is not in the table.
+    [[nodiscard]] static bool sizeOf(const std::string& type, float& width, float& height);
+    // Whether a mob of this type can be hit (everything but arrows in the air).
+    [[nodiscard]] static bool attackable(const std::string& type);
 
     // Draws a mob into the frame that was just drawn; `viewProj` is that frame's view and projection, `cam` where its camera is. Nothing happens for a type that is not supported
     // or whose files are missing.
     void render(const Matrix4f& viewProj, const std::array<double, 3>& cam, const std::string& type, const MobPose& pose);
+    // A painting: the picture ("kebab": textures/painting/kebab.png) on a square of widthBlocks x heightBlocks, its middle at `position`, facing `yaw` (0 is south).
+    void renderPainting(const Matrix4f& viewProj, const std::array<double, 3>& cam, const std::string& name, int widthBlocks, int heightBlocks, const std::array<double, 3>& position, float yaw,
+                        const std::array<float, 3>& light);
 
 private:
     MobRenderer() = default;
@@ -64,6 +71,7 @@ private:
     const ResourceManager* resources_ = nullptr;
     std::filesystem::path dataDir_;
     std::map<std::string, Loaded> loaded_;
+    std::map<std::string, std::unique_ptr<Texture2D>> paintingTextures_;  // by file name; null for one the game does not have
     ShaderProgram shader_;
     gl::GLint uProj_ = -1, uLight_ = -1, uSkin_ = -1, uTint_ = -1;
     gl::GLuint vao_ = 0, vbo_ = 0;

@@ -61,6 +61,10 @@ void drawStyled(GuiGraphics& g, const StyledText& text, float x, float y, std::u
     }
 }
 
+// What is thrown and drawn as the item it is (the entity type, the item): an ender pearl, a snowball ...
+constexpr const char* kThrownTypes[] = {"ender_pearl", "snowball", "egg", "experience_bottle", "eye_of_ender", "small_fireball", "fireball", "wind_charge"};
+constexpr const char* kThrownItems[] = {"ender_pearl", "snowball", "egg", "experience_bottle", "ender_eye", "fire_charge", "fire_charge", "wind_charge"};
+
 // The number of an entity type in the entity type registry (registries.json of the game's data).
 int entityTypeNumber(const std::filesystem::path& dataRoot, const char* name) {
     std::ifstream in(dataRoot / "registries.json", std::ios::binary);
@@ -87,11 +91,25 @@ std::map<int, std::string> mobTypeNumbers(const std::filesystem::path& dataRoot)
     if (registry == doc.end()) return types;
     const auto entries = registry->find("entries");
     if (entries == registry->end()) return types;
-    for (const std::string& name : MobRenderer::supportedTypes()) {
+    std::vector<std::string> names = MobRenderer::supportedTypes();
+    names.push_back("painting");
+    for (const char* thrown : kThrownTypes) names.emplace_back(thrown);
+    for (const std::string& name : names) {
         const auto e = entries->find("minecraft:" + name);
         if (e != entries->end()) types[e->value("protocol_id", -1)] = name;
     }
     return types;
+}
+
+// The gravity and the drag per tick of what flies (Projectile: arrows are slowed by 1% and fall by 0.05, thrown things fall by 0.03, a thrown bottle by 0.07), by entity type number.
+std::map<int, std::pair<float, float>> projectileTypeNumbers(const std::filesystem::path& dataRoot) {
+    std::map<int, std::pair<float, float>> out;
+    const struct { const char* name; float gravity; } kFlying[] = {{"arrow", 0.05f}, {"spectral_arrow", 0.05f}, {"ender_pearl", 0.03f}, {"snowball", 0.03f}, {"egg", 0.03f}, {"experience_bottle", 0.07f}};
+    for (const auto& f : kFlying) {
+        const int id = entityTypeNumber(dataRoot, (std::string("minecraft:") + f.name).c_str());
+        if (id >= 0) out[id] = {f.gravity, 0.99f};
+    }
+    return out;
 }
 
 // The names of the menu types by their number (registries.json), without the namespace: "generic_9x3", "furnace", ...
@@ -206,6 +224,12 @@ bool GameSession::connectRemote(const std::string& host, int port, const std::st
     remote_->setPlayerEntityType(entityTypeNumber(dataRoot_, "minecraft:player"));
     remote_->setItemEntityType(entityTypeNumber(dataRoot_, "minecraft:item"));
     if (mobs_) remote_->setMobTypes(mobTypeNumbers(dataRoot_));
+    remote_->setProjectileTypes(projectileTypeNumbers(dataRoot_));
+    thrownItems_.clear();
+    for (std::size_t i = 0; i < sizeof kThrownTypes / sizeof kThrownTypes[0]; ++i) {
+        const int type = entityTypeNumber(dataRoot_, (std::string("minecraft:") + kThrownTypes[i]).c_str());
+        if (const auto item = itemRegistry().find(kThrownItems[i]); type >= 0 && item) thrownItems_[type] = *item;
+    }
     remote_->setComponentIds(componentIds(dataRoot_));
     remote_->setSoundNames(soundEventNames(dataRoot_));
     menuTypeNames_ = menuTypeNameList(dataRoot_);
@@ -421,6 +445,15 @@ void GameSession::pumpSkins() {
         std::vector<net::SkinFetcher::Done> mine = localSkins_->takeFinished();
         for (net::SkinFetcher::Done& d : mine) done.push_back(std::move(d));
     }
+        if (type.compare(0, 9, "painting:") == 0) {  // painting:kebab:1:1 (the picture, its width and height in blocks)
+            const std::size_t c1 = type.find(':', 9), c2 = c1 == std::string::npos ? c1 : type.find(':', c1 + 1);
+            if (c2 != std::string::npos) {
+                const std::array<double, 3> middle = {player_.x + forwardX * 4.5 + rightX * x, player_.y + 1.0, player_.z + forwardZ * 4.5 + rightZ * x};
+                mobs_->renderPainting(renderer_.viewProjection(), camPos, type.substr(9, c1 - 9), std::atoi(type.c_str() + c1 + 1), std::atoi(type.c_str() + c2 + 1), middle, player_.yaw + 180.0f, {1.0f, 1.0f, 1.0f});
+            }
+            x += 1.6;
+            continue;
+        }
     for (const net::SkinFetcher::Done& d : done) {
         skinTextures_[d.hash] = std::make_unique<Texture2D>(d.image, FilterMode::Nearest);
         skinSlim_[d.hash] = d.slim;
@@ -498,6 +531,22 @@ void GameSession::sendRemoteTick(const PlayerInput& input) {
 void GameSession::renderRemotePlayers(const std::array<double, 3>& camPos) {
     if (!remote_ || !body_) return;
     const float partial = static_cast<float>(partialTick_);
+        for (const auto& [id, thing] : remote_->players()) {  // an ender pearl, a snowball ... in the air: the item it is
+            const auto item = thrownItems_.find(thing.type);
+            if (item == thrownItems_.end()) continue;
+            ItemEntity e;
+            e.stack = ItemStack(item->second, 1);
+            e.x = thing.x;
+            e.y = thing.y;
+            e.z = thing.z;
+            e.xo = thing.xo;
+            e.yo = thing.yo;
+            e.zo = thing.zo;
+            e.age = 0;
+            e.id = id;
+            e.pickupDelay = 0;
+            items.push_back(e);
+        }
     const float t = static_cast<float>(partialTick_);
     const auto wrap = [](float degrees) {
         float d = std::fmod(degrees, 360.0f);
@@ -551,6 +600,20 @@ void GameSession::renderRemotePlayers(const std::array<double, 3>& camPos) {
 
 // EntityRenderer.renderNameTag: the name hangs half a block over the head, always the same size in the world (a quarter of a pixel... 0.025 of a block for every pixel of
 // the font), on a box of the background colour. It is not shown beyond 64 blocks or when the team hides it.
+            if (thrownItems_.count(p.type) != 0) continue;  // (drawn as an item: see pumpRemote)
+            if (*type == "painting") {  // a picture on a square, facing the way the game says (the direction in the add packet: north 2, south 3, west 4, east 5)
+                const net::PaintingVariantInfo* variant = remote_->paintingVariant(p.variant);
+                if (variant == nullptr) continue;
+                std::string asset = variant->asset;
+                if (asset.compare(0, 10, "minecraft:") == 0) asset.erase(0, 10);
+                const std::array<double, 3> middle = {p.xo + (p.x - p.xo) * partialTick_, p.yo + (p.y - p.yo) * partialTick_, p.zo + (p.z - p.zo) * partialTick_};
+                const float facing = p.data == 2 ? 180.0f : p.data == 3 ? 0.0f : p.data == 4 ? 90.0f : p.data == 5 ? 270.0f : p.yaw;
+                int paintingSky = 15, paintingBlock = 0;
+                renderer_.lightAtWithCarried(static_cast<int>(std::floor(middle[0])), static_cast<int>(std::floor(middle[1])), static_cast<int>(std::floor(middle[2])), paintingSky, paintingBlock);
+                mobs_->renderPainting(renderer_.viewProjection(), camPos, asset, variant->width, variant->height, middle, facing,
+                                      entityLightColor(paintingSky, paintingBlock, static_cast<float>(services_.options.gamma)));
+                continue;
+            }
 void GameSession::drawNameTags(GuiGraphics& g, int guiWidth, int guiHeight, const Camera& cam) {
     if (!remote_) return;
     const Matrix4f& m = renderer_.viewProjection();

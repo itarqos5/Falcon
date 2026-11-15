@@ -17,71 +17,96 @@ namespace {
 using namespace entity_draw;
 
 // What the game gives each type of mob: the model (entity-models.json, "minecraft:<model>#main"), the picture (textures/entity/<texture>.png), how its parts move (a: a biped that
-// holds its arms out, as a zombie does; b: a biped; q: a quadruped; s: only the head turns) and the size it is drawn at. Every row was checked against the game's own files.
+// holds its arms out, as a zombie does; b: a biped; q: a quadruped; s: only the head turns; B: a boat; A: an arrow, which flies pointing the way it goes), the size it is drawn at and the size of its box (what
+// can be hit). Every row was checked against the game's own files.
 struct MobSpec {
     const char* type;
     const char* model;
     const char* texture;
     char kind;
     float scale;
+    float width;
+    float height;
 };
 
 constexpr MobSpec kMobs[] = {
-    {"zombie", "zombie", "zombie/zombie", 'a', 1.0f},
-    {"husk", "husk", "zombie/husk", 'a', 1.0625f},
-    {"drowned", "drowned", "zombie/drowned", 'a', 1.0f},
-    {"zombified_piglin", "zombified_piglin", "piglin/zombified_piglin", 'a', 1.0f},
-    {"zombie_villager", "zombie_villager", "zombie_villager/zombie_villager", 'a', 1.0f},
-    {"skeleton", "skeleton", "skeleton/skeleton", 'b', 1.0f},
-    {"stray", "stray", "skeleton/stray", 'b', 1.0f},
-    {"bogged", "bogged", "skeleton/bogged", 'b', 1.0f},
-    {"wither_skeleton", "wither_skeleton", "skeleton/wither_skeleton", 'b', 1.2f},
-    {"piglin", "piglin", "piglin/piglin", 'b', 1.0f},
-    {"piglin_brute", "piglin_brute", "piglin/piglin_brute", 'b', 1.0f},
-    {"enderman", "enderman", "enderman/enderman", 'b', 1.0f},
-    {"villager", "villager", "villager/villager", 'b', 1.0f},
-    {"wandering_trader", "wandering_trader", "wandering_trader/wandering_trader", 'b', 1.0f},
-    {"pillager", "pillager", "illager/pillager", 'b', 1.0f},
-    {"vindicator", "vindicator", "illager/vindicator", 'b', 1.0f},
-    {"evoker", "evoker", "illager/evoker", 'b', 1.0f},
-    {"illusioner", "illusioner", "illager/illusioner", 'b', 1.0f},
-    {"witch", "witch", "witch/witch", 'b', 1.0f},
-    {"iron_golem", "iron_golem", "iron_golem/iron_golem", 'b', 1.0f},
-    {"creeper", "creeper", "creeper/creeper", 'q', 1.0f},
-    {"pig", "pig", "pig/pig_temperate", 'q', 1.0f},
-    {"cow", "cow", "cow/cow_temperate", 'q', 1.0f},
-    {"mooshroom", "mooshroom", "cow/mooshroom_red", 'q', 1.0f},
-    {"sheep", "sheep", "sheep/sheep", 'q', 1.0f},
-    {"wolf", "wolf", "wolf/wolf", 'q', 1.0f},
-    {"horse", "horse", "horse/horse_brown", 'q', 1.0f},
-    {"donkey", "donkey", "horse/donkey", 'q', 1.0f},
-    {"mule", "mule", "horse/mule", 'q', 1.0f},
-    {"goat", "goat", "goat/goat", 'q', 1.0f},
-    {"fox", "fox", "fox/fox", 'q', 1.0f},
-    {"ocelot", "ocelot", "cat/ocelot", 'q', 1.0f},
-    {"cat", "cat", "cat/cat_tabby", 'q', 1.0f},
-    {"llama", "llama", "llama/llama_brown", 'q', 1.0f},
-    {"polar_bear", "polar_bear", "bear/polarbear", 'q', 1.0f},
-    {"panda", "panda", "panda/panda", 'q', 1.0f},
-    {"hoglin", "hoglin", "hoglin/hoglin", 'q', 1.0f},
-    {"chicken", "chicken", "chicken/chicken_temperate", 'b', 1.0f},
-    {"rabbit", "rabbit", "rabbit/rabbit_brown", 's', 1.0f},
-    {"spider", "spider", "spider/spider", 's', 1.0f},
-    {"cave_spider", "cave_spider", "spider/cave_spider", 's', 0.7f},
-    {"bat", "bat", "bat/bat", 's', 1.0f},
-    {"blaze", "blaze", "blaze/blaze", 's', 1.0f},
-    {"ghast", "ghast", "ghast/ghast", 's', 4.5f},
-    {"snow_golem", "snow_golem", "snow_golem/snow_golem", 's', 1.0f},
-    {"silverfish", "silverfish", "silverfish/silverfish", 's', 1.0f},
-    {"endermite", "endermite", "endermite/endermite", 's', 1.0f},
-    {"slime", "slime", "slime/slime", 's', 1.0f},
-    {"squid", "squid", "squid/squid", 's', 1.0f},
-    {"turtle", "turtle", "turtle/turtle", 's', 1.0f},
-    {"parrot", "parrot", "parrot/parrot_red_blue", 's', 1.0f},
-    {"bee", "bee", "bee/bee", 's', 1.0f},
-    {"strider", "strider", "strider/strider", 's', 1.0f},
-    {"phantom", "phantom", "phantom/phantom", 's', 1.0f},
-    {"warden", "warden", "warden/warden", 'b', 1.0f},
+    {"zombie", "zombie", "zombie/zombie", 'a', 1.0f, 0.6f, 1.95f},
+    {"husk", "husk", "zombie/husk", 'a', 1.0625f, 0.6f, 1.95f},
+    {"drowned", "drowned", "zombie/drowned", 'a', 1.0f, 0.6f, 1.95f},
+    {"zombified_piglin", "zombified_piglin", "piglin/zombified_piglin", 'a', 1.0f, 0.6f, 1.95f},
+    {"zombie_villager", "zombie_villager", "zombie_villager/zombie_villager", 'a', 1.0f, 0.6f, 1.95f},
+    {"skeleton", "skeleton", "skeleton/skeleton", 'b', 1.0f, 0.6f, 1.99f},
+    {"stray", "stray", "skeleton/stray", 'b', 1.0f, 0.6f, 1.99f},
+    {"bogged", "bogged", "skeleton/bogged", 'b', 1.0f, 0.6f, 1.99f},
+    {"wither_skeleton", "wither_skeleton", "skeleton/wither_skeleton", 'b', 1.2f, 0.7f, 2.4f},
+    {"piglin", "piglin", "piglin/piglin", 'b', 1.0f, 0.6f, 1.95f},
+    {"piglin_brute", "piglin_brute", "piglin/piglin_brute", 'b', 1.0f, 0.6f, 1.95f},
+    {"enderman", "enderman", "enderman/enderman", 'b', 1.0f, 0.6f, 2.9f},
+    {"villager", "villager", "villager/villager", 'b', 1.0f, 0.6f, 1.95f},
+    {"wandering_trader", "wandering_trader", "wandering_trader/wandering_trader", 'b', 1.0f, 0.6f, 1.95f},
+    {"pillager", "pillager", "illager/pillager", 'b', 1.0f, 0.6f, 1.95f},
+    {"vindicator", "vindicator", "illager/vindicator", 'b', 1.0f, 0.6f, 1.95f},
+    {"evoker", "evoker", "illager/evoker", 'b', 1.0f, 0.6f, 1.95f},
+    {"illusioner", "illusioner", "illager/illusioner", 'b', 1.0f, 0.6f, 1.95f},
+    {"witch", "witch", "witch/witch", 'b', 1.0f, 0.6f, 1.95f},
+    {"iron_golem", "iron_golem", "iron_golem/iron_golem", 'b', 1.0f, 1.4f, 2.7f},
+    {"creeper", "creeper", "creeper/creeper", 'q', 1.0f, 0.6f, 1.7f},
+    {"pig", "pig", "pig/pig_temperate", 'q', 1.0f, 0.9f, 0.9f},
+    {"cow", "cow", "cow/cow_temperate", 'q', 1.0f, 0.9f, 1.4f},
+    {"mooshroom", "mooshroom", "cow/mooshroom_red", 'q', 1.0f, 0.9f, 1.4f},
+    {"sheep", "sheep", "sheep/sheep", 'q', 1.0f, 0.9f, 1.3f},
+    {"wolf", "wolf", "wolf/wolf", 'q', 1.0f, 0.6f, 0.85f},
+    {"horse", "horse", "horse/horse_brown", 'q', 1.0f, 1.3964844f, 1.6f},
+    {"donkey", "donkey", "horse/donkey", 'q', 1.0f, 1.3964844f, 1.5f},
+    {"mule", "mule", "horse/mule", 'q', 1.0f, 1.3964844f, 1.6f},
+    {"goat", "goat", "goat/goat", 'q', 1.0f, 0.9f, 1.3f},
+    {"fox", "fox", "fox/fox", 'q', 1.0f, 0.6f, 0.7f},
+    {"ocelot", "ocelot", "cat/ocelot", 'q', 1.0f, 0.6f, 0.7f},
+    {"cat", "cat", "cat/cat_tabby", 'q', 1.0f, 0.6f, 0.7f},
+    {"llama", "llama", "llama/llama_brown", 'q', 1.0f, 0.9f, 1.87f},
+    {"polar_bear", "polar_bear", "bear/polarbear", 'q', 1.0f, 1.4f, 1.4f},
+    {"panda", "panda", "panda/panda", 'q', 1.0f, 1.3f, 1.25f},
+    {"hoglin", "hoglin", "hoglin/hoglin", 'q', 1.0f, 1.3964844f, 1.4f},
+    {"chicken", "chicken", "chicken/chicken_temperate", 'b', 1.0f, 0.4f, 0.7f},
+    {"rabbit", "rabbit", "rabbit/rabbit_brown", 's', 1.0f, 0.4f, 0.5f},
+    {"spider", "spider", "spider/spider", 's', 1.0f, 1.4f, 0.9f},
+    {"cave_spider", "cave_spider", "spider/cave_spider", 's', 0.7f, 0.7f, 0.5f},
+    {"bat", "bat", "bat/bat", 's', 1.0f, 0.5f, 0.9f},
+    {"blaze", "blaze", "blaze/blaze", 's', 1.0f, 0.6f, 1.8f},
+    {"ghast", "ghast", "ghast/ghast", 's', 4.5f, 4.0f, 4.0f},
+    {"snow_golem", "snow_golem", "snow_golem/snow_golem", 's', 1.0f, 0.7f, 1.9f},
+    {"silverfish", "silverfish", "silverfish/silverfish", 's', 1.0f, 0.4f, 0.3f},
+    {"endermite", "endermite", "endermite/endermite", 's', 1.0f, 0.4f, 0.3f},
+    {"slime", "slime", "slime/slime", 's', 1.0f, 2.04f, 2.04f},
+    {"squid", "squid", "squid/squid", 's', 1.0f, 0.8f, 0.8f},
+    {"turtle", "turtle", "turtle/turtle", 's', 1.0f, 1.2f, 0.4f},
+    {"parrot", "parrot", "parrot/parrot_red_blue", 's', 1.0f, 0.5f, 0.9f},
+    {"bee", "bee", "bee/bee", 's', 1.0f, 0.7f, 0.6f},
+    {"strider", "strider", "strider/strider", 's', 1.0f, 0.9f, 1.7f},
+    {"phantom", "phantom", "phantom/phantom", 's', 1.0f, 0.9f, 0.5f},
+    {"warden", "warden", "warden/warden", 'b', 1.0f, 0.9f, 2.9f},
+    {"oak_boat", "boat/oak", "boat/oak", 'B', 1.0f, 1.375f, 0.5625f},
+    {"oak_chest_boat", "chest_boat/oak", "chest_boat/oak", 'B', 1.0f, 1.375f, 0.5625f},
+    {"spruce_boat", "boat/spruce", "boat/spruce", 'B', 1.0f, 1.375f, 0.5625f},
+    {"spruce_chest_boat", "chest_boat/spruce", "chest_boat/spruce", 'B', 1.0f, 1.375f, 0.5625f},
+    {"birch_boat", "boat/birch", "boat/birch", 'B', 1.0f, 1.375f, 0.5625f},
+    {"birch_chest_boat", "chest_boat/birch", "chest_boat/birch", 'B', 1.0f, 1.375f, 0.5625f},
+    {"jungle_boat", "boat/jungle", "boat/jungle", 'B', 1.0f, 1.375f, 0.5625f},
+    {"jungle_chest_boat", "chest_boat/jungle", "chest_boat/jungle", 'B', 1.0f, 1.375f, 0.5625f},
+    {"acacia_boat", "boat/acacia", "boat/acacia", 'B', 1.0f, 1.375f, 0.5625f},
+    {"acacia_chest_boat", "chest_boat/acacia", "chest_boat/acacia", 'B', 1.0f, 1.375f, 0.5625f},
+    {"dark_oak_boat", "boat/dark_oak", "boat/dark_oak", 'B', 1.0f, 1.375f, 0.5625f},
+    {"dark_oak_chest_boat", "chest_boat/dark_oak", "chest_boat/dark_oak", 'B', 1.0f, 1.375f, 0.5625f},
+    {"mangrove_boat", "boat/mangrove", "boat/mangrove", 'B', 1.0f, 1.375f, 0.5625f},
+    {"mangrove_chest_boat", "chest_boat/mangrove", "chest_boat/mangrove", 'B', 1.0f, 1.375f, 0.5625f},
+    {"cherry_boat", "boat/cherry", "boat/cherry", 'B', 1.0f, 1.375f, 0.5625f},
+    {"cherry_chest_boat", "chest_boat/cherry", "chest_boat/cherry", 'B', 1.0f, 1.375f, 0.5625f},
+    {"pale_oak_boat", "boat/pale_oak", "boat/pale_oak", 'B', 1.0f, 1.375f, 0.5625f},
+    {"pale_oak_chest_boat", "chest_boat/pale_oak", "chest_boat/pale_oak", 'B', 1.0f, 1.375f, 0.5625f},
+    {"bamboo_raft", "boat/bamboo", "boat/bamboo", 'B', 1.0f, 1.375f, 0.5625f},
+    {"bamboo_chest_raft", "chest_boat/bamboo", "chest_boat/bamboo", 'B', 1.0f, 1.375f, 0.5625f},
+    {"arrow", "arrow", "projectiles/arrow", 'A', 1.0f, 0.5f, 0.5f},
+    {"spectral_arrow", "arrow", "projectiles/arrow_spectral", 'A', 1.0f, 0.5f, 0.5f},
 };
 
 const MobSpec* specOf(const std::string& type) {
@@ -105,6 +130,19 @@ void copyPose(EntityPart& dst, EntityPart& whole) {
 }  // namespace
 
 bool MobRenderer::supports(const std::string& type) { return specOf(type) != nullptr; }
+
+bool MobRenderer::sizeOf(const std::string& type, float& width, float& height) {
+    const MobSpec* spec = specOf(type);
+    if (spec == nullptr) return false;
+    width = spec->width;
+    height = spec->height;
+    return true;
+}
+
+bool MobRenderer::attackable(const std::string& type) {
+    const MobSpec* spec = specOf(type);
+    return spec != nullptr && spec->kind != 'A';  // (an arrow in the air is not something to hit)
+}
 
 std::vector<std::string> MobRenderer::supportedTypes() {
     std::vector<std::string> out;
@@ -175,9 +213,11 @@ void MobRenderer::render(const Matrix4f& viewProj, const std::array<double, 3>& 
     if (!loaded.ok) return;
     EntityPart model = loaded.model;  // posed on a copy
     const float p = pose.walkPosition * 0.6662f, s = pose.walkSpeed;
-    if (EntityPart* head = model.find("head")) {
-        head->rotation[1] = pose.headYaw * kDegrees;
-        head->rotation[0] = pose.headPitch * kDegrees;
+    if (loaded.kind != 'A' && loaded.kind != 'B') {
+        if (EntityPart* head = model.find("head")) {
+            head->rotation[1] = pose.headYaw * kDegrees;
+            head->rotation[0] = pose.headPitch * kDegrees;
+        }
     }
     const float swingA = std::cos(p) * 1.4f * s, swingB = std::cos(p + kPi) * 1.4f * s;
     if (loaded.kind == 'q') {  // QuadrupedModel.setupAnim: the legs on a diagonal go together
@@ -207,10 +247,18 @@ void MobRenderer::render(const Matrix4f& viewProj, const std::array<double, 3>& 
             if (leftArm != nullptr) leftArm->rotation[0] = std::cos(p) * 2.0f * s * 0.5f;
         }
     }
-    // LivingEntityRenderer: to the mob's place, turned about Y, the model's y-down mirrored space flipped, dropped by 1.501 (and the size of the type).
     const double k = static_cast<double>(loaded.scale);
-    Xf entity = mul(scaling({-k, -k, k}), translation({0.0, -1.501, 0.0}));
-    entity = mul(rotY((180.0 - static_cast<double>(pose.bodyYaw)) * static_cast<double>(kDegrees)), entity);
+    Xf entity;
+    if (loaded.kind == 'B') {  // BoatRenderer: up by 0.375, turned about Y, the model's y-down mirrored space flipped, and a quarter turn
+        entity = mul(scaling({-1.0, -1.0, 1.0}), rotY(90.0 * static_cast<double>(kDegrees)));
+        entity = mul(rotY((180.0 - static_cast<double>(pose.bodyYaw)) * static_cast<double>(kDegrees)), entity);
+        entity = mul(translation({0.0, 0.375, 0.0}), entity);
+    } else if (loaded.kind == 'A') {  // ArrowRenderer: turned about Y (the yaw less a quarter turn) and tilted about Z (the pitch, up being positive): its length is along its flight
+        entity = mul(rotY((static_cast<double>(pose.bodyYaw) - 90.0) * static_cast<double>(kDegrees)), rotZ(static_cast<double>(pose.headPitch) * static_cast<double>(kDegrees)));
+    } else {  // LivingEntityRenderer: turned about Y, the model's y-down mirrored space flipped, dropped by 1.501 (and the size of the type)
+        entity = mul(scaling({-k, -k, k}), translation({0.0, -1.501, 0.0}));
+        entity = mul(rotY((180.0 - static_cast<double>(pose.bodyYaw)) * static_cast<double>(kDegrees)), entity);
+    }
     entity = mul(translation({pose.position[0] - cam[0], pose.position[1] - cam[1], pose.position[2] - cam[2]}), entity);
     const std::array<bool, 7> all = {true, true, true, true, true, true, true};
     std::vector<Vertex> vertices;
@@ -242,6 +290,59 @@ void MobRenderer::render(const Matrix4f& viewProj, const std::array<double, 3>& 
         collect(fleece, Xf{}, entity, all, list);
         draw(list, *loaded.woolTexture, 0.976f, 1.0f, 0.996f);  // (white wool: DyeColor.WHITE's 0xF9FFFE)
     }
+    gl::BindVertexArray(0);
+}
+
+// A painting: the picture on a flat square of the painting's size, with the back picture on the other side. `position` is the middle of it (where the entity is), `yaw` the way it
+// faces (0 faces south, a quarter turn at a time as the game turns paintings). Nothing is drawn for a picture the game's files do not have.
+void MobRenderer::renderPainting(const Matrix4f& viewProj, const std::array<double, 3>& cam, const std::string& name, int widthBlocks, int heightBlocks, const std::array<double, 3>& position,
+                                 float yaw, const std::array<float, 3>& light) {
+    const auto textureOf = [&](const std::string& file) -> Texture2D* {
+        auto it = paintingTextures_.find(file);
+        if (it == paintingTextures_.end()) {
+            std::unique_ptr<Texture2D> texture;
+            const auto bytes = resources_->readBytes(ResourceLocation("minecraft", "textures/painting/" + file + ".png"));
+            if (const auto image = bytes ? decodePng(*bytes) : std::nullopt) texture = std::make_unique<Texture2D>(*image, FilterMode::Nearest);
+            it = paintingTextures_.emplace(file, std::move(texture)).first;
+        }
+        return it->second.get();
+    };
+    Texture2D* front = textureOf(name);
+    if (front == nullptr || widthBlocks <= 0 || heightBlocks <= 0) return;
+    Texture2D* back = textureOf("back");
+    const double radians = static_cast<double>(yaw) * static_cast<double>(kDegrees);
+    const double fx = -std::sin(radians), fz = std::cos(radians);   // the way it faces
+    const double rx = std::cos(radians), rz = std::sin(radians);    // to the right of someone who looks at it
+    const double hw = widthBlocks / 2.0, hh = heightBlocks / 2.0;
+    const double cx = position[0] - cam[0], cy = position[1] - cam[1], cz = position[2] - cam[2];
+    const auto quad = [&](double depth, bool flip) {
+        std::vector<Vertex> v;
+        const double ox = cx + fx * depth, oz = cz + fz * depth;
+        const auto corner = [&](double sx, double sy, float u, float vv) {
+            const double s = flip ? -sx : sx;
+            return Vertex{static_cast<float>(ox + rx * s * hw), static_cast<float>(cy + sy * hh), static_cast<float>(oz + rz * s * hw), flip ? 1.0f - u : u, vv, 1.0f};
+        };
+        const Vertex a = corner(-1, 1, 0.0f, 0.0f), b = corner(1, 1, 1.0f, 0.0f), c = corner(1, -1, 1.0f, 1.0f), d = corner(-1, -1, 0.0f, 1.0f);
+        v.insert(v.end(), {a, b, c, a, c, d});
+        return v;
+    };
+    gl::Enable(gl::DEPTH_TEST);
+    gl::Disable(gl::CULL_FACE);
+    gl::Disable(gl::BLEND);
+    shader_.use();
+    gl::UniformMatrix4fv(uProj_, 1, 0, viewProj.m.data());
+    gl::Uniform3f(uLight_, light[0], light[1], light[2]);
+    gl::Uniform1i(uSkin_, 0);
+    gl::Uniform3f(uTint_, 1.0f, 1.0f, 1.0f);
+    gl::BindVertexArray(vao_);
+    gl::BindBuffer(gl::ARRAY_BUFFER, vbo_);
+    const auto draw = [&](const std::vector<Vertex>& list, const Texture2D& texture) {
+        texture.bind(0);
+        gl::BufferData(gl::ARRAY_BUFFER, static_cast<gl::GLsizeiptr>(list.size() * sizeof(Vertex)), list.data(), gl::STREAM_DRAW);
+        gl::DrawArrays(gl::TRIANGLES, 0, static_cast<gl::GLsizei>(list.size()));
+    };
+    draw(quad(0.03125, false), *front);                       // the picture, on the front face (1/32 of a block out)
+    if (back != nullptr) draw(quad(-0.03125, true), *back);   // the back
     gl::BindVertexArray(0);
 }
 

@@ -51,6 +51,9 @@ struct TabEntry {
 struct RemotePlayer {
     int entityId = 0;
     int type = -1;  // the entity type: a player's (isPlayerEntity), or a mob's that was asked to be followed (setMobTypes)
+    double vx = 0, vy = 0, vz = 0;  // its velocity, per tick (a projectile flies by it between the server's words)
+    int data = 0;                   // the data of the add packet (a painting's direction)
+    int variant = -1;               // a painting's variant: its number in the server's registry
     Uuid id{};
     double x = 0, y = 0, z = 0;
     double xo = 0, yo = 0, zo = 0;
@@ -70,6 +73,13 @@ struct RemoteItem {
     double xo = 0, yo = 0, zo = 0;
     int age = 0;  // ticks since it appeared (it bobs and spins by this)
     bool onGround = false;
+};
+
+// A kind of painting the server's registry has: the name of its picture ("minecraft:kebab") and its size in blocks.
+struct PaintingVariantInfo {
+    std::string asset;
+    int width = 1;
+    int height = 1;
 };
 
 // A scoreboard team: its prefix, suffix and colour go round the names of its members (the name tags and the player list).
@@ -139,6 +149,9 @@ public:
     // The entity types that are followed besides players and items, by their number in the registry, with their names ("zombie"): mobs that can be drawn.
     void setMobTypes(std::map<int, std::string> types) { mobTypes_ = std::move(types); }
     [[nodiscard]] bool isPlayerEntity(const RemotePlayer& e) const { return e.type == playerType_; }
+    // The entity types that fly (arrows, thrown things) with their gravity and drag per tick: between the server's positions they go by their velocity, as on the real client.
+    void setProjectileTypes(std::map<int, std::pair<float, float>> physics) { projectilePhysics_ = std::move(physics); }
+    [[nodiscard]] const PaintingVariantInfo* paintingVariant(int id) const { return id >= 0 && static_cast<std::size_t>(id) < paintingVariants_.size() ? &paintingVariants_[static_cast<std::size_t>(id)] : nullptr; }
     [[nodiscard]] const std::string* mobName(int type) const {
         const auto it = mobTypes_.find(type);
         return it == mobTypes_.end() ? nullptr : &it->second;
@@ -213,6 +226,8 @@ private:
     int itemType_ = -1;    // and of an item
     std::map<int, std::string> mobTypes_;
     std::map<int, RemoteItem> items_;
+    std::map<int, std::pair<float, float>> projectilePhysics_;
+    std::vector<PaintingVariantInfo> paintingVariants_;
     ComponentIds componentIds_;
     SkinFetcher skins_;
     std::map<Uuid, SkinInfo> skinInfos_;
@@ -233,6 +248,7 @@ private:
     Uuid chatSessionId_{};
     int chatIndex_ = 0;  // the number of the next signed message in the chain
     LastSeenTracker lastSeen_;  // the signed messages of others that were seen (every message of ours says which)
+    ServerCommands commands_;  // the server's command tree: which arguments of a command are messages that must be signed
     std::map<int, int> containerStates_;  // the state of each menu as the server last said it (a click must carry it)
     std::vector<std::string> soundNames_;
     int sequence_ = 0;
@@ -248,4 +264,3 @@ private:
 };
 
 }  // namespace falcon::net
-    ServerCommands commands_;  // the server's command tree: which arguments of a command are messages that must be signed
