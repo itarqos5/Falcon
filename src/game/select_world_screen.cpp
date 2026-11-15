@@ -223,14 +223,11 @@ void SelectWorldScreen::pollScan() {
         loaded_ = true;
         if (levels_.empty()) {
             // No worlds at all: like the game, go straight to Create New World. Cancelling it leaves for the
-            // title screen (this screen is replaced, not kept underneath); making a world plays it, with this list
-            // underneath for when the player leaves it.
+            // title screen (this screen is replaced, not kept underneath); making a world plays it.
             navigator_.pop();
-            navigator_.push(std::make_unique<CreateWorldScreen>(
-                navigator_, services_, [&navigator = navigator_, &services = services_](const std::string& folder) {
-                    navigator.push(std::make_unique<SelectWorldScreen>(navigator, services));
-                    if (services.startWorld) services.startWorld(folder);
-                }));
+            navigator_.push(std::make_unique<CreateWorldScreen>(navigator_, services_, [&services = services_](const std::string& folder) {
+                if (services.startWorld) services.startWorld(folder);
+            }));
             return;
         }
     }

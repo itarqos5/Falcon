@@ -618,9 +618,12 @@ int Client::run() {
             }
         }
         // Opening a world (Play, or --play): the session starts loading and the in-game screen goes on top.
+        // A screen that asked to be closed and to start a world at once (Create New World) has a pop waiting: it is done before the world's screen goes on, or it would take that one off.
+        bool appliedEarly = false;
         if (worldToStart) {
             const std::string folder = *worldToStart;
             worldToStart.reset();
+            appliedEarly = navigator.apply(screens);
             auto levelInfo = readLevelInfo(gameDir / "saves" / pathFromUtf8(folder));
             if (levelInfo && options_.gameType) levelInfo->gameType = *options_.gameType;  // --gamemode
             if (levelInfo && options_.cheats) levelInfo->allowCommands = true;               // --cheats
@@ -660,7 +663,7 @@ int Client::run() {
         if (steering && !window.background() && !window.focused()) screens.back()->keyPressed(256, 0);
 
         // Screen changes requested by buttons / Escape; a new top screen is laid out first.
-        const bool screenChanged = navigator.apply(screens);
+        const bool screenChanged = navigator.apply(screens) || appliedEarly;
         if (screenChanged) saveOptions();  // leaving a settings screen saves the settings
         panorama.setSpeed(static_cast<float>(gameOptions.panoramaSpeed));
         if (windowResized || screenChanged || resourcesReloaded) screens.back()->resize(guiWidth, guiHeight);
