@@ -4,6 +4,7 @@
 
 #include "falcon/assets/asset_locator.hpp"
 #include "falcon/assets/resource_manager.hpp"
+#include "falcon/game/command_tree.hpp"
 #include "falcon/game/creative_inventory.hpp"
 #include "falcon/game/creative_tabs.hpp"
 #include "falcon/game/hotbar_hud.hpp"
@@ -893,6 +894,71 @@ void test_block_support_real(const std::filesystem::path& dataDir, const BlockRe
     CHECK(support->afterNeighborChange(doorLower, 0, 1, 0, at) == doorLower && support->afterNeighborChange(doorUpper, 0, 2, 0, at) == doorUpper);
 }
 
+// The game's command tree: what parses, what is suggested, what the usage says.
+void test_commands_real(const std::filesystem::path& dataDir, const BlockRegistry& blocks) {
+    std::string error;
+    const auto tree = CommandTree::loadFromGameData(dataDir, error);
+    CHECK(tree != nullptr);
+    if (!tree) {
+        std::printf("  commands failed: %s\n", error.c_str());
+        return;
+    }
+    std::vector<std::string> itemNames, blockNames;
+    for (const ItemType& t : itemRegistry().items()) itemNames.push_back("minecraft:" + t.name);
+    for (const BlockType& t : blocks.blocks()) blockNames.push_back("minecraft:" + t.name);
+    CommandContext cheats;
+    cheats.playerName = "Steve";
+    cheats.cheats = true;
+    cheats.names = [&](const std::string& registry) -> const std::vector<std::string>& {
+        static const std::vector<std::string> none;
+        return registry == "minecraft:item" ? itemNames : registry == "minecraft:block" ? blockNames : none;
+    };
+    CommandContext plain = cheats;
+    plain.cheats = false;
+    const auto parses = [&](const char* text) { return parseCommand(*tree, cheats, text).complete; };
+    CHECK(parses("give @s diamond 2") && parses("give Steve minecraft:diamond_sword") && parses("gamemode creative") && parses("kill") && parses("seed"));
+    CHECK(parses("tp @s ~ ~ ~") && parses("tp ~ 70 ~") && parses("teleport @s @a") && parses("setblock ~ ~-1 ~ oak_stairs[facing=east]"));
+    CHECK(parses("fill 0 0 0 1 1 1 stone replace dirt") && parses("fill ~ ~ ~ ~5 ~5 ~5 glass hollow") && parses("execute as @a run say hi") && parses("gamerule random_tick_speed 0"));
+    CHECK(parses("summon tnt ~ ~ ~ {fuse:20}") && parses("xp add @s 5 levels") && parses("say hello  there"));
+    CHECK(!parses("give @s") && !parses("give") && !parses("gamemode") && !parses("seed ") && !parses("nonsense 1 2"));
+    const CommandParse badMode = parseCommand(*tree, cheats, "gamemode foo");
+    CHECK(!badMode.complete && badMode.error == "Invalid game mode 'foo'" && badMode.errorAt == 9);
+    const CommandParse badItem = parseCommand(*tree, cheats, "give @s notanitem");
+    CHECK(!badItem.complete && badItem.error == "Unknown item 'minecraft:notanitem'");
+    const CommandParse badCount = parseCommand(*tree, cheats, "give @s stone abc");
+    CHECK(!badCount.complete && badCount.error == "Expected integer");
+    CHECK(parseCommand(*tree, cheats, "nonsense").error == "command.unknown.command");
+    CHECK(parseCommand(*tree, cheats, "give @s").error == "command.unknown.command" && parseCommand(*tree, cheats, "give @s").errorAt == 7);
+    // Without cheats only the commands anyone may use are there.
+    CHECK(!parseCommand(*tree, plain, "give @s stone").complete && parseCommand(*tree, plain, "help").complete);
+    // The parts of a command, for the colours and for running it.
+    const CommandParse give = parseCommand(*tree, cheats, "give @s stone 5");
+    CHECK(give.parts.size() == 4 && give.parts[0].node->name == "give" && !give.parts[0].node->isArgument() && give.parts[1].node->name == "targets" && give.parts[3].node->name == "count");
+    CHECK(give.parts[3].start == 14 && give.parts[3].end == 15);
+    // Suggestions: the words of a node, the values an argument knows, the rest of a name.
+    const auto has = [](const CommandSuggestions& s, const char* what) { return std::find(s.list.begin(), s.list.end(), what) != s.list.end(); };
+    const CommandSuggestions root = suggestCommands(*tree, cheats, "");
+    CHECK(has(root, "give") && has(root, "gamemode") && has(root, "tp") && has(root, "help") && root.start == 0);
+    CHECK(!has(suggestCommands(*tree, plain, ""), "give") && has(suggestCommands(*tree, plain, ""), "help"));
+    CHECK(suggestCommands(*tree, cheats, "gamem").list == std::vector<std::string>{"gamemode"} && suggestCommands(*tree, cheats, "gamem").start == 0);
+    const CommandSuggestions modes = suggestCommands(*tree, cheats, "gamemode c");
+    CHECK(modes.list == std::vector<std::string>{"creative"} && modes.start == 9);
+    const CommandSuggestions diamonds = suggestCommands(*tree, cheats, "give @s dia");
+    CHECK(has(diamonds, "minecraft:diamond") && has(diamonds, "minecraft:diamond_pickaxe") && !has(diamonds, "minecraft:stone") && diamonds.start == 8);
+    CHECK(has(suggestCommands(*tree, cheats, "give @s pick"), "minecraft:iron_pickaxe"));  // (the start of any word of the name)
+    CHECK(has(suggestCommands(*tree, cheats, "setblock ~ ~ "), "~") && has(suggestCommands(*tree, cheats, "setblock ~ ~ ~ gla"), "minecraft:glass"));
+    const CommandSuggestions tp = suggestCommands(*tree, cheats, "tp @s ");
+    CHECK(has(tp, "@a") && has(tp, "~") && has(tp, "Steve"));  // an entity to go to, or a position
+    CHECK(has(suggestCommands(*tree, cheats, "fill ~ ~ ~ ~ ~ ~ stone "), "replace") && has(suggestCommands(*tree, cheats, "execute "), "as"));
+    CHECK(has(suggestCommands(*tree, cheats, "gamerule random"), "random_tick_speed") && has(suggestCommands(*tree, cheats, "gamerule keep_inventory "), "true"));
+    // Usage: what could come next.
+    const auto usage = commandUsage(*tree, cheats, "give @s diamond ");
+    CHECK(usage.size() == 1 && usage[0] == "<count>");
+    CHECK(commandUsage(*tree, cheats, "give ")[0] == "<item> [<count>]" || commandUsage(*tree, cheats, "give @s ")[0] == "<item> [<count>]");
+    const CommandNode* giveNode = tree->resolve({"give"});
+    CHECK(giveNode != nullptr && commandUsageLine(*tree, *giveNode, true) == "/give <targets> <item> [<count>]");
+}
+
 // Blocks that fall, burn and explode, with the game's own tables: which blocks do what, and a small world in which they do it.
 void test_block_physics_real(const std::filesystem::path& dataDir, const BlockRegistry& blocks) {
     std::string error;
@@ -1277,6 +1343,7 @@ void test_item_registry_and_recipes_real(const std::filesystem::path& dataDir) {
     test_block_support_real(dataDir, *blocks);
     test_mining_real(dataDir, *blocks, *items);
     test_block_physics_real(dataDir, *blocks);
+    test_commands_real(dataDir, *blocks);
     test_player_preview_real(dataDir / "assets");
     test_item_names_real(dataDir / "assets");
     test_item_icons_real(dataDir / "assets", blocks);

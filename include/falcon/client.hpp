@@ -70,6 +70,7 @@ struct ClientOptions {
     std::vector<ScriptedMouse> mouseEvents;            // --press/--release X,Y,BUTTON@S and --move X,Y@S
     bool holdShift = false;                            // --shift: shift counts as held (for a shift-click)
     std::vector<std::string> give;                     // --give ITEM[:COUNT] (repeatable): put items in the inventory
+    bool cheats = false;                               // --cheats: commands allowed whatever the world says
     std::optional<int> gameType;                       // --gamemode survival|creative: overrides the world's game mode
     std::optional<double> dropFrom;                    // --drop-from BLOCKS: once the world is ready the player is lifted that far and falls (to test fall damage)
     std::optional<std::array<float, 4>> vitals;        // --vitals HEALTH,FOOD,LEVEL,PROGRESS: what the survival bars show (health in half hearts: 20 is full)

@@ -303,6 +303,8 @@ add_library(falcon_core
     src/game/gamemode_switcher_screen.cpp
     src/game/block_placement.cpp
     src/game/mining.cpp
+    src/game/command_tree.cpp
+    src/game/game_commands.cpp
     src/game/creative_tabs.cpp
     src/game/creative_inventory.cpp
     src/game/item_names.cpp

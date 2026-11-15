@@ -293,6 +293,7 @@ std::string usageText() {
            "  --shift                 Treat shift as held (a shift-click)\n"
            "  --give <item>[:<n>]     Put items in the inventory once a world is open (repeatable)\n"
            "  --gamemode <mode>       survival, creative, adventure or spectator, whatever the world says\n"
+           "  --cheats                allow commands whatever the world says\n"
            "  --drop-from <blocks>    Lift the player that far once the world is ready and let them fall (to test fall damage)\n"
            "  --vitals <h>,<f>,<l>,<p>  What the survival bars show: health (20 = full), food (20), level, progress 0..1 (for screenshots)\n"
            "  --click <X>,<Y>@<s>     Inject a left click at that window position after <s> seconds\n"
@@ -375,6 +376,8 @@ ClientOptions parseOptions(int argc, const char* const* argv) {
                 pos = comma == std::string::npos ? v.size() : comma + 1;
             }
             o.camera = cam;
+        } else if (arg == "--cheats") {
+            o.cheats = true;
         } else if (arg == "--edit") {
             o.edits.push_back(nextValue(i, argc, argv));
         } else if (arg == "--bench") {
@@ -941,6 +944,7 @@ int Client::run() {
             worldToStart.reset();
             auto levelInfo = readLevelInfo(gameDir / "saves" / pathFromUtf8(folder));
             if (levelInfo && options_.gameType) levelInfo->gameType = *options_.gameType;  // --gamemode
+            if (levelInfo && options_.cheats) levelInfo->allowCommands = true;               // --cheats
             if (!levelInfo) {
                 std::printf("[falcon] cannot open world '%s': no readable level.dat\n", folder.c_str());
             } else if (session == nullptr) {

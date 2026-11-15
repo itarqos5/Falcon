@@ -2,6 +2,7 @@
 
 #include "falcon/assets/resource_manager.hpp"
 #include "falcon/game/chat.hpp"
+#include "falcon/game/command_tree.hpp"
 #include "falcon/game/screen_services.hpp"
 #include "falcon/game/hotbar_hud.hpp"
 #include "falcon/game/mining.hpp"
@@ -32,6 +33,7 @@
 #include "falcon/world/loot.hpp"
 
 #include <array>
+#include <map>
 #include <filesystem>
 #include <memory>
 #include <optional>
@@ -50,6 +52,8 @@ namespace falcon {
 // mobs, light levels or day and night. The world is saved when it is left (see save()). The player is simulated in game ticks, 20 a
 // second (see Player); between ticks the camera shows the interpolated position. A paused game does not tick.
 class GameSession {
+    friend struct CommandRunner;
+
 public:
     GameSession(ScreenServices& services, const ResourceManager& resources, Window& window, const LevelInfo& info);
     // Leaving the world (quitting to the title, closing the window) saves it.
@@ -78,6 +82,10 @@ public:
     [[nodiscard]] ChatComponent& chat() { return chat_; }
     // Handles a line the player typed into the chat: remembers it, then shows it (a "/..." is treated as a command).
     void chatInput(const std::string& text);
+    // The game's commands (null when its command list is missing), and what the argument parsers and the suggestions need to know.
+    [[nodiscard]] const CommandTree* commandTree() const { return commands_.get(); }
+    [[nodiscard]] CommandContext commandContext() const;
+    [[nodiscard]] bool gameRuleOn(const std::string& rule) const;
     void addChatMessage(const std::string& text);
 
     // Input events the in-game screen passes on (a key was pressed, with the GLFW modifier bits; a mouse button; the wheel turned).
@@ -222,6 +230,9 @@ private:
     void digSurvival(double dt, bool fresh);   // MultiPlayerGameMode.startDestroyBlock / continueDestroyBlock; `fresh`: the button went down this frame
     void stopDigging();
     void damageHeldTool(int amount);
+    void runCommand(const std::string& text);  // a command typed in the chat, without its "/"
+    void applyGameRule(const std::string& rule, const std::string& value);
+    void tickBurning();
     // A flint and steel or a fire charge used on a block (TNT goes off, a campfire or candle lights, else a fire starts next to it). True if it did something.
     bool useFireStarter(const std::string& item, const BlockHit& hit);
     void interact(double dt, bool active);
@@ -326,6 +337,11 @@ private:
     double digClock_ = 0.0;
     std::shared_ptr<const BlockBehaviours> behaviours_;  // which blocks fall, burn or explode (null: the game files are missing)
     std::unique_ptr<BlockPhysics> physics_;              // falling blocks, fire, TNT
+    std::shared_ptr<const CommandTree> commands_;
+    mutable std::map<std::string, std::vector<std::string>> registryNames_;  // the ids of a registry, for the argument checks and the suggestions
+    std::map<std::string, std::string> gameRules_;                           // game rules set by /gamerule (the others have their defaults)
+    int difficulty_ = 2;
+    int burnTicks_ = 0;  // how long the player is still on fire
     std::unique_ptr<BlockTags> blockTags_;
     std::unique_ptr<MiningRules> mining_;
     std::unique_ptr<BlockLoot> loot_;

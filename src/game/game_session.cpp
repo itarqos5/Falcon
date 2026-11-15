@@ -204,6 +204,7 @@ GameSession::GameSession(ScreenServices& services, const ResourceManager& resour
                     playWorldSound(event, SoundSource::Blocks, volume, pitch, &at);
                 };
                 host.drops = [this](Block b) {
+                    if (!gameRuleOn("block_drops")) return std::vector<ItemStack>{};
                     std::mt19937 random(rng_());
                     return loot_ ? loot_->drops(b, ItemStack(), random) : std::vector<ItemStack>{};
                 };
@@ -225,6 +226,11 @@ GameSession::GameSession(ScreenServices& services, const ResourceManager& resour
                 physics_ = std::make_unique<BlockPhysics>(renderer_.level(), behaviours_, itemEntities_, std::move(host), static_cast<std::uint32_t>(rng_()));
                 if (const char* speed = std::getenv("FALCON_RANDOM_TICK_SPEED")) physics_->setRandomTickSpeed(std::atoi(speed));  // (tests: lava starts fires in seconds)
             }
+        }
+        {
+            std::string commandError;
+            commands_ = CommandTree::loadFromGameData(resources.dataRoot(), commandError);
+            if (!commands_) std::printf("[falcon] commands: %s (the chat cannot run commands)\n", commandError.c_str());
         }
         blockTags_ = std::make_unique<BlockTags>(resources.dataRoot() / "data" / "minecraft" / "tags" / "block", *registry_);
         mining_ = std::make_unique<MiningRules>(*registry_, *blockTags_);
@@ -477,6 +483,7 @@ void GameSession::tickPlayer(double seconds, bool steering) {
             }
         }
         tickHealth();
+        tickBurning();
         if (ready_) itemEntities_.tick(renderer_.level());
         // The water that flows: its updates that are due this tick.
         fluids_.tick(renderer_.level(), [this](int bx, int by, int bz, Block b) { return renderer_.setBlock(bx, by, bz, b); });
@@ -549,7 +556,7 @@ void GameSession::breakBlockAt(int x, int y, int z, bool survival) {
             playBlockSound(broken, "break", breakOrPlaceMix(type.soundVolume, type.soundPitch), SoundSource::Blocks, &where);
         }
     }
-    if (!survival) return;
+    if (!survival || !gameRuleOn("block_drops")) return;
     const ItemStack tool = inventory_.selectedItem();
     collectDrop(broken, x, y, z, tool, !mining_ || mining_->correctForDrops(tool, broken));
     // Item.mineBlock: a tool wears by one use (more for some) from a block that was not instant to dig.
@@ -748,6 +755,7 @@ void GameSession::splash(double vx, double vy, double vz) {
 
 // LivingEntity.causeFallDamage: the cry for the size of the fall, the block's fall sound, then the hurt itself.
 void GameSession::fallDamage(int damage) {
+    if (!gameRuleOn("fall_damage")) return;
     playWorldSound(fallDamageEvent(damage), SoundSource::Players, 1.0f, 1.0f);
     const Block under = renderer_.level().block(static_cast<int>(std::floor(player_.x)), static_cast<int>(std::floor(player_.y - 0.2)), static_cast<int>(std::floor(player_.z)));
     if (!registry_->isAir(under)) {
@@ -783,8 +791,8 @@ void GameSession::die() {
     dead_ = true;
     deathRequested_ = true;
     playWorldSound("entity.player.death", SoundSource::Players, 1.0f, 1.0f + (randomFloat() - randomFloat()) * 0.2f);
-    // Inventory.dropAll: everything the player carried is scattered where they died.
-    for (int slot = 0; slot < Inventory::kSize; ++slot) {
+    // Inventory.dropAll: everything the player carried is scattered where they died (unless the game rule keep_inventory is on).
+    for (int slot = 0; slot < Inventory::kSize && !gameRuleOn("keep_inventory"); ++slot) {
         ItemStack& stack = inventory_.item(slot);
         if (stack.isEmpty()) continue;
         dropFromPlayer(stack, true);
@@ -813,13 +821,53 @@ void GameSession::tickHealth() {
     if (invulnerableTime_ > 0) --invulnerableTime_;
     if (hurtTime_ > 0) --hurtTime_;
     if (!survivalBars() || dead_) return;
-    if (vitals_.health > 0.0f && vitals_.health < vitals_.maxHealth && vitals_.food >= 18) {
+    if (vitals_.health > 0.0f && vitals_.health < vitals_.maxHealth && vitals_.food >= 18 && gameRuleOn("natural_health_regeneration")) {
         if (++regenTimer_ >= 80) {
             vitals_.health = std::min(vitals_.maxHealth, vitals_.health + 1.0f);
             regenTimer_ = 0;
         }
     } else {
         regenTimer_ = 0;
+    }
+}
+
+// Fire and lava: standing in a fire burns for 8 seconds (1 damage a second, 2 in soul fire), lava for 15 (4 a second); water puts it out. No flames are drawn on the
+// screen yet (the burning overlay).
+void GameSession::tickBurning() {
+    if (!survivalBars() || dead_) {
+        burnTicks_ = 0;
+        return;
+    }
+    const Aabb box = player_.boundingBox();
+    bool inFire = false, inSoulFire = false;
+    if (behaviours_) {
+        for (int y = static_cast<int>(std::floor(box.minY)); y <= static_cast<int>(std::floor(box.maxY - 1.0E-7)); ++y) {
+            for (int x = static_cast<int>(std::floor(box.minX)); x <= static_cast<int>(std::floor(box.maxX - 1.0E-7)); ++x) {
+                for (int z = static_cast<int>(std::floor(box.minZ)); z <= static_cast<int>(std::floor(box.maxZ - 1.0E-7)); ++z) {
+                    const int index = registry_->state(renderer_.level().block(x, y, z)).block;
+                    if (!behaviours_->isFire(index)) continue;
+                    inFire = true;
+                    inSoulFire = inSoulFire || registry_->type(index).name == "soul_fire";
+                }
+            }
+        }
+    }
+    const bool fireDamage = gameRuleOn("fire_damage");
+    if (player_.isInLava()) {
+        burnTicks_ = 300;
+        if (fireDamage) hurt(4.0f);
+    } else if (inFire) {
+        burnTicks_ = std::max(burnTicks_, 160);
+        if (fireDamage) hurt(inSoulFire ? 2.0f : 1.0f);
+    }
+    if (burnTicks_ > 0) {
+        if (player_.inWater) {
+            burnTicks_ = 0;
+            playWorldSound("entity.generic.extinguish_fire", SoundSource::Players, 0.7f, 1.6f + (randomFloat() - randomFloat()) * 0.4f);
+        } else {
+            if (burnTicks_ % 20 == 0 && fireDamage) hurt(1.0f);
+            --burnTicks_;
+        }
     }
 }
 
@@ -1545,9 +1593,7 @@ void GameSession::chatInput(const std::string& text) {
     if (text.empty()) return;
     chat_.remember(text);
     if (text[0] == '/') {
-        // There is no server and no command engine yet: a command is acknowledged the way the game shows an unknown one.
-        addChatMessage("§cUnknown or incomplete command, see below for error");
-        addChatMessage("§c" + text + "§r§c<--[HERE]");
+        runCommand(text.substr(1));
     } else {
         addChatMessage("<" + services_.playerName + "> " + text);
     }
