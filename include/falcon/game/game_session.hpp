@@ -28,6 +28,7 @@
 #include "falcon/world/water_fog.hpp"
 #include "falcon/world/block_behaviours.hpp"
 #include "falcon/world/block_physics.hpp"
+#include "falcon/world/redstone.hpp"
 #include "falcon/world/block_support.hpp"
 #include "falcon/world/block_tags.hpp"
 #include "falcon/world/loot.hpp"
@@ -342,6 +343,7 @@ private:
     double digClock_ = 0.0;
     std::shared_ptr<const BlockBehaviours> behaviours_;  // which blocks fall, burn or explode (null: the game files are missing)
     std::unique_ptr<BlockPhysics> physics_;              // falling blocks, fire, TNT
+    std::unique_ptr<Redstone> redstone_;                 // power, dust, repeaters, lamps, doors ...
     std::shared_ptr<const CommandTree> commands_;
     mutable std::map<std::string, std::vector<std::string>> registryNames_;  // the ids of a registry, for the argument checks and the suggestions
     std::map<std::string, std::string> gameRules_;                           // game rules set by /gamerule (the others have their defaults)

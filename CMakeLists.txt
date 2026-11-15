@@ -243,6 +243,7 @@ add_library(falcon_core
     src/world/block_tags.cpp
     src/world/block_behaviours.cpp
     src/world/block_physics.cpp
+    src/world/redstone.cpp
     src/world/loot.cpp
     src/world/chunk_cache.cpp
     src/world/raycast.cpp

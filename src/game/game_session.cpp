@@ -224,6 +224,26 @@ GameSession::GameSession(ScreenServices& services, const ResourceManager& resour
                 host.beginBatch = [this] { renderer_.beginBatch(); };
                 host.endBatch = [this] { renderer_.endBatch(); };
                 physics_ = std::make_unique<BlockPhysics>(renderer_.level(), behaviours_, itemEntities_, std::move(host), static_cast<std::uint32_t>(rng_()));
+                Redstone::Host redstone;
+                redstone.setBlock = [this](int x, int y, int z, Block b) { return setBlock(x, y, z, b); };
+                redstone.sound = [this](const std::string& event, float volume, float pitch, double x, double y, double z) {
+                    const std::array<double, 3> at = {x, y, z};
+                    playWorldSound(event, SoundSource::Blocks, volume, pitch, &at);
+                };
+                redstone.drop = [this](const ItemStack& stack, double x, double y, double z) { itemEntities_.spawn(stack, x, y, z, 0.0, 0.1, 0.0, 10, randomFloat() * 6.2831855f); };
+                redstone.primeTnt = [this](int x, int y, int z) {
+                    if (physics_) physics_->primeTnt(x, y, z);
+                };
+                redstone.entityInside = [this](const Aabb& box, bool items) {
+                    if (info_.gameType != 3 && player_.boundingBox().intersects(box)) return true;
+                    if (items) {
+                        for (const ItemEntity& e : itemEntities_.items()) {
+                            if (!e.stack.isEmpty() && e.box().intersects(box)) return true;
+                        }
+                    }
+                    return false;
+                };
+                redstone_ = std::make_unique<Redstone>(renderer_.level(), std::move(redstone), static_cast<std::uint32_t>(rng_()));
                 if (const char* speed = std::getenv("FALCON_RANDOM_TICK_SPEED")) physics_->setRandomTickSpeed(std::atoi(speed));  // (tests: lava starts fires in seconds)
             }
         }
@@ -440,6 +460,7 @@ bool GameSession::setBlock(int x, int y, int z, Block block) {
     if (!renderer_.setBlock(x, y, z, block)) return false;
     fluids_.blockChanged(renderer_.level(), x, y, z);  // water next to it looks round again (flows into a hole, or loses its source)
     if (physics_) physics_->blockPlaced(x, y, z);  // sand may fall, fire starts to burn
+    if (redstone_) redstone_->blockChanged(x, y, z);  // power runs through what is near
     if (support_ || physics_) {
         // The game's neighbour updates (updateShape): every block next to a change checks that it can still stand, and a plant that
         // cannot (its soil gone, the other half of a tall plant gone) disappears, which tells ITS neighbours in turn.
@@ -495,6 +516,7 @@ void GameSession::tickPlayer(double seconds, bool steering) {
         // The water that flows: its updates that are due this tick.
         fluids_.tick(renderer_.level(), [this](int bx, int by, int bz, Block b) { return renderer_.setBlock(bx, by, bz, b); });
         if (ready_ && physics_) physics_->tick();
+        if (ready_ && redstone_) redstone_->tick();
     }
     // Out of the world (below the void line) the void hurts a survival player (4 a tick, through any protection) until they die; anyone else
     // starts again at the spawn.
@@ -1024,6 +1046,11 @@ void GameSession::interact(double dt, bool active) {
     if (attack && !creative()) target_ = raycastBlocks(renderer_.level(), eye, look, kReach);  // (a block that was dug is gone: aim past it)
     if (use && placeCooldown_ <= 0.0 && target_) {
         placeCooldown_ = kRepeatDelay;
+        // A lever, button, door, trapdoor or fence gate answers to the right click (sneaking with something in the hand puts the item down instead).
+        if (redstone_ && !(player_.sneaking && !inventory_.selectedItem().isEmpty()) && redstone_->use(target_->x, target_->y, target_->z)) {
+            hand_.swing();
+            return;
+        }
         if (!inventory_.selectedItem().isEmpty()) {
             const std::string& heldName = inventory_.selectedItem().type().name;
             if ((heldName == "flint_and_steel" || heldName == "fire_charge") && useFireStarter(heldName, *target_)) return;

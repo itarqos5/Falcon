@@ -752,6 +752,12 @@ const StateRender* BlockModels::bake(Block block) const {
     const BlockType& type = registry_.type(block);
     out->tintSource = static_cast<std::uint8_t>(tintSourceOf(type.name));
     out->tintConstant = constantTint(type.name);
+    if (type.name == "redstone_wire") {  // RedStoneWireBlock.COLORS: the dust is dark red when it is off and brighter the stronger the signal
+        const float f = static_cast<float>(std::atoi(std::string(registry_.get(block, "power")).c_str())) / 15.0f;
+        const auto channel = [](float v) { return static_cast<std::uint32_t>(std::clamp(v, 0.0f, 1.0f) * 255.0f); };
+        out->tintSource = static_cast<std::uint8_t>(TintSource::Constant);
+        out->tintConstant = (channel(f * 0.6f + (f > 0.0f ? 0.4f : 0.3f)) << 16) | (channel(f * f * 0.7f - 0.5f) << 8) | channel(f * f * 0.6f - 0.7f);
+    }
     const bool leaves = type.name.size() > 7 && type.name.compare(type.name.size() - 7, 7, "_leaves") == 0;
     // A face between two of the same see-through block is not drawn: glass and ice panes, and - the big one for forests - leaves,
     // so a solid blob of leaves is just its outer shell instead of every interior face (this is what the game's Fast graphics does).
