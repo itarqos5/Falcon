@@ -54,6 +54,7 @@ bool remoteMenuKindOf(const std::string& typeName, RemoteMenuKind& kind, int& ro
     if (typeName == "crafting") { kind = RemoteMenuKind::Crafting; return true; }
     if (typeName == "anvil") { kind = RemoteMenuKind::Anvil; return true; }
     if (typeName == "enchantment") { kind = RemoteMenuKind::Enchanting; return true; }
+    if (typeName == "merchant") { kind = RemoteMenuKind::Merchant; return true; }
     return false;
 }
 
@@ -112,6 +113,13 @@ RemoteMenu::RemoteMenu(MenuPlayer player, RemoteMenuKind kind, int rows, int con
             addSlot(std::make_unique<OneItemSlot>(container_, 0, 15, 47));
             addSlot(std::make_unique<LapisSlot>(container_, 1, 35, 47));
             break;
+        case RemoteMenuKind::Merchant:  // MerchantMenu: the two things that are paid and the result, on the right of the list of offers
+            containerSlots_ = 3;
+            container_ = SimpleContainer(containerSlots_);
+            addSlot(std::make_unique<Slot>(container_, 0, 136, 37));
+            addSlot(std::make_unique<Slot>(container_, 1, 162, 37));
+            addSlot(std::make_unique<ResultOnlySlot>(container_, 2, 220, 37));
+            break;
         case RemoteMenuKind::Crafting:
             containerSlots_ = 10;
             container_ = SimpleContainer(containerSlots_);
@@ -121,7 +129,7 @@ RemoteMenu::RemoteMenu(MenuPlayer player, RemoteMenuKind kind, int rows, int con
             }
             break;
     }
-    addStandardInventorySlots(*player_.inventory, 8, inventoryTop);
+    addStandardInventorySlots(*player_.inventory, kind == RemoteMenuKind::Merchant ? 108 : 8, inventoryTop);
 }
 
 int RemoteMenu::imageHeight() const {

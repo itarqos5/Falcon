@@ -540,6 +540,70 @@ void test_server_commands() {
     CHECK(!none.read(badReader) && none.empty());
 }
 
+// A villager's offer as the network writes it (what it costs, what it gives, how often it was used, what moves the price) and the packet of several.
+void test_trade_offers() {
+    ComponentIds ids;
+    ids.damage = 3;
+    Writer w;
+    w.varint(5);   // costA: the item,
+    w.varint(3);   // how many,
+    w.varint(0);   // no condition on its components
+    w.varint(2);   // the result: how many (a stack says this first), then the item, and no components added or removed
+    w.varint(9);
+    w.varint(0);
+    w.varint(0);
+    w.boolean(true);  // costB
+    w.varint(7);
+    w.varint(1);
+    w.varint(0);
+    w.boolean(false);  // not out of stock
+    w.i32(1);          // used once
+    w.i32(12);         // of twelve
+    w.i32(5);          // experience
+    w.i32(-2);         // the price of this player
+    w.f32(0.05f);
+    w.i32(3);          // demand
+    w.varint(99);      // something after
+    Reader r(w.data);
+    TradeOffer offer;
+    CHECK(readTradeOffer(r, ids, offer));
+    CHECK(static_cast<int>(offer.costA.item) == 5 && offer.costA.count == 3);
+    CHECK(static_cast<int>(offer.result.item) == 9 && offer.result.count == 2);
+    CHECK(static_cast<int>(offer.costB.item) == 7 && offer.costB.count == 1);
+    CHECK(!offer.outOfStock && offer.uses == 1 && offer.maxUses == 12 && offer.xp == 5 && offer.specialPriceDiff == -2 && offer.demand == 3);
+    CHECK(offer.priceMultiplier > 0.049f && offer.priceMultiplier < 0.051f);
+    CHECK(r.varint() == 99);  // the reader stands right after the offer
+    // a trade of one thing, with a condition on a component that can be read (the damage)
+    Writer one;
+    one.varint(4);
+    one.varint(1);
+    one.varint(1);  // one condition: the damage is 17
+    one.varint(3);
+    one.varint(17);
+    one.varint(1);  // the result: 1 of item 8
+    one.varint(8);
+    one.varint(0);
+    one.varint(0);
+    one.boolean(false);  // no second cost
+    one.boolean(true);   // out of stock
+    for (int i = 0; i < 4; ++i) one.i32(0);
+    one.f32(0.0f);
+    one.i32(0);
+    Reader oneReader(one.data);
+    TradeOffer second;
+    CHECK(readTradeOffer(oneReader, ids, second));
+    CHECK(second.costB.isEmpty() && second.outOfStock && static_cast<int>(second.result.item) == 8);
+    // a cost with a condition that cannot be read is refused (nothing more can be told after it)
+    Writer bad;
+    bad.varint(4);
+    bad.varint(1);
+    bad.varint(1);
+    bad.varint(77);
+    Reader badReader(bad.data);
+    TradeOffer none;
+    CHECK(!readTradeOffer(badReader, ids, none));
+}
+
 }  // namespace
 
 int main() {
@@ -556,6 +620,7 @@ int main() {
     test_skins();
     test_mob_table();
     test_server_commands();
+    test_trade_offers();
 #ifdef _WIN32
     test_encrypted_connection();
 #endif

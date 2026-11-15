@@ -129,6 +129,7 @@ struct RemoteHandler {
     std::function<void(int id, int index, int value)> containerData;
     std::function<void(int id)> containerClose;
     std::function<void(const ItemStack&)> cursor;
+    std::function<void(const TradeOffers&)> merchantOffers;  // a villager's window: what it offers
     std::function<void(int slot)> heldSlot;                          // the server picks the hotbar slot in the hand
     std::function<void(const std::string&)> disconnect;
 };
@@ -208,6 +209,7 @@ public:
     void sendCreativeSlot(int inventorySlot, const ItemStack& stack);  // creative mode: this slot of the inventory now holds this
     void sendContainerClose(int containerId);
     void sendContainerButton(int containerId, int button);  // a button of a menu (an enchanting table's three offers)
+    void sendSelectTrade(int index);                        // the offer of a villager that is chosen
     void sendRenameItem(const std::string& name);           // what is typed into an anvil's name box
     // A click in a menu (container 0 is the player's own): the slot, the button, the kind (ClickType's number), the slots it changed with what they hold now, the stack on the cursor.
     void sendContainerClick(int containerId, int slot, int button, int mode, const std::vector<std::pair<int, ItemStack>>& changed, const ItemStack& carried);

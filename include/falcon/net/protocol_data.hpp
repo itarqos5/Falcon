@@ -9,6 +9,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace falcon::net {
 
@@ -39,6 +40,23 @@ struct ComponentIds {
 // An item stack as the network writes it (ItemStack.OPTIONAL_STREAM_CODEC): the count, the item's number, then the components that differ from the item's own.
 // `known` turns false when a component that cannot be read was met: the stack is then what was read of it, and the reader is not after it.
 [[nodiscard]] ItemStack readItemStack(Reader& r, const ComponentIds& ids, bool& known);
+// One offer of a villager (MerchantOffer): what it costs (one or two things), what it gives, whether it is used up, and what makes the price move.
+struct TradeOffer {
+    ItemStack costA, costB, result;  // costB is empty for a trade of one thing
+    bool outOfStock = false;
+    int uses = 0, maxUses = 0, xp = 0, specialPriceDiff = 0, demand = 0;
+    float priceMultiplier = 0.0f;
+};
+// What ClientboundMerchantOffersPacket says about a villager's window.
+struct TradeOffers {
+    int containerId = 0;
+    std::vector<TradeOffer> offers;
+    int level = 0, xp = 0;  // how far the villager is in its trade levels
+    bool showProgress = false, canRestock = false;
+};
+// A trade offer as the network writes it. False when a component that cannot be read is in it (nothing more of the packet can then be read).
+[[nodiscard]] bool readTradeOffer(Reader& r, const ComponentIds& ids, TradeOffer& out);
+
 // The same the other way, without components (what a creative slot says to the server).
 void writeItemStack(Writer& w, const ItemStack& stack);
 

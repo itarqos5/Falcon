@@ -2,6 +2,7 @@
 
 #include "falcon/game/game_session.hpp"
 #include "falcon/game/item_names.hpp"
+#include "falcon/game/item_render.hpp"
 
 #include <GLFW/glfw3.h>
 
@@ -15,7 +16,7 @@ constexpr std::uint32_t kLabelColor = 0xFF404040u;
 }
 
 RemoteContainerScreen::RemoteContainerScreen(ScreenNavigator& navigator, ScreenServices& services, RemoteMenu& menu, std::string title)
-    : ContainerScreen(navigator, services, 176, menu.imageHeight()), menu_(menu), title_(std::move(title)) {}
+    : ContainerScreen(navigator, services, menu.imageWidth(), menu.imageHeight()), menu_(menu), title_(std::move(title)) {}
 
 namespace {
 
@@ -57,7 +58,33 @@ void RemoteContainerScreen::init() {
     }
 }
 
+// The offers of a villager in the window's list: seven rows (MerchantScreen), a click chooses one, and the wheel moves the list.
+int RemoteContainerScreen::tradeRowAt(double x, double y) const {
+    for (int i = 0; i < 7; ++i) {
+        const int index = scrollOff_ + i;
+        if (index >= static_cast<int>(menu_.offers.size())) break;
+        const double rx = leftPos_ + 5, ry = topPos_ + 18 + i * 20;
+        if (x >= rx && x < rx + 88 && y >= ry && y < ry + 20) return index;
+    }
+    return -1;
+}
+
+void RemoteContainerScreen::selectTrade(int index) {
+    if (index < 0 || index >= static_cast<int>(menu_.offers.size())) return;
+    selectedTrade_ = index;
+    if (menu_.onSelectTrade) menu_.onSelectTrade(index);  // (the server puts what the offer costs into the two slots)
+}
+
+bool RemoteContainerScreen::mouseScrolled(double x, double y, double dy) {
+    if (menu_.kind() == RemoteMenuKind::Merchant && menu_.offers.size() > 7) {
+        scrollOff_ = std::clamp(scrollOff_ - static_cast<int>(dy > 0 ? 1 : -1), 0, static_cast<int>(menu_.offers.size()) - 7);
+        return true;
+    }
+    return ContainerScreen::mouseScrolled(x, y, dy);
+}
+
 void RemoteContainerScreen::render(GuiGraphics& g, int mouseX, int mouseY, const FrameTime& time) {
+    if (menu_.kind() == RemoteMenuKind::Merchant && selectedTrade_ < 0 && !menu_.offers.empty()) selectTrade(0);  // the first offer is chosen when they come
     if (rename_ != nullptr) {  // the box shows the name of the thing in the first slot, and can be used only when there is one
         const ItemStack& first = menu_.slot(0).getItem();
         const int key = first.isEmpty() ? -1 : static_cast<int>(first.item);
@@ -107,6 +134,13 @@ bool RemoteContainerScreen::canEnchant(int button) const {
 }
 
 bool RemoteContainerScreen::mouseClicked(double x, double y, int button) {
+    if (menu_.kind() == RemoteMenuKind::Merchant && button == 0) {
+        const int row = tradeRowAt(x, y);
+        if (row >= 0) {
+            selectTrade(row);
+            return true;
+        }
+    }
     if (menu_.kind() == RemoteMenuKind::Enchanting && button == 0) {
         const int which = enchantButtonAt(x, y);
         if (which >= 0) {
@@ -137,6 +171,11 @@ void RemoteContainerScreen::drawBackground(GuiGraphics& g, int mouseX, int mouse
         case RemoteMenuKind::Dispenser: picture("gui/container/dispenser.png"); break;
         case RemoteMenuKind::Hopper: picture("gui/container/hopper.png"); break;
         case RemoteMenuKind::Crafting: picture("gui/container/crafting_table.png"); break;
+        case RemoteMenuKind::Merchant: {
+            g.blit(g.textures().get("gui/container/villager.png"), leftPos_, topPos_, 0.0f, 0.0f, imageWidth_, imageHeight_, 512, 256);
+            drawTrades(g, mouseX, mouseY);
+            break;
+        }
         case RemoteMenuKind::Anvil: {
             picture("gui/container/anvil.png");
             const bool hasFirst = menu_.slot(0).hasItem();
@@ -190,7 +229,73 @@ void RemoteContainerScreen::drawBackground(GuiGraphics& g, int mouseX, int mouse
     }
 }
 
+// MerchantScreen: the list of offers (the thing paid, a second one, an arrow, what is given), the scroller, the villager's level bar and the sign when the chosen offer is used up.
+void RemoteContainerScreen::drawTrades(GuiGraphics& g, int mouseX, int mouseY) {
+    ItemIcons& icons = session().itemIcons();
+    const int total = static_cast<int>(menu_.offers.size());
+    std::vector<TooltipLine> tip;
+    for (int i = 0; i < 7; ++i) {
+        const int index = scrollOff_ + i;
+        if (index >= total) break;
+        const net::TradeOffer& offer = menu_.offers[static_cast<std::size_t>(index)];
+        const int x = leftPos_ + 5, y = topPos_ + 18 + i * 20;
+        const bool over = tradeRowAt(mouseX, mouseY) == index;
+        g.fill(x, y, x + 88, y + 20, index == selectedTrade_ ? 0x60FFFFFFu : over ? 0x40FFFFFFu : 0x18FFFFFFu);
+        // the price as the game works it out: the count, a share of it by the demand, and the special price of this player (TradeOffer.getCostA)
+        ItemStack cost = offer.costA;
+        const int share = std::max(0, static_cast<int>(std::floor(static_cast<float>(cost.count * offer.demand) * offer.priceMultiplier)));
+        cost.count = std::clamp(cost.count + share + offer.specialPriceDiff, 1, std::max(1, cost.maxStackSize()));
+        drawItemStack(g, icons, cost, x + 5, y + 2);
+        if (!offer.costB.isEmpty()) drawItemStack(g, icons, offer.costB, x + 28, y + 2);
+        g.blitSprite(offer.outOfStock ? "container/villager/trade_arrow_out_of_stock" : "container/villager/trade_arrow", x + 52, y + 6, 10, 9);
+        drawItemStack(g, icons, offer.result, x + 68, y + 2);
+        if (over) {  // what the pointer is on, by name
+            const auto named = [&](const ItemStack& s, int ix) {
+                if (!s.isEmpty() && mouseX >= ix && mouseX < ix + 16 && mouseY >= y + 2 && mouseY < y + 18) tip.push_back({itemDisplayName(s, services_.language), 0xFFFFFFFFu});
+            };
+            named(cost, x + 5);
+            named(offer.costB, x + 28);
+            named(offer.result, x + 68);
+        }
+    }
+    // the scroller: 27 high, a travel of 113 over the list (disabled when it all fits)
+    const int extra = total - 6;
+    if (extra > 1) {
+        const int l = 139 - (27 + (extra - 1) * 139 / extra);
+        const int step = 1 + l / extra + 139 / extra;
+        int travel = std::min(113, scrollOff_ * step);
+        if (scrollOff_ == extra - 1) travel = 113;
+        g.blitSprite("container/villager/scroller", leftPos_ + 94, topPos_ + 18 + travel, 6, 27);
+    } else {
+        g.blitSprite("container/villager/scroller_disabled", leftPos_ + 94, topPos_ + 18, 6, 27);
+    }
+    // the villager's level bar: from where this level starts to where the next begins
+    const int level = menu_.traderLevel;
+    if (menu_.showProgress && level >= 1 && level < 5) {
+        static const int kMin[] = {0, 10, 70, 150, 250}, kMax[] = {10, 70, 150, 250};
+        const int low = kMin[level - 1], high = kMax[level - 1];
+        g.blitSprite("container/villager/experience_bar_background", leftPos_ + 136, topPos_ + 16, 102, 5);
+        if (menu_.traderXp >= low) {
+            const int width = std::min(100, static_cast<int>(std::floor(100.0f / static_cast<float>(high - low) * static_cast<float>(menu_.traderXp - low)))) + 1;
+            g.pushScissor(leftPos_ + 136, topPos_ + 16, leftPos_ + 136 + width, topPos_ + 21);
+            g.blitSprite("container/villager/experience_bar_current", leftPos_ + 136, topPos_ + 16, 102, 5);
+            g.popScissor();
+        }
+    }
+    if (selectedTrade_ >= 0 && selectedTrade_ < total && menu_.offers[static_cast<std::size_t>(selectedTrade_)].outOfStock) g.blitSprite("container/villager/out_of_stock", leftPos_ + 186, topPos_ + 35, 28, 21);
+    if (!tip.empty()) g.setItemTooltip(tip, mouseX, mouseY);
+}
+
 void RemoteContainerScreen::drawLabels(GuiGraphics& g, int mouseX, int mouseY) {
+    if (menu_.kind() == RemoteMenuKind::Merchant) {  // the villager's name (with its level) over the slots, "Trades" over the list, "Inventory" in its place
+        std::string title = title_;
+        if (menu_.showProgress && menu_.traderLevel >= 1 && menu_.traderLevel <= 5) title = formatText(text("merchant.title"), {title_, text("merchant.level." + std::to_string(menu_.traderLevel))});
+        g.text(title, static_cast<float>(leftPos_ + 49 + imageWidth_ / 2 - g.textWidth(title) / 2), static_cast<float>(topPos_ + 6), kLabelColor, /*shadow=*/false);
+        const std::string trades = text("merchant.trades");
+        g.text(trades, static_cast<float>(leftPos_ + 5 - g.textWidth(trades) / 2 + 48), static_cast<float>(topPos_ + 6), kLabelColor, /*shadow=*/false);
+        g.text(text("container.inventory"), static_cast<float>(leftPos_ + 107), static_cast<float>(topPos_ + imageHeight_ - 94), kLabelColor, /*shadow=*/false);
+        return;
+    }
     if (menu_.kind() == RemoteMenuKind::Anvil) {  // AnvilScreen: the cost, in green, or red when it cannot be paid or is too much
         const int cost = menu_.data(0);
         if (cost > 0) {

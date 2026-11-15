@@ -651,6 +651,25 @@ void MultiplayerClient::handlePlay(const Packet& p, RemoteHandler& h) {
             else sendContainerClose(container);
             break;
         }
+        case 53: {  // merchant_offers: what a villager trades (the offers, its level and experience)
+            TradeOffers offers;
+            offers.containerId = r.varint();
+            const int n = r.varint();
+            bool whole = r.ok && n >= 0 && n < 4096;
+            for (int i = 0; i < n && whole && r.ok; ++i) {
+                TradeOffer offer;
+                if (readTradeOffer(r, componentIds_, offer)) offers.offers.push_back(offer);
+                else whole = false;  // one that cannot be read: the rest cannot be told apart, the ones before it are shown
+            }
+            if (whole && r.ok) {
+                offers.level = r.varint();
+                offers.xp = r.varint();
+                offers.showProgress = r.boolean();
+                offers.canRestock = r.boolean();
+            }
+            if (h.merchantOffers) h.merchantOffers(offers);
+            break;
+        }
         case 17: {  // container_close: the server closes what it opened
             const int container = r.varint();
             if (r.ok && container > 0 && h.containerClose) h.containerClose(container);
@@ -1232,6 +1251,13 @@ void MultiplayerClient::sendContainerButton(int containerId, int button) {
     w.varint(containerId);
     w.varint(button);
     connection_.send(17, w.data);
+}
+
+void MultiplayerClient::sendSelectTrade(int index) {
+    if (phase_ != Phase::Play) return;
+    Writer w;
+    w.varint(index);
+    connection_.send(52, w.data);
 }
 
 void MultiplayerClient::sendRenameItem(const std::string& name) {

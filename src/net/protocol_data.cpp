@@ -286,6 +286,69 @@ StyledText componentToStyled(const NbtTag& component) {
 
 StyledText readComponent(Reader& r) { return componentToStyled(readNetworkNbt(r)); }
 
+// The value of a component of this type (the type's number has been read): kept in the stack where the stack has a place for it (the damage, a name), stepped over otherwise.
+// False for a type whose layout is not known here.
+bool readComponentValue(Reader& r, int type, const ComponentIds& ids, ItemStack* stack) {
+    if (type == ids.damage) {
+        const int damage = r.varint();
+        if (stack != nullptr) stack->damage = damage;
+    } else if (type == ids.repairCost || type == ids.maxStackSize || type == ids.maxDamage) {
+        r.varint();
+    } else if (type == ids.unbreakable) {  // (a unit: nothing is written)
+    } else if (type == ids.customName) {
+        const std::string name = plainText(readComponent(r));
+        if (stack != nullptr) stack->customName = name;
+    } else if (type == ids.itemName) {
+        (void)readComponent(r);
+    } else if (type == ids.enchantments) {
+        const int n = r.varint();
+        for (int e = 0; e < n && r.ok; ++e) {
+            r.varint();  // the enchantment
+            r.varint();  // its level
+        }
+    } else if (type == ids.glintOverride) {
+        r.boolean();
+    } else if (type == ids.tooltipDisplay) {
+        r.boolean();  // hide everything
+        const int n = r.varint();
+        for (int h = 0; h < n && r.ok; ++h) r.varint();
+    } else if (type == ids.customData) {
+        (void)readNetworkNbt(r);
+    } else {
+        return false;
+    }
+    return r.ok;
+}
+
+// An ItemCost: the item, how many, and a predicate on its components (a list of components that must be there, which is empty for nearly every trade).
+bool readItemCost(Reader& r, const ComponentIds& ids, ItemStack& out) {
+    const int item = r.varint();
+    const int count = r.varint();
+    const int predicates = r.varint();
+    if (!r.ok || count <= 0 || predicates < 0 || predicates > 64) return false;
+    out = ItemStack(static_cast<Item>(item), count);
+    for (int i = 0; i < predicates; ++i) {
+        if (!readComponentValue(r, r.varint(), ids, nullptr)) return false;
+    }
+    return r.ok;
+}
+
+bool readTradeOffer(Reader& r, const ComponentIds& ids, TradeOffer& out) {
+    if (!readItemCost(r, ids, out.costA)) return false;
+    bool known = true;
+    out.result = readItemStack(r, ids, known);
+    if (!known || !r.ok) return false;
+    if (r.boolean() && !readItemCost(r, ids, out.costB)) return false;
+    out.outOfStock = r.boolean();
+    out.uses = r.i32();
+    out.maxUses = r.i32();
+    out.xp = r.i32();
+    out.specialPriceDiff = r.i32();
+    out.priceMultiplier = r.f32();
+    out.demand = r.i32();
+    return r.ok;
+}
+
 ItemStack readItemStack(Reader& r, const ComponentIds& ids, bool& known) {
     ItemStack stack;
     const int count = r.varint();
@@ -296,25 +359,7 @@ ItemStack readItemStack(Reader& r, const ComponentIds& ids, bool& known) {
     const int added = r.varint();
     const int removed = r.varint();
     for (int i = 0; i < added && r.ok; ++i) {
-        const int type = r.varint();
-        if (type == ids.damage) stack.damage = r.varint();
-        else if (type == ids.repairCost || type == ids.maxStackSize || type == ids.maxDamage) r.varint();
-        else if (type == ids.unbreakable) {}  // (a unit: nothing is written)
-        else if (type == ids.customName) stack.customName = plainText(readComponent(r));
-        else if (type == ids.itemName) (void)readComponent(r);
-        else if (type == ids.enchantments) {
-            const int n = r.varint();
-            for (int e = 0; e < n && r.ok; ++e) {
-                r.varint();  // the enchantment
-                r.varint();  // its level
-            }
-        } else if (type == ids.glintOverride) r.boolean();
-        else if (type == ids.tooltipDisplay) {
-            r.boolean();  // hide everything
-            const int n = r.varint();
-            for (int h = 0; h < n && r.ok; ++h) r.varint();
-        } else if (type == ids.customData) (void)readNetworkNbt(r);
-        else {
+        if (!readComponentValue(r, r.varint(), ids, &stack)) {
             known = false;
             return stack;
         }

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "falcon/net/protocol_data.hpp"
 #include "falcon/world/menu.hpp"
 
 #include <string>
@@ -7,8 +8,8 @@
 namespace falcon {
 
 // The containers of a server that Falcon can show: a chest, a barrel, an ender chest or a shulker box (rows of nine), a dispenser or dropper (3 x 3), a hopper, a furnace, a blast
-// furnace, a smoker, a crafting table, an anvil and an enchanting table. Each is drawn from the game's own picture, with slots where the game puts them.
-enum class RemoteMenuKind { Chest, Shulker, Dispenser, Hopper, Furnace, BlastFurnace, Smoker, Crafting, Anvil, Enchanting };
+// furnace, a smoker, a crafting table, an anvil, an enchanting table and a villager's trades. Each is drawn from the game's own picture, with slots where the game puts them.
+enum class RemoteMenuKind { Chest, Shulker, Dispenser, Hopper, Furnace, BlastFurnace, Smoker, Crafting, Anvil, Enchanting, Merchant };
 
 // The kind (and for a chest the number of rows) of a menu type of the game's registry ("generic_9x3", "furnace", ...); false for a type that is not shown ("brewing_stand").
 [[nodiscard]] bool remoteMenuKindOf(const std::string& typeName, RemoteMenuKind& kind, int& rows);
@@ -25,6 +26,7 @@ public:
     [[nodiscard]] int rows() const { return rows_; }
     [[nodiscard]] int containerSlots() const { return containerSlots_; }
     [[nodiscard]] int imageHeight() const;
+    [[nodiscard]] int imageWidth() const { return kind_ == RemoteMenuKind::Merchant ? 276 : 176; }
 
     // The server says what a slot holds (the menu's own numbering). When it is one of the player's slots, the number of that slot in the Inventory is returned (so that what the
     // game keeps about the inventory can follow); otherwise -1.
@@ -41,6 +43,12 @@ public:
     std::function<int()> experienceLevel;
     std::function<void(const std::string&)> onRename;
     std::function<void(int)> onButton;
+    std::function<void(int)> onSelectTrade;  // an offer of a villager is chosen
+
+    // A villager's window (RemoteMenuKind::Merchant): the offers it makes and how far it is in its levels.
+    std::vector<net::TradeOffer> offers;
+    int traderLevel = 0, traderXp = 0;
+    bool showProgress = false;
 
     ItemStack quickMoveStack(int index) override;
 

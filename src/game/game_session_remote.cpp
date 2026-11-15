@@ -329,6 +329,9 @@ bool GameSession::connectRemote(const std::string& host, int port, const std::st
         remoteMenu_->onRename = [this](const std::string& name) {
             if (remote_ && remote_->inPlay()) remote_->sendRenameItem(name);
         };
+        remoteMenu_->onSelectTrade = [this](int index) {
+            if (remote_ && remote_->inPlay()) remote_->sendSelectTrade(index);
+        };
         remoteMenu_->onButton = [this, id](int button) {
             if (remote_ && remote_->inPlay()) remote_->sendContainerButton(id, button);
         };
@@ -348,6 +351,13 @@ bool GameSession::connectRemote(const std::string& host, int port, const std::st
         if (!remoteMenuOpen_ || remoteMenu_->containerId() != id) return;
         const int inventorySlot = remoteMenu_->setFromServer(slot, stack);
         if (inventorySlot >= 0 && inventorySlot < 41) remoteSlots_[static_cast<std::size_t>(inventorySlot)] = stack;
+    };
+    h.merchantOffers = [this](const net::TradeOffers& offers) {  // a villager's window: the offers and its level
+        if (!remoteMenuOpen_ || remoteMenu_->containerId() != offers.containerId || remoteMenu_->kind() != RemoteMenuKind::Merchant) return;
+        remoteMenu_->offers = offers.offers;
+        remoteMenu_->traderLevel = offers.level;
+        remoteMenu_->traderXp = offers.xp;
+        remoteMenu_->showProgress = offers.showProgress;
     };
     h.containerData = [this](int id, int index, int value) {
         if (remoteMenuOpen_ && remoteMenu_->containerId() == id) remoteMenu_->setData(index, value);
@@ -520,6 +530,24 @@ void GameSession::openTestContainer() {
     remoteMenu_->setData(1, 200);
     remoteMenu_->setData(2, 80);
     remoteMenu_->setData(3, 200);
+    if (menuKind == RemoteMenuKind::Merchant) {  // nine offers, to see the list, the scroller and the level
+        const char* const names[] = {"stone", "oak_planks", "diamond", "iron_ingot", "coal", "apple", "cobblestone", "stick", "torch"};
+        for (int i = 0; i < 9; ++i) {
+            net::TradeOffer offer;
+            const auto a = itemRegistry().find(names[i]), b = itemRegistry().find(names[(i + 3) % 9]), c = itemRegistry().find(names[(i + 5) % 9]);
+            if (!a || !b || !c) continue;
+            offer.costA = ItemStack(*a, 3 + i);
+            if (i % 2 == 0) offer.costB = ItemStack(*b, 1 + i % 3);
+            offer.result = ItemStack(*c, 1 + i % 4);
+            offer.outOfStock = i == 4;
+            offer.demand = i == 2 ? 2 : 0;
+            offer.priceMultiplier = 0.05f;
+            remoteMenu_->offers.push_back(offer);
+        }
+        remoteMenu_->traderLevel = 2;
+        remoteMenu_->traderXp = 40;
+        remoteMenu_->showProgress = true;
+    }
     if (menuKind == RemoteMenuKind::Anvil) remoteMenu_->setData(0, 7);  // what putting these together costs
     if (menuKind == RemoteMenuKind::Enchanting) {
         remoteMenu_->setData(0, 5);
