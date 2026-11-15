@@ -99,6 +99,45 @@ FetchContent_Declare(miniaudio
 
 FetchContent_MakeAvailable(glfw nlohmann_json stb_image stb_image_write stb_vorbis miniaudio)
 
+# The Vulkan renderer (src/vulkan/): only the headers are needed to build it. The loader is looked for when the game starts, so a PC without Vulkan still runs the game on OpenGL.
+option(FALCON_VULKAN "Build the Vulkan renderer (the Graphics API setting's second choice)" ON)
+if(FALCON_VULKAN)
+    FetchContent_Declare(vulkan_headers
+        GIT_REPOSITORY https://github.com/KhronosGroup/Vulkan-Headers.git
+        GIT_TAG        vulkan-sdk-1.4.350.0
+        GIT_SHALLOW    TRUE
+    )
+    FetchContent_MakeAvailable(vulkan_headers)
+
+    # Only for changing a Vulkan shader: -DFALCON_COMPILE_SHADERS=ON fetches glslang (its libraries only, built from source, no SPIRV-Tools and none of its Python) and adds the
+    # target falcon_vk_shaders, which compiles src/vulkan/shaders/ into src/vulkan/spirv_data.cpp. That file is committed, so building the game needs none of this.
+    option(FALCON_COMPILE_SHADERS "Build glslang and add the target falcon_vk_shaders (compiles the Vulkan shaders)" OFF)
+    if(FALCON_COMPILE_SHADERS)
+        find_program(FALCON_NODE node REQUIRED)
+        set(ENABLE_OPT OFF CACHE BOOL "" FORCE)
+        set(ENABLE_HLSL OFF CACHE BOOL "" FORCE)
+        set(ENABLE_GLSLANG_BINARIES OFF CACHE BOOL "" FORCE)
+        set(ENABLE_SPVREMAPPER OFF CACHE BOOL "" FORCE)
+        set(BUILD_EXTERNAL OFF CACHE BOOL "" FORCE)
+        set(GLSLANG_TESTS OFF CACHE BOOL "" FORCE)
+        set(GLSLANG_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
+        FetchContent_Declare(glslang
+            GIT_REPOSITORY https://github.com/KhronosGroup/glslang.git
+            GIT_TAG        16.6.0
+            GIT_SHALLOW    TRUE
+        )
+        FetchContent_MakeAvailable(glslang)
+        add_executable(falcon_compile_spirv EXCLUDE_FROM_ALL tools/compile_spirv.cpp)
+        target_link_libraries(falcon_compile_spirv PRIVATE glslang::glslang glslang::SPIRV glslang::glslang-default-resource-limits)
+        add_custom_target(falcon_vk_shaders
+            COMMAND "${FALCON_NODE}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/compile_vk_shaders.mjs" "$<TARGET_FILE:falcon_compile_spirv>"
+            DEPENDS falcon_compile_spirv
+            WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+            COMMENT "Compiling the Vulkan shaders"
+            VERBATIM)
+    endif()
+endif()
+
 add_library(falcon_stb INTERFACE)
 target_include_directories(falcon_stb SYSTEM INTERFACE
     "${stb_image_SOURCE_DIR}"
@@ -184,6 +223,26 @@ add_library(falcon_base
     src/platform/file_lock.cpp
 )
 add_library(falcon::base ALIAS falcon_base)
+if(FALCON_VULKAN)
+    # (VK_NO_PROTOTYPES: every Vulkan function is loaded by hand, so nothing is linked against a Vulkan library.)
+    target_sources(falcon_base PRIVATE
+        src/vulkan/vk_api.cpp
+        src/vulkan/vk_core.cpp
+        src/vulkan/vk_swapchain.cpp
+        src/vulkan/vk_backend.cpp
+        src/vulkan/spirv_reflect.cpp
+        src/vulkan/shader_registry.cpp
+        src/vulkan/spirv_data.cpp
+        src/vulkan/gl_buffers.cpp
+        src/vulkan/gl_textures.cpp
+        src/vulkan/gl_programs.cpp
+        src/vulkan/gl_draw.cpp
+        src/vulkan/gl_misc.cpp
+    )
+    target_compile_definitions(falcon_base PUBLIC FALCON_HAS_VULKAN=1)
+    target_compile_definitions(falcon_base PRIVATE VK_NO_PROTOTYPES)
+    target_link_libraries(falcon_base PRIVATE Vulkan::Headers)
+endif()
 target_include_directories(falcon_base PUBLIC
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
     "$<BUILD_INTERFACE:${FALCON_GENERATED_DIR}>"
