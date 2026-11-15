@@ -101,6 +101,7 @@ FetchContent_MakeAvailable(glfw nlohmann_json stb_image stb_image_write stb_vorb
 
 # The Vulkan renderer (src/vulkan/): only the headers are needed to build it. The loader is looked for when the game starts, so a PC without Vulkan still runs the game on OpenGL.
 option(FALCON_VULKAN "Build the Vulkan renderer (the Graphics API setting's second choice)" ON)
+option(FALCON_STRIP "Strip the symbols from the Release exes (OFF for a build that tools/resolve_samples.mjs can read the profiler's samples of)" ON)
 if(FALCON_VULKAN)
     FetchContent_Declare(vulkan_headers
         GIT_REPOSITORY https://github.com/KhronosGroup/Vulkan-Headers.git
@@ -221,6 +222,7 @@ add_library(falcon_base
     src/platform/http.cpp
     src/platform/mapped_file.cpp
     src/platform/file_lock.cpp
+    src/platform/sampling_profiler.cpp
 )
 add_library(falcon::base ALIAS falcon_base)
 if(FALCON_VULKAN)
@@ -477,7 +479,9 @@ elseif(UNIX AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
 endif()
 if(NOT MSVC)
     # Release: strip symbols from the shipped exe (a large part of its size).
-    target_link_options(falcon_client PRIVATE $<$<CONFIG:Release>:-s>)
+    if(FALCON_STRIP)
+        target_link_options(falcon_client PRIVATE $<$<CONFIG:Release>:-s>)
+    endif()
 endif()
 
 # Every build ends by replacing dist/ with the fresh game, wherever the intermediates live.
@@ -567,7 +571,9 @@ elseif(UNIX AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     target_link_options(falcon_client_licensed PRIVATE -static-libstdc++ -static-libgcc)
 endif()
 if(NOT MSVC)
-    target_link_options(falcon_client_licensed PRIVATE $<$<CONFIG:Release>:-s>)
+    if(FALCON_STRIP)
+        target_link_options(falcon_client_licensed PRIVATE $<$<CONFIG:Release>:-s>)
+    endif()
 endif()
 if(WIN32 AND NOT FALCON_CONSOLE)
     if(MSVC)

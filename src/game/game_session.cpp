@@ -8,6 +8,7 @@
 #include "falcon/game/item_render.hpp"
 #include "falcon/game/menu_background.hpp"
 #include "falcon/platform/memory.hpp"
+#include "falcon/platform/sampling_profiler.hpp"
 #include "falcon/util/text_util.hpp"
 #include "falcon/world/recipes.hpp"
 #include "falcon/world/water_fog.hpp"
@@ -396,6 +397,8 @@ void GameSession::startBenchmark(double seconds) {
     benchmark_ = {};
     benchmark_.running = true;
     benchmark_.seconds = seconds;
+    profiler::registerThread("main");  // the frame thread; the worker threads registered themselves when they started (only with FALCON_SAMPLE set)
+    profiler::start();
     pinnedPose_ = true;
     player_.canFly = true;
     player_.flying = true;
@@ -534,6 +537,7 @@ void GameSession::update(double dt, bool active, int framebufferWidth, int frame
         if (benchmark_.elapsed >= benchmark_.seconds) {
             benchmark_.running = false;
             benchmark_.done = true;
+            profiler::finish();
             benchmark_.endRss = processWorkingSetBytes();
             const RenderStats s = renderer_.stats();
             benchmark_.finalStats = format("%d chunks, %d sections drawn of %d, %zu quads drawn of %zu, blocks %.1f MB, meshes %.1f MB; %d draw calls for %d runs (%s, %s)",
