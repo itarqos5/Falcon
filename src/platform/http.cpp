@@ -1,5 +1,9 @@
 #include "falcon/platform/http.hpp"
 
+#include <algorithm>
+#include <chrono>
+#include <thread>
+
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -36,6 +40,11 @@ HttpAnswer httpsRequest(const std::string& method, const std::string& host, cons
                 DWORD status = 0, size = sizeof(status);
                 WinHttpQueryHeaders(request, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_HEADER_NAME_BY_INDEX, &status, &size, WINHTTP_NO_HEADER_INDEX);
                 answer.status = static_cast<int>(status);
+                if (status == 429 || status == 503) {  // (Retry-After in seconds, when it is given as a number)
+                    wchar_t value[32] = {};
+                    DWORD valueSize = sizeof(value) - sizeof(wchar_t);
+                    if (WinHttpQueryHeaders(request, WINHTTP_QUERY_CUSTOM, L"Retry-After", value, &valueSize, WINHTTP_NO_HEADER_INDEX) != FALSE) answer.retryAfterSeconds = std::max(0, _wtoi(value));
+                }
                 for (;;) {
                     DWORD available = 0;
                     if (WinHttpQueryDataAvailable(request, &available) == FALSE || available == 0) break;
@@ -69,5 +78,26 @@ HttpAnswer httpsRequest(const std::string&, const std::string&, const std::strin
 }
 
 #endif
+
+HttpAnswer httpsRequestPatient(const std::string& method, const std::string& host, const std::string& path, const std::string& bearer, const std::string& jsonBody, int maxWaitSeconds) {
+    HttpAnswer answer = httpsRequest(method, host, path, bearer, jsonBody);
+    int waited = 0, pause = 1;
+    while ((answer.status == 429 || answer.status == 502 || answer.status == 503) && waited < maxWaitSeconds) {
+        const int sleepFor = answer.retryAfterSeconds > 0 ? answer.retryAfterSeconds : pause;
+        if (waited + sleepFor > maxWaitSeconds) break;  // (told to wait longer than is worth it here: the player is told instead)
+        std::this_thread::sleep_for(std::chrono::seconds(sleepFor));
+        waited += sleepFor;
+        pause = std::min(pause * 2, 4);
+        answer = httpsRequest(method, host, path, bearer, jsonBody);
+    }
+    return answer;
+}
+
+std::string busyAnswerWords(const HttpAnswer& answer) {
+    std::string words = "Minecraft's servers are limiting requests from this account or connection right now (HTTP " + std::to_string(answer.status) + ")";
+    if (answer.retryAfterSeconds > 0) words += "; they ask to wait " + std::to_string(answer.retryAfterSeconds) + " seconds";
+    else if (answer.status == 429) words += "; wait about a minute";
+    return words + ", then try again";
+}
 
 }  // namespace falcon

@@ -4,8 +4,13 @@
 
 #include <nlohmann/json.hpp>
 
+#include <chrono>
 #include <cctype>
 #include <cstdio>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <sstream>
 
 namespace falcon::net {
 
@@ -163,13 +168,15 @@ bool joinSession(const std::string& accessToken, const std::string& profileId, c
     body["accessToken"] = accessToken;
     body["selectedProfile"] = uuidWithoutDashes(id);
     body["serverId"] = serverHash;
-    const HttpAnswer answer = httpsRequest("POST", "sessionserver.mojang.com", "/session/minecraft/join", {}, body.dump());
+    const HttpAnswer answer = httpsRequestPatient("POST", "sessionserver.mojang.com", "/session/minecraft/join", {}, body.dump());
     if (answer.status == 204 || answer.status == 200) return true;
     if (answer.status == 0) {
         error = "Falcon could not reach Minecraft's session server (" + answer.error + ")";
     } else if (answer.status == 401 || answer.status == 403) {
         const std::string words = serverWords(answer);
         error = "Minecraft's session server did not accept the sign-in" + (words.empty() ? std::string() : " (" + words + ")") + ": start Falcon from the launcher again";
+    } else if (answer.status == 429 || answer.status >= 500) {
+        error = busyAnswerWords(answer);
     } else {
         error = "Minecraft's session server answered " + std::to_string(answer.status);
     }
@@ -177,9 +184,13 @@ bool joinSession(const std::string& accessToken, const std::string& profileId, c
 }
 
 bool fetchProfile(const std::string& accessToken, std::string& id, std::string& name, std::string& error) {
-    const HttpAnswer answer = httpsRequest("GET", "api.minecraftservices.com", "/minecraft/profile", accessToken);
+    const HttpAnswer answer = httpsRequestPatient("GET", "api.minecraftservices.com", "/minecraft/profile", accessToken);
     if (answer.status == 0) {
         error = "Falcon could not reach Minecraft's servers (" + answer.error + ")";
+        return false;
+    }
+    if (answer.status == 429 || answer.status >= 500) {
+        error = busyAnswerWords(answer);
         return false;
     }
     const nlohmann::json j = nlohmann::json::parse(answer.body, nullptr, false);
@@ -192,17 +203,67 @@ bool fetchProfile(const std::string& accessToken, std::string& id, std::string& 
     return true;
 }
 
-bool fetchChatKeys(const std::string& accessToken, ChatKeys& out, std::string& error) {
-    const HttpAnswer answer = httpsRequest("POST", "api.minecraftservices.com", "/player/certificates", accessToken);
+namespace {
+
+// Where the keys are kept (the game keeps them too, in .minecraft/profilekeys): one file per account, the answer of the server as it came.
+std::filesystem::path keyCachePath(const std::string& profileId) {
+    std::array<std::uint8_t, 16> id{};
+    if (!parseUuid(profileId, id)) return {};
+    const char* local = std::getenv("LOCALAPPDATA");
+    if (local == nullptr || *local == '\0') return {};
+    return std::filesystem::path(local) / "Falcon" / "profilekeys" / (uuidWithoutDashes(id) + ".json");
+}
+
+std::int64_t nowMillis() { return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count(); }
+
+// The kept keys when there are some that are still good: not expired (with an hour to spare when they are to be used as they are) and, for a fresh use, not older than
+// six hours (the server says when they ought to be renewed, about eight hours in).
+bool readKeyCache(const std::filesystem::path& path, bool needFresh, ChatKeys& out) {
+    std::error_code ec;
+    if (path.empty() || !std::filesystem::exists(path, ec)) return false;
+    std::ifstream in(path, std::ios::binary);
+    std::stringstream buffer;
+    buffer << in.rdbuf();
+    ChatKeys keys;
+    std::string ignored;
+    if (!parseChatKeysResponse(buffer.str(), keys, ignored)) return false;
+    const std::int64_t now = nowMillis();
+    if (keys.expiresAtMillis <= now + (needFresh ? 3600000 : 0)) return false;
+    if (needFresh) {
+        const auto written = std::filesystem::last_write_time(path, ec);
+        if (ec) return false;
+        const auto age = std::filesystem::file_time_type::clock::now() - written;
+        if (age > std::chrono::hours(6)) return false;
+    }
+    out = std::move(keys);
+    return true;
+}
+
+}  // namespace
+
+bool fetchChatKeys(const std::string& accessToken, const std::string& profileId, ChatKeys& out, std::string& error) {
+    const std::filesystem::path cache = keyCachePath(profileId);
+    if (readKeyCache(cache, /*needFresh=*/true, out)) return true;  // (the game asks Mojang only when its keys are about to run out: the request is limited hard)
+    const HttpAnswer answer = httpsRequestPatient("POST", "api.minecraftservices.com", "/player/certificates", accessToken);
+    if (answer.status == 200 && parseChatKeysResponse(answer.body, out, error)) {
+        std::error_code ec;
+        if (!cache.empty()) {
+            std::filesystem::create_directories(cache.parent_path(), ec);
+            std::ofstream file(cache, std::ios::binary | std::ios::trunc);
+            file << answer.body;
+        }
+        return true;
+    }
+    if (answer.status == 200) return false;  // (the answer could not be read: error is set)
+    if (readKeyCache(cache, /*needFresh=*/false, out)) return true;  // refused or not reachable: the keys that were kept still work until they expire
     if (answer.status == 0) {
         error = "Falcon could not reach Minecraft's servers for the chat keys (" + answer.error + ")";
-        return false;
-    }
-    if (answer.status != 200) {
+    } else if (answer.status == 429 || answer.status >= 500) {
+        error = busyAnswerWords(answer);
+    } else {
         error = "Minecraft would not give the chat keys (it answered " + std::to_string(answer.status) + ")";
-        return false;
     }
-    return parseChatKeysResponse(answer.body, out, error);
+    return false;
 }
 
 }  // namespace falcon::net

@@ -230,9 +230,9 @@ void MultiplayerClient::startEncryption(Reader& r, RemoteHandler& h) {
         return error.empty() ? "Minecraft's session server refused the sign-in" : error;
     });
     if (authenticate && !token.empty()) {  // the key that signs chat is fetched meanwhile
-        keysResult_ = std::async(std::launch::async, [token]() {
+        keysResult_ = std::async(std::launch::async, [token, profile]() {
             KeysResult result;
-            result.ok = fetchChatKeys(token, result.keys, result.error);
+            result.ok = fetchChatKeys(token, profile, result.keys, result.error);
             return result;
         });
     }

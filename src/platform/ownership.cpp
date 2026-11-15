@@ -55,7 +55,8 @@ OwnershipCheck verifyMinecraftOwnership(const std::string& accessToken, const st
         return result;
     }
     const auto expired = [](int status) { return status == 401 || status == 403; };
-    const HttpAnswer entitlements = httpsRequest("GET", "api.minecraftservices.com", "/entitlements/mcstore", accessToken);
+    const auto busy = [](int status) { return status == 429 || status >= 500; };
+    const HttpAnswer entitlements = httpsRequestPatient("GET", "api.minecraftservices.com", "/entitlements/mcstore", accessToken);
     if (entitlements.status == 0) {
         result.message = "Falcon could not reach Minecraft's servers to check that you own the game (" + entitlements.error + "). Check your internet connection and start it again.";
         return result;
@@ -64,13 +65,21 @@ OwnershipCheck verifyMinecraftOwnership(const std::string& accessToken, const st
         result.message = "Your Minecraft sign-in has expired. Start Falcon from the launcher again.";
         return result;
     }
+    if (busy(entitlements.status)) {  // (not an answer about the account: Falcon asked too often, or Minecraft is busy)
+        result.message = "Falcon cannot check that you own the game right now: " + busyAnswerWords(entitlements) + ".";
+        return result;
+    }
     if (entitlements.status != 200 || !entitlementsListGame(entitlements.body)) {
         result.message = "This Minecraft account does not own Minecraft: Java Edition, so Falcon cannot be played with it.";
         return result;
     }
-    const HttpAnswer profile = httpsRequest("GET", "api.minecraftservices.com", "/minecraft/profile", accessToken);
+    const HttpAnswer profile = httpsRequestPatient("GET", "api.minecraftservices.com", "/minecraft/profile", accessToken);
     if (profile.status == 0) {
         result.message = "Falcon could not reach Minecraft's servers to check your profile (" + profile.error + ").";
+        return result;
+    }
+    if (busy(profile.status)) {
+        result.message = "Falcon cannot check your profile right now: " + busyAnswerWords(profile) + ".";
         return result;
     }
     if (profile.status != 200) {

@@ -26,8 +26,9 @@ struct ChatKeys {
 // The id (without dashes) and the name of the account's Java Edition profile (GET /minecraft/profile).
 [[nodiscard]] bool fetchProfile(const std::string& accessToken, std::string& id, std::string& name, std::string& error);
 
-// The chat signing key pair (POST /player/certificates).
-[[nodiscard]] bool fetchChatKeys(const std::string& accessToken, ChatKeys& out, std::string& error);
+// The chat signing key pair (POST /player/certificates). Like the game, it keeps the keys on disk (%LOCALAPPDATA%\Falcon\profilekeys) and asks Mojang only when they are
+// nearly spent or not there, because that request is limited hard; keys that were kept still serve when Mojang refuses or cannot be reached.
+[[nodiscard]] bool fetchChatKeys(const std::string& accessToken, const std::string& profileId, ChatKeys& out, std::string& error);
 
 // The parts that need no network (and are tested):
 [[nodiscard]] Bytes base64Decode(const std::string& text);                  // whitespace is skipped; empty for text that is not base64
