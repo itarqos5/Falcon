@@ -17,7 +17,7 @@ namespace {
 // The world's shaders. The #version line and a few #define lines in front of them are added when they are built (worldShaderSource), so
 // the same text serves the variants that are compared with each other: LIGHT_LUT (the light map as a 16 x 16 picture instead of
 // arithmetic on every pixel) and FLAT_NORMAL (a face's direction from the vertex instead of from screen derivatives).
-constexpr char kWorldVertexBody[] = R"(
+constexpr char kWorldVertexBody[] = R"(// vk: world.vert
 layout(location = 0) in vec4 aPos;    // x, y, z inside the section (1/1024 block), and the texture layer
 layout(location = 1) in vec2 aUv;     // 1/1024 of a texture repeat
 layout(location = 2) in vec4 aColor;  // tint colour, and the shade of the face's direction
@@ -46,7 +46,7 @@ void main() {
 }
 )";
 
-constexpr char kWorldFragmentBody[] = R"(
+constexpr char kWorldFragmentBody[] = R"(// vk: world.frag
 in vec2 vUv;
 flat in float vLayer;
 flat in float vFace;
@@ -127,7 +127,8 @@ std::string worldShaderSource(const char* body) {
     return source;
 }
 
-constexpr char kSkyVertex[] = R"(#version 330 core
+constexpr char kSkyVertex[] = R"(// vk: sky.vert
+#version 330 core
 out vec2 vNdc;
 void main() {
     vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));
@@ -136,7 +137,8 @@ void main() {
 }
 )";
 
-constexpr char kSkyFragment[] = R"(#version 330 core
+constexpr char kSkyFragment[] = R"(// vk: sky.frag
+#version 330 core
 in vec2 vNdc;
 uniform vec3 uForward;
 uniform vec3 uRight;
@@ -152,19 +154,22 @@ void main() {
 }
 )";
 
-constexpr char kLineVertex[] = R"(#version 330 core
+constexpr char kLineVertex[] = R"(// vk: lines.vert
+#version 330 core
 layout(location = 0) in vec3 aPos;
 uniform mat4 uViewProj;
 void main() { gl_Position = uViewProj * vec4(aPos, 1.0); }
 )";
 
-constexpr char kLineFragment[] = R"(#version 330 core
+constexpr char kLineFragment[] = R"(// vk: lines.frag
+#version 330 core
 out vec4 frag;
 void main() { frag = vec4(0.0, 0.0, 0.0, 0.6); }
 )";
 
 // The cracks of a block being dug: the picture alone, multiplied into what is already there by the blend (see drawBreakOverlay).
-constexpr char kCrackVertex[] = R"(#version 330 core
+constexpr char kCrackVertex[] = R"(// vk: cracks.vert
+#version 330 core
 layout(location = 0) in vec3 aPos;
 layout(location = 1) in vec2 aUv;
 uniform mat4 uViewProj;
@@ -172,7 +177,8 @@ out vec2 vUv;
 void main() { vUv = aUv; gl_Position = uViewProj * vec4(aPos, 1.0); }
 )";
 
-constexpr char kCrackFragment[] = R"(#version 330 core
+constexpr char kCrackFragment[] = R"(// vk: cracks.frag
+#version 330 core
 in vec2 vUv;
 uniform sampler2D uTex;
 out vec4 frag;

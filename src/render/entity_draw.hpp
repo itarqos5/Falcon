@@ -14,7 +14,8 @@ namespace falcon::entity_draw {
 inline constexpr float kPi = 3.14159265358979f;
 inline constexpr float kDegrees = kPi / 180.0f;
 
-inline constexpr char kVertex[] = R"(#version 330 core
+inline constexpr char kVertex[] = R"(// vk: entity.vert
+#version 330 core
 layout(location = 0) in vec3 aPos;   // relative to the camera
 layout(location = 1) in vec2 aUv;    // 0..1 on the 64x64 skin
 layout(location = 2) in float aShade;
@@ -28,7 +29,8 @@ void main() {
 }
 )";
 
-inline constexpr char kFragment[] = R"(#version 330 core
+inline constexpr char kFragment[] = R"(// vk: entity.frag
+#version 330 core
 in vec2 vUv;
 in float vShade;
 uniform sampler2D uSkin;

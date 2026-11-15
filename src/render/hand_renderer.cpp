@@ -123,7 +123,8 @@ std::array<float, 3> lightMapColor(int sky, int block, float gamma) {
     return c;
 }
 
-constexpr char kArmVertex[] = R"(#version 330 core
+constexpr char kArmVertex[] = R"(// vk: arm.vert
+#version 330 core
 layout(location = 0) in vec3 aPos;   // camera space
 layout(location = 1) in vec2 aUv;    // 0..1 on the 64x64 skin
 layout(location = 2) in float aShade;
@@ -137,7 +138,8 @@ void main() {
 }
 )";
 
-constexpr char kArmFragment[] = R"(#version 330 core
+constexpr char kArmFragment[] = R"(// vk: arm.frag
+#version 330 core
 in vec2 vUv;
 in float vShade;
 uniform sampler2D uSkin;

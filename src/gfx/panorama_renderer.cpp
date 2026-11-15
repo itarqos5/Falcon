@@ -9,7 +9,8 @@
 namespace falcon {
 namespace {
 
-const char* const kVertexSource = R"(#version 330 core
+const char* const kVertexSource = R"(// vk: panorama.vert
+#version 330 core
 layout(location = 0) in vec3 aPos;
 uniform mat4 uProjection;
 uniform mat4 uView;
@@ -20,7 +21,8 @@ void main() {
 }
 )";
 
-const char* const kFragmentSource = R"(#version 330 core
+const char* const kFragmentSource = R"(// vk: panorama.frag
+#version 330 core
 uniform samplerCube uSky;
 in vec3 vDirection;
 out vec4 fragColor;
@@ -30,7 +32,8 @@ void main() {
 )";
 
 // Full-screen triangle generated from gl_VertexID, like the game's screenquad.vsh.
-const char* const kBlurVertexSource = R"(#version 330 core
+const char* const kBlurVertexSource = R"(// vk: blur.vert
+#version 330 core
 out vec2 texCoord;
 void main() {
     vec2 uv = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));
@@ -41,7 +44,8 @@ void main() {
 
 // The game's post/box_blur.fsh: bilinear taps two pixels apart, so each sample covers two texels.
 // With uRadius == 0 it degenerates to a plain copy, which is used to present the result.
-const char* const kBlurFragmentSource = R"(#version 330 core
+const char* const kBlurFragmentSource = R"(// vk: blur.frag
+#version 330 core
 uniform sampler2D uInput;
 uniform vec2 uInSize;
 uniform vec2 uBlurDir;

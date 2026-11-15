@@ -6,7 +6,8 @@
 namespace falcon {
 namespace {
 
-const char* const kVertexSource = R"(#version 330 core
+const char* const kVertexSource = R"(// vk: gui.vert
+#version 330 core
 layout(location = 0) in vec2 aPos;
 layout(location = 1) in vec2 aUV;
 layout(location = 2) in vec4 aColor;
@@ -20,7 +21,8 @@ void main() {
 }
 )";
 
-const char* const kFragmentSource = R"(#version 330 core
+const char* const kFragmentSource = R"(// vk: gui.frag
+#version 330 core
 uniform sampler2D uTexture;
 uniform float uCutoff;
 in vec2 vUV;
