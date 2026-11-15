@@ -240,7 +240,10 @@ private:
     // A block taken out of the world by the player: the block goes, it sounds, and in survival it drops what its loot table says (and wears the tool).
     void breakBlockAt(int x, int y, int z, bool survival);
     void digSurvival(double dt, bool fresh);   // MultiPlayerGameMode.startDestroyBlock / continueDestroyBlock; `fresh`: the button went down this frame
-    void stopDigging();
+    void stopDigging(bool abort = true);  // (on a server an abort is told to it)
+    void swingArm();                      // the hand swings (and on a server the arm swing is told to it)
+    bool useItemRemote();                 // right click on a server: the block clicked or the item in the hand
+    void syncCreativeSlots();             // creative on a server: what the player took or put in the inventory is told to it
     void damageHeldTool(int amount);
     void runCommand(const std::string& text);  // a command typed in the chat, without its "/"
     void applyGameRule(const std::string& rule, const std::string& value);
@@ -350,6 +353,7 @@ private:
     double breakCooldown_ = 0.0;
     // Digging in survival (the game's MultiPlayerGameMode): the block being dug, how much of it is gone, the game ticks spent on it, the pause after one broke.
     std::optional<std::array<int, 3>> digPos_;
+    int digFace_ = 0;  // the face of the block that is being dug (the server wants it)
     float digProgress_ = 0.0f;
     int digTicks_ = 0;
     int digDelay_ = 0;
@@ -370,6 +374,10 @@ private:
     net::RemoteHandler remoteHandler_;
     std::string remoteLost_;
     int lastInputFlags_ = 0;
+    bool selfOnFire_ = false;                  // the server says the player burns
+    int lastHeldSent_ = -1;                    // the hotbar slot the server knows is in the hand
+    bool usingRemote_ = false;                 // an item is being used (eaten, drawn) on a server: the release must be told
+    std::array<ItemStack, 41> remoteSlots_{};  // what the server thinks the inventory holds (to tell it only what differs)
     bool lastSprintSent_ = false;
     bool loadedSent_ = false;
     bool remoteTeleported_ = false;  // the server has put the player somewhere

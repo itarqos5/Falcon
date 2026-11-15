@@ -62,7 +62,7 @@ void GameSession::damageHeldTool(int amount) {
 void GameSession::breakBlockAt(int x, int y, int z, bool survival) {
     const Block broken = renderer_.level().block(x, y, z);
     setBlock(x, y, z, Block::Air);
-    hand_.swing();
+    swingArm();
     if (registry_->isAir(broken)) return;
     {  // the break sound of the block, heard where it was (a fire put out hisses instead)
         const std::array<double, 3> where = {x + 0.5, y + 0.5, z + 0.5};
@@ -73,7 +73,7 @@ void GameSession::breakBlockAt(int x, int y, int z, bool survival) {
             playBlockSound(broken, "break", breakOrPlaceMix(type.soundVolume, type.soundPitch), SoundSource::Blocks, &where);
         }
     }
-    if (!survival || !gameRuleOn("block_drops")) return;
+    if (!survival || remote_ || !gameRuleOn("block_drops")) return;  // (on a server the loot is the server's)
     const ItemStack tool = inventory_.selectedItem();
     collectDrop(broken, x, y, z, tool, !mining_ || mining_->correctForDrops(tool, broken));
     // Item.mineBlock: a tool wears by one use (more for some) from a block that was not instant to dig.
@@ -100,7 +100,7 @@ bool GameSession::useFireStarter(const std::string& item, const BlockHit& hit) {
     if (behaviours_->isTnt(index)) {  // the TNT is lit where it stands: it becomes primed TNT
         setBlock(hit.x, hit.y, hit.z, Block::Air);
         physics_->primeTnt(hit.x, hit.y, hit.z);
-        hand_.swing();
+        swingArm();
         spend();
         return true;
     }
@@ -109,7 +109,7 @@ bool GameSession::useFireStarter(const std::string& item, const BlockHit& hit) {
         registry_->get(clicked, "waterlogged") != "true") {  // CampfireBlock.canLight, CandleBlock.canLight
         setBlock(hit.x, hit.y, hit.z, registry_->with(clicked, "lit", "true"));
         playWorldSound(flint ? "item.flintandsteel.use" : "item.firecharge.use", SoundSource::Blocks, 1.0f, flint ? randomFloat() * 0.4f + 0.8f : (randomFloat() - randomFloat()) * 0.2f + 1.0f, &where);
-        hand_.swing();
+        swingArm();
         spend();
         return true;
     }
@@ -118,12 +118,19 @@ bool GameSession::useFireStarter(const std::string& item, const BlockHit& hit) {
     const std::array<double, 3> fireAt = {at[0] + 0.5, at[1] + 0.5, at[2] + 0.5};
     playWorldSound(flint ? "item.flintandsteel.use" : "item.firecharge.use", SoundSource::Blocks, 1.0f, flint ? randomFloat() * 0.4f + 0.8f : (randomFloat() - randomFloat()) * 0.2f + 1.0f, &fireAt);
     setBlock(at[0], at[1], at[2], physics_->fireStateAt(at[0], at[1], at[2]));
-    hand_.swing();
+    swingArm();
     spend();
     return true;
 }
 
-void GameSession::stopDigging() {
+void GameSession::swingArm() {
+    hand_.swing();
+    if (remote_) remote_->sendSwing();
+}
+
+// MultiPlayerGameMode.stopDestroyBlock: a dig that is let go of before it is done is told to the server as aborted.
+void GameSession::stopDigging(bool abort) {
+    if (abort && digPos_ && remote_) remote_->sendDig(1, (*digPos_)[0], (*digPos_)[1], (*digPos_)[2], digFace_);
     digPos_.reset();
     digProgress_ = 0.0f;
     digTicks_ = 0;
@@ -146,6 +153,8 @@ void GameSession::digSurvival(double dt, bool fresh) {
         const Block block = renderer_.level().block(pos[0], pos[1], pos[2]);
         if (registry_->isAir(block) || pos[1] <= kMinY) return;
         if (digDelay_ > 0 && !fresh) return;
+        digFace_ = target_->face;
+        if (remote_) remote_->sendDig(0, pos[0], pos[1], pos[2], digFace_);  // (START_DESTROY_BLOCK, also for a block that goes at once)
         if (perTick(block) >= 1.0f) {
             breakBlockAt(pos[0], pos[1], pos[2], true);
             return;
@@ -154,7 +163,7 @@ void GameSession::digSurvival(double dt, bool fresh) {
         digProgress_ = 0.0f;
         digTicks_ = 0;
         digItem_ = tool.item;
-        hand_.swing();
+        swingArm();
         return;
     }
     for (; ticks > 0 && digPos_; --ticks) {
@@ -170,13 +179,38 @@ void GameSession::digSurvival(double dt, bool fresh) {
             playBlockSound(block, "hit", {(type.soundVolume + 1.0f) / 8.0f, type.soundPitch * 0.5f}, SoundSource::Blocks, &where);
         }
         ++digTicks_;
-        hand_.swing();
+        swingArm();
         if (digProgress_ >= 1.0f) {
+            if (remote_) remote_->sendDig(2, pos[0], pos[1], pos[2], digFace_);  // STOP_DESTROY_BLOCK: the block is done
             breakBlockAt(pos[0], pos[1], pos[2], true);
-            stopDigging();
+            stopDigging(false);
             digDelay_ = 5;
         }
     }
+}
+
+// MultiPlayerGameMode.useItemOn on a server: the click is told with where on the block it hit; the server decides what it does (opens a door, puts the block
+// down ...) and says so in block changes. True when the click can also be played out here at once (a block in the hand put down on a block that does not answer to
+// a click, or any block when sneaking), so that the new block does not wait for the answer.
+bool GameSession::useItemRemote() {
+    const std::array<double, 3> eye = player_.eyePosition(partialTick_);
+    const auto look = Look{player_.yaw, player_.pitch}.forward();
+    remote_->sendUseItemOn(target_->x, target_->y, target_->z, target_->face, eye[0] + look[0] * target_->distance - target_->x, eye[1] + look[1] * target_->distance - target_->y,
+                           eye[2] + look[2] * target_->distance - target_->z);
+    const ItemStack& held = inventory_.selectedItem();
+    if (player_.sneaking && !held.isEmpty()) return true;
+    const std::string& name = registry_->type(registry_->state(renderer_.level().block(target_->x, target_->y, target_->z)).block).name;
+    static const char* const kAnswers[] = {"door", "trapdoor", "button", "lever", "chest", "barrel", "furnace", "smoker", "crafting_table", "anvil", "_bed", "shulker_box", "hopper",
+                                           "dispenser", "dropper", "note_block", "jukebox", "cauldron", "composter", "lectern", "loom", "grindstone", "stonecutter", "cartography_table",
+                                           "smithing_table", "enchanting_table", "brewing_stand", "beacon", "command_block", "repeater", "comparator", "daylight_detector", "fence_gate",
+                                           "_sign", "bell", "respawn_anchor", "cake", "flower_pot", "ender_chest", "crafter", "vault", "decorated_pot", "candle", "campfire"};
+    for (const char* part : kAnswers) {
+        if (name.find(part) != std::string::npos) {
+            swingArm();
+            return false;
+        }
+    }
+    return true;
 }
 
 void GameSession::interact(double dt, bool active) {
@@ -207,13 +241,31 @@ void GameSession::interact(double dt, bool active) {
     const bool freshPress = attack && !digHeld_;
     digHeld_ = attack;
     if (!use) placeCooldown_ = 0.0;
+    if (remote_) {  // using an item (eating, drawing a bow ...) goes to the server once; letting go tells it that the use stopped
+        const ItemStack& held = inventory_.selectedItem();
+        const std::string& heldName = held.isEmpty() ? std::string() : held.type().name;
+        const bool usable = !held.isEmpty() && (held.type().food.has_value() || heldName == "bow" || heldName == "crossbow" || heldName == "trident" || heldName == "shield" ||
+                                                 heldName == "ender_pearl" || heldName == "snowball" || heldName == "egg" || heldName == "fishing_rod" || heldName == "spyglass" ||
+                                                 heldName == "experience_bottle" || heldName == "wind_charge" || heldName == "potion" || heldName == "splash_potion" ||
+                                                 heldName == "lingering_potion" || heldName.find("bucket") != std::string::npos ||
+                                                 held.type().armorSlot != EquipSlot::None);  // (armor in the hand goes on by a click)
+        if (use && usable && !usingRemote_ && placeCooldown_ <= 0.0) {
+            remote_->sendUseItem(player_.yaw, player_.pitch);
+            usingRemote_ = true;
+            placeCooldown_ = kRepeatDelay;
+        }
+        if (!use && usingRemote_) {
+            remote_->sendAction(5);  // RELEASE_USE_ITEM
+            usingRemote_ = false;
+        }
+    }
     if (attack && !target_ && breakCooldown_ <= 0.0) {  // a swing at the air: the attack cooldown starts over
         breakCooldown_ = kRepeatDelay;
-        hand_.swing();
+        swingArm();
         hand_.resetAttackStrength();
     }
     if (attack && !creative()) digSurvival(dt, freshPress);
-    if (use && placeCooldown_ <= 0.0 && !inventory_.selectedItem().isEmpty()) {
+    if (use && placeCooldown_ <= 0.0 && !remote_ && !inventory_.selectedItem().isEmpty()) {  // (on a server the click goes to it)
         // Equippable.swapWithEquipmentSlot: armor used in the hand (aimed at a block or at the air) goes on, and what was worn there comes into the hand.
         const EquipSlot armorSlot = inventory_.selectedItem().type().armorSlot;
         if (armorSlot == EquipSlot::Head || armorSlot == EquipSlot::Chest || armorSlot == EquipSlot::Legs || armorSlot == EquipSlot::Feet) {
@@ -221,7 +273,7 @@ void GameSession::interact(double dt, bool active) {
             std::swap(inventory_.selectedItem(), inventory_.item(slot));
             placeCooldown_ = kRepeatDelay * 2.0;
             playWorldSound("item.armor.equip_generic", SoundSource::Players, 1.0f, 1.0f);
-            hand_.swing();
+            swingArm();
             return;
         }
     }
@@ -230,6 +282,7 @@ void GameSession::interact(double dt, bool active) {
     if (attack && creative() && breakCooldown_ <= 0.0) {  // creative: every block goes at once, five ticks apart
         breakCooldown_ = kRepeatDelay;
         if (target_->y > kMinY) {  // the floor of the world stays
+            if (remote_) remote_->sendDig(0, target_->x, target_->y, target_->z, target_->face);
             breakBlockAt(target_->x, target_->y, target_->z, false);
             target_ = raycastBlocks(renderer_.level(), eye, look, kReach);
         }
@@ -237,9 +290,10 @@ void GameSession::interact(double dt, bool active) {
     if (attack && !creative()) target_ = raycastBlocks(renderer_.level(), eye, look, kReach);  // (a block that was dug is gone: aim past it)
     if (use && placeCooldown_ <= 0.0 && target_) {
         placeCooldown_ = kRepeatDelay;
+        if (remote_ && !useItemRemote()) return;  // (the server answers a lever, a chest ...: only a block put down is shown at once)
         // A lever, button, door, trapdoor or fence gate answers to the right click (sneaking with something in the hand puts the item down instead).
         if (redstone_ && !(player_.sneaking && !inventory_.selectedItem().isEmpty()) && redstone_->use(target_->x, target_->y, target_->z)) {
-            hand_.swing();
+            swingArm();
             return;
         }
         if (!inventory_.selectedItem().isEmpty()) {
@@ -258,8 +312,8 @@ void GameSession::interact(double dt, bool active) {
                     const std::array<double, 3> where = {target_->x + 0.5, target_->y + 0.5, target_->z + 0.5};
                     const BlockType& slab = registry_->type(under);
                     playBlockSound(under, "place", breakOrPlaceMix(slab.soundVolume, slab.soundPitch), SoundSource::Blocks, &where);
-                    hand_.swing();
-                    if (!creative()) {
+                    swingArm();
+                    if (!creative() && !remote_) {  // (on a server the new count comes from it)
                         inventory_.selectedItem().shrink(1);
                         if (inventory_.selectedItem().isEmpty()) inventory_.selectedItem() = ItemStack();
                     }
@@ -296,13 +350,13 @@ void GameSession::interact(double dt, bool active) {
                     renderer_.setBlock(place[0], place[1] + 1, place[2], support_->upperHalf(placed));
                 }
                 setBlock(place[0], place[1], place[2], placed);
-                hand_.swing();
+                swingArm();
                 {  // the place sound of the new block
                     const std::array<double, 3> where = {place[0] + 0.5, place[1] + 0.5, place[2] + 0.5};
                     const BlockType& type = registry_->type(placed);
                     playBlockSound(placed, "place", breakOrPlaceMix(type.soundVolume, type.soundPitch), SoundSource::Blocks, &where);
                 }
-                if (!creative()) {
+                if (!creative() && !remote_) {
                     heldStack.shrink(1);
                     if (heldStack.isEmpty()) heldStack = ItemStack();
                 }

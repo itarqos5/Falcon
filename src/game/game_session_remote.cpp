@@ -75,11 +75,59 @@ int playerEntityType(const std::filesystem::path& dataRoot) {
     return player->value("protocol_id", -1);
 }
 
+// The numbers of the item components that can be read (the game's data component type registry).
+net::ComponentIds componentIds(const std::filesystem::path& dataRoot) {
+    net::ComponentIds ids;
+    std::ifstream in(dataRoot / "registries.json", std::ios::binary);
+    if (!in) return ids;
+    const nlohmann::json doc = nlohmann::json::parse(in, nullptr, false);
+    if (!doc.is_object()) return ids;
+    const auto registry = doc.find("minecraft:data_component_type");
+    if (registry == doc.end()) return ids;
+    const auto entries = registry->find("entries");
+    if (entries == registry->end()) return ids;
+    const auto id = [&](const char* name) {
+        const auto e = entries->find(name);
+        return e == entries->end() ? -1 : e->value("protocol_id", -1);
+    };
+    ids.damage = id("minecraft:damage");
+    ids.repairCost = id("minecraft:repair_cost");
+    ids.maxStackSize = id("minecraft:max_stack_size");
+    ids.maxDamage = id("minecraft:max_damage");
+    ids.unbreakable = id("minecraft:unbreakable");
+    ids.customName = id("minecraft:custom_name");
+    ids.itemName = id("minecraft:item_name");
+    ids.enchantments = id("minecraft:enchantments");
+    ids.glintOverride = id("minecraft:enchantment_glint_override");
+    ids.tooltipDisplay = id("minecraft:tooltip_display");
+    ids.customData = id("minecraft:custom_data");
+    return ids;
+}
+
 }  // namespace
+
+// Creative mode on a server: a slot that holds something else than the server thinks (the player took an item from the creative inventory, or moved one) is told to it.
+void GameSession::syncCreativeSlots() {
+    for (int slot = 0; slot < 41; ++slot) {
+        const ItemStack& now = inventory_.item(slot);
+        ItemStack& known = remoteSlots_[static_cast<std::size_t>(slot)];
+        const bool same = now.isEmpty() ? known.isEmpty() : (now.item == known.item && now.count == known.count && now.damage == known.damage);
+        if (same) continue;
+        if (info_.gameType == 1) {
+            remote_->sendCreativeSlot(slot, now);
+            known = now;
+        } else {
+            inventory_.item(slot) = known;  // (in the other modes the server alone changes the inventory: what was moved here snaps back)
+        }
+    }
+}
 
 bool GameSession::connectRemote(const std::string& host, int port, const std::string& username, std::string& error) {
     remote_ = std::make_unique<net::MultiplayerClient>(*registry_);
     remote_->setPlayerEntityType(playerEntityType(dataRoot_));
+    remote_->setComponentIds(componentIds(dataRoot_));
+    physics_.reset();  // the server runs the world: no falling blocks, fire, redstone or random ticks of ours on its chunks
+    redstone_.reset();
     renderer_.setRemote(true);
     net::setComponentTranslator([this](const std::string& key) { return services_.language.get(key); });  // (the server speaks in translation keys)
     net::RemoteHandler& h = remoteHandler_;
@@ -116,7 +164,11 @@ bool GameSession::connectRemote(const std::string& host, int port, const std::st
         addChatMessage(toLegacy(text));
     };
     h.health = [this](float health, int food, float saturation) {
-        if (health < vitals_.health) invulnerableTime_ = 20;
+        if (health < vitals_.health) {  // hurt: the view tilts for half a second (the server does not say from where)
+            invulnerableTime_ = 20;
+            hurtTime_ = 10;
+            hurtDirection_ = 0.0f;
+        }
         vitals_.health = health;
         vitals_.food = food;
         vitals_.saturation = saturation;
@@ -132,6 +184,16 @@ bool GameSession::connectRemote(const std::string& host, int port, const std::st
         (void)invulnerable;
         player_.canFly = mayFly;
         player_.flying = flying && mayFly;
+    };
+    h.inventorySlot = [this](int slot, const ItemStack& stack) {
+        if (slot < 0 || slot >= 41) return;
+        inventory_.item(slot) = stack;
+        remoteSlots_[static_cast<std::size_t>(slot)] = stack;  // (the server knows it: nothing to tell back)
+    };
+    h.selfFlags = [this](int flags) { selfOnFire_ = (flags & 1) != 0; };
+    h.heldSlot = [this](int slot) {
+        inventory_.setSelected(slot);
+        lastHeldSent_ = inventory_.selected;
     };
     h.disconnect = [this](const std::string& why) {
         std::printf("[falcon] left the server: %s\n", why.c_str());
@@ -170,6 +232,11 @@ void GameSession::sendRemoteTick(const PlayerInput& input) {
         remote_->sendSprint(player_.sprinting);
         lastSprintSent_ = player_.sprinting;
     }
+    if (inventory_.selected != lastHeldSent_) {  // (LocalPlayer: the server is told when the hotbar slot in the hand changes)
+        remote_->sendHeldSlot(inventory_.selected);
+        lastHeldSent_ = inventory_.selected;
+    }
+    syncCreativeSlots();
     net::MoveState state;
     state.x = player_.x;
     state.y = player_.y;

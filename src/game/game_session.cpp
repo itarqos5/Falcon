@@ -413,6 +413,7 @@ PlayerInput GameSession::sampleInput() const {
 
 bool GameSession::setBlock(int x, int y, int z, Block block) {
     if (!renderer_.setBlock(x, y, z, block)) return false;
+    if (remote_) return true;  // on a server what happens to the neighbours is the server's to say (it sends the changes)
     fluids_.blockChanged(renderer_.level(), x, y, z);  // water next to it looks round again (flows into a hole, or loses its source)
     if (physics_) physics_->blockPlaced(x, y, z);  // sand may fall, fire starts to burn
     if (redstone_) redstone_->blockChanged(x, y, z);  // power runs through what is near
@@ -582,7 +583,12 @@ void GameSession::onKey(int key, int mods) {
     if (services_.options.toggleSprint && keyIs("key.sprint", key)) sprintLatched_ = !sprintLatched_;
     if (keyIs("key.pickItem", key) && target_) pickBlock(renderer_.level().block(target_->x, target_->y, target_->z));
     // Q throws the held item (Ctrl + Q the whole stack) out in front of the player.
-    if (keyIs("key.drop", key) && ready_ && info_.gameType != 3 && !dead_) {
+    if (keyIs("key.drop", key) && ready_ && info_.gameType != 3 && !dead_ && remote_) {  // on a server it takes the item (DROP_ITEM, DROP_ALL_ITEMS)
+        if (!inventory_.selectedItem().isEmpty()) {
+            remote_->sendAction((mods & GLFW_MOD_CONTROL) != 0 ? 4 : 3);
+            swingArm();
+        }
+    } else if (keyIs("key.drop", key) && ready_ && info_.gameType != 3 && !dead_) {
         const ItemStack thrown = inventory_.removeFromSelected((mods & GLFW_MOD_CONTROL) != 0);
         if (!thrown.isEmpty()) {
             dropFromPlayer(thrown);
@@ -592,7 +598,10 @@ void GameSession::onKey(int key, int mods) {
     // F5: first person, from behind, from the front, and round again.
     if (keyIs("key.togglePerspective", key) && ready_) perspective_ = (perspective_ + 1) % 3;
     // F swaps the held item with the offhand one.
-    if (keyIs("key.swapOffhand", key) && ready_ && info_.gameType != 3) std::swap(inventory_.selectedItem(), inventory_.offhand());
+    if (keyIs("key.swapOffhand", key) && ready_ && info_.gameType != 3) {
+        if (remote_) remote_->sendAction(6);  // SWAP_ITEM_WITH_OFFHAND: the server swaps and sends the slots
+        else std::swap(inventory_.selectedItem(), inventory_.offhand());
+    }
 }
 
 void GameSession::drawPlayerPreview(GuiGraphics& g, int x0, int y0, int x1, int y1, float scale, float mouseX, float mouseY) {

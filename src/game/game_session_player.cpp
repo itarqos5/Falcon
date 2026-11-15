@@ -65,7 +65,7 @@ void GameSession::tickPlayer(double seconds, bool steering) {
             waterVisionTicks_ = nextWaterVisionTicks(waterVisionTicks_, player_.isUnderWater(), info_.gameType == 3);  // the eyes get used to the water
             if (ready_ && !dead_) {
                 footsteps(input.shift);
-                if (const int damage = player_.takeFallDamage(); damage > 0 && survivalBars()) fallDamage(damage);
+                if (const int damage = player_.takeFallDamage(); damage > 0 && survivalBars() && !remote_) fallDamage(damage);  // (on a server it says how much it hurt)
                 if (player_.inWater && !wasInWater_) splash(vx, vy, vz);
                 wasInWater_ = player_.inWater;
                 tickBody();
@@ -76,7 +76,7 @@ void GameSession::tickPlayer(double seconds, bool steering) {
         tickBurning();
         if (ready_) itemEntities_.tick(renderer_.level());
         // The water that flows: its updates that are due this tick.
-        fluids_.tick(renderer_.level(), [this](int bx, int by, int bz, Block b) { return renderer_.setBlock(bx, by, bz, b); });
+        if (!remote_) fluids_.tick(renderer_.level(), [this](int bx, int by, int bz, Block b) { return renderer_.setBlock(bx, by, bz, b); });
         if (ready_ && physics_) physics_->tick();
         if (ready_ && redstone_) redstone_->tick();
     }
@@ -254,6 +254,7 @@ void GameSession::die() {
     dead_ = true;
     deathRequested_ = true;
     playWorldSound("entity.player.death", SoundSource::Players, 1.0f, 1.0f + (randomFloat() - randomFloat()) * 0.2f);
+    if (remote_) return;  // (on a server what the player carried is dropped by it)
     // Inventory.dropAll: everything the player carried is scattered where they died (unless the game rule keep_inventory is on).
     for (int slot = 0; slot < Inventory::kSize && !gameRuleOn("keep_inventory"); ++slot) {
         ItemStack& stack = inventory_.item(slot);
@@ -264,6 +265,13 @@ void GameSession::die() {
 }
 
 void GameSession::respawn() {
+    if (remote_) {  // ServerboundClientCommandPacket PERFORM_RESPAWN: the server puts the player back (a position, the health, the inventory) and says so
+        remote_->sendRespawn();
+        dead_ = false;
+        vitals_.health = vitals_.maxHealth;
+        hurtTime_ = invulnerableTime_ = 0;
+        return;
+    }
     dead_ = false;
     vitals_.health = vitals_.maxHealth;
     vitals_.food = 20;
@@ -283,7 +291,7 @@ void GameSession::respawn() {
 void GameSession::tickHealth() {
     if (invulnerableTime_ > 0) --invulnerableTime_;
     if (hurtTime_ > 0) --hurtTime_;
-    if (!survivalBars() || dead_) return;
+    if (!survivalBars() || dead_ || remote_) return;  // (on a server the health is what it says)
     if (vitals_.health > 0.0f && vitals_.health < vitals_.maxHealth && vitals_.food >= 18 && gameRuleOn("natural_health_regeneration")) {
         if (++regenTimer_ >= 80) {
             vitals_.health = std::min(vitals_.maxHealth, vitals_.health + 1.0f);
@@ -297,6 +305,10 @@ void GameSession::tickHealth() {
 // Fire and lava: standing in a fire burns for 8 seconds (1 damage a second, 2 in soul fire), lava for 15 (4 a second); water puts it out. No flames are drawn on the
 // screen yet (the burning overlay).
 void GameSession::tickBurning() {
+    if (remote_) {  // on a server the flames come from its word that the player burns (the entity flags), and it does the damage
+        burnTicks_ = selfOnFire_ ? 20 : 0;
+        return;
+    }
     if (!survivalBars() || dead_) {
         burnTicks_ = 0;
         return;
