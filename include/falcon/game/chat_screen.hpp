@@ -1,5 +1,6 @@
 #pragma once
 
+#include "falcon/game/command_tree.hpp"
 #include "falcon/game/screen_services.hpp"
 #include "falcon/ui/screen.hpp"
 
@@ -7,9 +8,8 @@
 
 namespace falcon {
 
-// The chat input: opened over the world with the Chat or Command key. It shows the chat log in full (focused), an input
-// box across the bottom with a blinking cursor, and lets the player scroll the log and walk the sent-message history. It
-// follows the game's ChatScreen: Enter sends, Escape closes, Up/Down are the history, PageUp/PageDown scroll.
+// The chat: a box across the bottom that sends what is typed (CommandSuggestions: a text starting with "/" is a command, which is coloured as it is typed,
+// completed with Tab, and offered suggestions above the box).
 class ChatScreen : public Screen {
 public:
     // `initial` is what the box starts with: empty for the Chat key, "/" for the Command key.
@@ -32,12 +32,25 @@ protected:
 private:
     void send();
     void setFromHistory(int delta);
+    // Works out the suggestions, the usage and the error for the command being typed (after every change of the text or the caret).
+    void refreshCommand();
+    void applySuggestion();
+    void cycleSuggestion(int delta);
+    [[nodiscard]] std::string coloredInput() const;
 
     ScreenServices& services_;
     std::u32string input_;
     std::size_t cursor_ = 0;
     int historyPos_ = -1;   // -1: the live edit; else an index from the end of the sent history
     std::string draft_;     // the live edit, kept while browsing history
+
+    // The command being typed.
+    CommandSuggestions suggestions_;
+    std::vector<std::string> usage_;
+    std::string commandError_;
+    int selected_ = 0;
+    int firstShown_ = 0;
+    bool hidden_ = false;  // Esc closed the list until the text changes
 };
 
 }  // namespace falcon
