@@ -62,7 +62,7 @@ On startup it looks for assets in this order:
 
 1. `--assets <dir>`
 2. the `FALCON_ASSETS_DIR` environment variable
-3. the newest `26.3\assets` tree under `%APPDATA%\horizon-launcher\versions\*\.local\horizon-client\` (a fallback for development; the launcher passes `--assets` itself)
+3. on Windows, the newest `26.3\assets` tree under `%APPDATA%\horizon-launcher\versions\*\.local\horizon-client\` (a fallback for development; the launcher passes `--assets` itself)
 
 A plain `.minecraft` folder is not enough: the title screen needs the button sprites, logo, font
 sheets and `en_us.json`, which the launcher keeps inside the client jar rather than in
@@ -88,6 +88,33 @@ Dependencies (GLFW 3.4, nlohmann/json, stb, miniaudio) are fetched by CMake at c
 pinned, and never re-fetched once present. Build speed: `ccache` is used automatically when
 installed (objects are cached outside the project, so a deleted `build/` rebuilds in seconds);
 compiling stays light with `cmake --build --preset release -j 3`.
+
+### Linux
+
+Falcon builds and runs on Linux (x86-64; the build is checked on every push on Ubuntu 22.04 with GCC 12, and the programs it makes run on any distribution with glibc 2.35 or newer).
+It needs GCC 12 or newer (or another C++20 compiler), CMake 3.20, Ninja and the development packages below (Debian and Ubuntu names):
+
+```sh
+sudo apt install g++ cmake ninja-build pkg-config libssl-dev libgl1-mesa-dev \
+    libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
+    libxkbcommon-dev libwayland-dev wayland-protocols extra-cmake-modules
+
+cmake --preset release -DFALCON_STATIC_OPENSSL=ON
+cmake --build --preset release     # -> dist/Falcon
+```
+
+`-DFALCON_STATIC_OPENSSL=ON` puts OpenSSL (the cryptography of a server in online mode and the HTTPS to Mojang) inside the program, so it needs nothing but the C library; without it the
+system's `libssl` is used. The window is GLFW's, on X11 or Wayland as the session is (the X11 and Wayland libraries are loaded when the program starts, not linked), the graphics are the driver's
+OpenGL (4.5 when the driver has it, else 3.3: Mesa, NVIDIA and AMD all do) and the sound goes through PulseAudio, PipeWire or ALSA, whichever is there.
+
+Folders: the game folder (options, worlds) is `~/.minecraft`, like the real game's; what Falcon keeps for itself (the launcher's downloads, extra resource packs, the chat keys) is in
+`$XDG_DATA_HOME/Falcon`, which is `~/.local/share/Falcon` unless that variable says otherwise. The `FALCON_*` variables and the options below are the same as on Windows. What differs:
+
+- no icon resource and no dark title bar: the window class and app id are `falcon`, and the desktop gets the icon from the application menu entry the launcher adds;
+- error messages that Windows shows in a message box go to the terminal, and to a `zenity`, `kdialog` or `xmessage` dialog when one is installed and a display is there;
+- `--borderless` has no way to move the window (it needs the title strip that only the Windows build adds).
+
+The launcher needs GTK 3, WebKitGTK 4.1 and Node.js besides: `cmake --preset release -DFALCON_BUILD_LAUNCHER=ON`, then `cmake --build --preset launcher` (see [launcher/README.md](launcher/README.md)).
 
 ### Command line
 

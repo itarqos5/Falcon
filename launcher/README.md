@@ -1,6 +1,6 @@
 # Falcon Launcher
 
-A small native Windows launcher for Falcon, written in C++20 with a React interface.
+A small native launcher for Falcon (Windows and Linux), written in C++20 with a React interface. This page describes the Windows one; what differs on Linux is in the section "Linux" below.
 
 - **No browser is bundled.** The interface is a React + TypeScript page, built into one HTML file, embedded in the exe and shown by the **WebView2 runtime that Windows already has** (it ships with Windows 11 and with Microsoft Edge on Windows 10). If it is missing, the first-run setup offers to install it.
 - **Falcon is bundled.** `FalconLauncher.exe` carries `Falcon.exe` inside it and puts it in `%LOCALAPPDATA%\Falcon\client\` during setup. Nothing else to download for the client.
@@ -64,9 +64,32 @@ The client id is the **Minecraft launcher's own public id, `00000000402b5328`**.
 
 Developing the page alone: `cd launcher/ui && npm install && npm run dev`. In a normal browser a fake host plays the launcher's part; put a state after the URL (`#home`, `#signin`, `#waiting`, `#installing`, `#error`, …), or `#settings` / `#logs` for those pages.
 
+## Linux
+
+The same launcher, with the same page, runs on Linux (x86-64). What is different:
+
+- **The web view is WebKitGTK** (GTK 3, the package `libwebkit2gtk-4.1-0`; `sudo apt install libwebkit2gtk-4.1-0` on Debian and Ubuntu, `webkit2gtk4.1` on Fedora, `webkit2gtk-4.1` on Arch)
+  instead of WebView2. A small script in front of the page gives it the two names it talks to the launcher with, so the page itself is the same file. The page is answered from memory to
+  `falcon://app/index.html`, and nothing but it may be shown in that window (links open in the browser). No browser profile is kept on disk.
+- **One file.** `FalconLauncher` carries the page, the Falcon client (the one that checks ownership) and the icon inside it, like `FalconLauncher.exe`; setup puts the client at
+  `~/.local/share/Falcon/client/<id>/Falcon`, and adds an application menu entry (`~/.local/share/applications/falcon-launcher.desktop`, with the icon next to it) so the desktop can show it with
+  its icon. It needs only the C library and the packages above; the C++ runtime and OpenSSL are inside it.
+- **The window has no system title bar**, as on Windows: the page draws its own, and a press on it starts the window manager's own move (it works on X11 and Wayland). It is a fixed-size window.
+  The Microsoft sign-in is a window of the usual kind with a title, as there.
+- **Where the sign-in is kept:** Linux has nothing a program can call to encrypt for the current user (a keyring may or may not be running), so `account.bin` is a file in a folder only that user can open
+  (mode 0600 in 0700): the refresh token as it is, which signing out deletes and which Microsoft can revoke. The official Minecraft launcher keeps its tokens in a file in the same way.
+- **Folders:** `$XDG_DATA_HOME/Falcon`, which is `~/.local/share/Falcon` (`FALCON_LAUNCHER_HOME` overrides it, as on Windows). The game's files are downloaded there and passed to the client with `--assets`.
+- **Network:** HTTP/1.1 over OpenSSL (no libcurl), with the system's certificates (looked for in the places the distributions put them; `SSL_CERT_FILE` and `SSL_CERT_DIR` work). It does not read the
+  desktop's proxy settings: `HTTPS_PROXY` is not used yet.
+- **Build:** `cmake --preset release -DFALCON_STATIC_OPENSSL=ON -DFALCON_BUILD_LAUNCHER=ON`, then `cmake --build --preset launcher` (needs `libgtk-3-dev`, `libwebkit2gtk-4.1-dev` and Node.js as well as the
+  game's own packages, see the main README). The result is `dist-launcher/FalconLauncher`. The tests run the same way (`cmake --build --preset check`), on the fake network.
+
+If the window comes up blank or the launcher crashes at once with some graphics drivers (NVIDIA on Wayland in particular), WebKitGTK's own switches help: `WEBKIT_DISABLE_DMABUF_RENDERER=1` or
+`WEBKIT_DISABLE_COMPOSITING_MODE=1` in the environment, before starting it.
+
 ## What it costs
 
-Measured on a Ryzen 5 5600G:
+Measured on a Ryzen 5 5600G, on Windows:
 
 - **Start-up:** the window and its splash are up in about 20 ms; the page is interactive about 0.3 s after launch.
 - **Memory:** about **65 MB of private memory in total**: 2.7 MB for the launcher's own process, the rest in the six processes WebView2 needs (browser, renderer, utility). It is not as small as a fully native window would be. That is the price of using web code without shipping a browser. When minimised, the page is suspended and asked to give memory back.
