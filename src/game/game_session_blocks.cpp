@@ -249,6 +249,22 @@ void GameSession::interact(double dt, bool active) {
         }
     }
     digHeld_ = pressed;
+    if (remote_ && use && placeCooldown_ <= 0.0 && info_.gameType != 3) {  // MultiPlayerGameMode.interact: a thing under the crosshair, nearer than any block, gets the click
+        double distance = 0.0;
+        const int entity = entityUnderCrosshair(eye, look, std::min(3.0, target_ ? target_->distance : 3.0), &distance);
+        if (entity >= 0) {
+            const auto found = remote_->players().find(entity);
+            if (found != remote_->players().end()) {
+                const net::RemotePlayer& thing = found->second;
+                const double hx = eye[0] + look[0] * distance, hy = eye[1] + look[1] * distance, hz = eye[2] + look[2] * distance;
+                const double px = thing.xo + (thing.x - thing.xo) * partialTick_, py = thing.yo + (thing.y - thing.yo) * partialTick_, pz = thing.zo + (thing.z - thing.zo) * partialTick_;
+                remote_->sendInteract(entity, hx - px, hy - py, hz - pz, player_.sneaking);
+                swingArm();
+                placeCooldown_ = kRepeatDelay;
+                return;  // (the server's answer is the whole of it: no item is used on what is behind)
+            }
+        }
+    }
     if (info_.gameType >= 2) return;
     if (!attack) {
         breakCooldown_ = 0.0;

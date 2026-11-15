@@ -286,6 +286,45 @@ StyledText componentToStyled(const NbtTag& component) {
 
 StyledText readComponent(Reader& r) { return componentToStyled(readNetworkNbt(r)); }
 
+// An LpVec3 as it is: the velocity of an entity (LpVec3.read): a byte that is 0 for no movement, else six bytes (three values of 15 bits that are fractions of a scale) and when
+// bit 2 of the first byte is set a VarInt that makes the scale bigger.
+void readLpVec3(Reader& r, double& x, double& y, double& z) {
+    x = y = z = 0.0;
+    const std::uint32_t lowest = static_cast<std::uint32_t>(r.u8());
+    if (lowest == 0) return;
+    const std::uint32_t middle = static_cast<std::uint32_t>(r.u8());
+    const std::uint64_t highest = static_cast<std::uint32_t>(r.i32());
+    const std::uint64_t buffer = (highest << 16) | (middle << 8) | lowest;
+    std::uint64_t scale = lowest & 3u;
+    if ((lowest & 4u) == 4u) scale |= (static_cast<std::uint64_t>(static_cast<std::uint32_t>(r.varint())) & 0xFFFFFFFFull) << 2;
+    const auto unpack = [](std::uint64_t value) { return std::min(static_cast<double>(value & 32767ull), 32766.0) * 2.0 / 32766.0 - 1.0; };
+    x = unpack(buffer >> 3) * static_cast<double>(scale);
+    y = unpack(buffer >> 18) * static_cast<double>(scale);
+    z = unpack(buffer >> 33) * static_cast<double>(scale);
+}
+
+// LpVec3.write, the other way of readLpVec3: three numbers in 15 bits each, as fractions of a scale (the nearest whole number above the biggest of them).
+void writeLpVec3(Writer& w, double x, double y, double z) {
+    const auto clean = [](double v) { return std::isnan(v) ? 0.0 : std::clamp(v, -1.7179869183E10, 1.7179869183E10); };
+    x = clean(x);
+    y = clean(y);
+    z = clean(z);
+    const double biggest = std::max({std::abs(x), std::abs(y), std::abs(z)});
+    if (biggest < 3.051944088384301E-5) {
+        w.u8(0);
+        return;
+    }
+    const std::uint64_t scale = static_cast<std::uint64_t>(std::ceil(biggest));
+    const bool more = (scale & 3ull) != scale;
+    const std::uint64_t scaleBits = more ? ((scale & 3ull) | 4ull) : scale;
+    const auto pack = [scale](double v) { return static_cast<std::uint64_t>(std::llround((v / static_cast<double>(scale) * 0.5 + 0.5) * 32766.0)); };
+    const std::uint64_t buffer = scaleBits | (pack(x) << 3) | (pack(y) << 18) | (pack(z) << 33);
+    w.u8(static_cast<std::uint8_t>(buffer & 0xFF));
+    w.u8(static_cast<std::uint8_t>((buffer >> 8) & 0xFF));
+    w.i32(static_cast<std::int32_t>(static_cast<std::uint32_t>(buffer >> 16)));
+    if (more) w.varint(static_cast<int>(scale >> 2));
+}
+
 // The value of a component of this type (the type's number has been read): kept in the stack where the stack has a place for it (the damage, a name), stepped over otherwise.
 // False for a type whose layout is not known here.
 bool readComponentValue(Reader& r, int type, const ComponentIds& ids, ItemStack* stack) {

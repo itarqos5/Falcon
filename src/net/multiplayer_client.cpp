@@ -30,23 +30,6 @@ void unpackBlockPos(std::int64_t v, int& x, int& y, int& z) {
 
 float angleOf(int byteValue) { return static_cast<float>(byteValue) * 360.0f / 256.0f; }
 
-// An LpVec3 as it is: the velocity of an entity (LpVec3.read): a byte that is 0 for no movement, else six bytes (three values of 15 bits that are fractions of a scale) and when
-// bit 2 of the first byte is set a VarInt that makes the scale bigger.
-void readLpVec3(Reader& r, double& x, double& y, double& z) {
-    x = y = z = 0.0;
-    const std::uint32_t lowest = static_cast<std::uint32_t>(r.u8());
-    if (lowest == 0) return;
-    const std::uint32_t middle = static_cast<std::uint32_t>(r.u8());
-    const std::uint64_t highest = static_cast<std::uint32_t>(r.i32());
-    const std::uint64_t buffer = (highest << 16) | (middle << 8) | lowest;
-    std::uint64_t scale = lowest & 3u;
-    if ((lowest & 4u) == 4u) scale |= (static_cast<std::uint64_t>(static_cast<std::uint32_t>(r.varint())) & 0xFFFFFFFFull) << 2;
-    const auto unpack = [](std::uint64_t value) { return std::min(static_cast<double>(value & 32767ull), 32766.0) * 2.0 / 32766.0 - 1.0; };
-    x = unpack(buffer >> 3) * static_cast<double>(scale);
-    y = unpack(buffer >> 18) * static_cast<double>(scale);
-    z = unpack(buffer >> 33) * static_cast<double>(scale);
-}
-
 std::uint32_t formattingColor(int index) {
     static constexpr std::uint32_t kColors[16] = {0x000000, 0x0000AA, 0x00AA00, 0x00AAAA, 0xAA0000, 0xAA00AA, 0xFFAA00, 0xAAAAAA,
                                                   0x555555, 0x5555FF, 0x55FF55, 0x55FFFF, 0xFF5555, 0xFF55FF, 0xFFFF55, 0xFFFFFF};
@@ -1177,6 +1160,16 @@ void MultiplayerClient::sendAttack(int entityId) {
     Writer w;
     w.varint(entityId);
     connection_.send(1, w.data);
+}
+
+void MultiplayerClient::sendInteract(int entityId, double dx, double dy, double dz, bool secondary) {
+    if (phase_ != Phase::Play) return;
+    Writer w;
+    w.varint(entityId);
+    w.varint(0);  // the main hand
+    writeLpVec3(w, dx, dy, dz);
+    w.boolean(secondary);
+    connection_.send(26, w.data);
 }
 
 void MultiplayerClient::sendSwing() {

@@ -604,6 +604,31 @@ void test_trade_offers() {
     CHECK(!readTradeOffer(badReader, ids, none));
 }
 
+// The point of a click on an entity (LpVec3): what is written is read back to within the precision of 15 bits of a scale, nothing at rest is one byte, and a big one has the
+// scale's second part.
+void test_lp_vec3() {
+    const auto roundTrip = [](double x, double y, double z, double& rx, double& ry, double& rz) {
+        Writer w;
+        writeLpVec3(w, x, y, z);
+        Reader r(w.data);
+        readLpVec3(r, rx, ry, rz);
+        return w.data.size();
+    };
+    double x = 9, y = 9, z = 9;
+    CHECK(roundTrip(0, 0, 0, x, y, z) == 1 && x == 0 && y == 0 && z == 0);
+    CHECK(roundTrip(0.25, -0.5, 0.125, x, y, z) == 6);
+    CHECK(std::abs(x - 0.25) < 1e-4 && std::abs(y + 0.5) < 1e-4 && std::abs(z - 0.125) < 1e-4);
+    CHECK(roundTrip(-0.3, 0.7, -0.9, x, y, z) == 6 && std::abs(x + 0.3) < 1e-4 && std::abs(y - 0.7) < 1e-4 && std::abs(z + 0.9) < 1e-4);
+    CHECK(roundTrip(7.5, -3.0, 0.5, x, y, z) > 6);  // scale 8: more than three, so the scale goes on in a VarInt
+    CHECK(std::abs(x - 7.5) < 8 * 1e-4 && std::abs(y + 3.0) < 8 * 1e-4 && std::abs(z - 0.5) < 8 * 1e-4);
+    // the bytes of a known value: (1, 0, -1) is scale 1 and packs to 32766, 16383 and 0 at bits 3, 18 and 33
+    Writer one;
+    writeLpVec3(one, 1.0, 0.0, -1.0);
+    const std::uint64_t expected = 1ull | (32766ull << 3) | (16383ull << 18) | (0ull << 33);
+    CHECK(one.data.size() == 6 && one.data[0] == (expected & 0xFF) && one.data[1] == ((expected >> 8) & 0xFF));  // (then a big-endian int of the bits from the sixteenth up)
+    CHECK(one.data[2] == ((expected >> 40) & 0xFF) && one.data[3] == ((expected >> 32) & 0xFF) && one.data[4] == ((expected >> 24) & 0xFF) && one.data[5] == ((expected >> 16) & 0xFF));
+}
+
 }  // namespace
 
 int main() {
@@ -621,6 +646,7 @@ int main() {
     test_mob_table();
     test_server_commands();
     test_trade_offers();
+    test_lp_vec3();
 #ifdef _WIN32
     test_encrypted_connection();
 #endif

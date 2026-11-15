@@ -265,7 +265,8 @@ private:
     void renderRemotePlayers(const std::array<double, 3>& camPos);
     void renderTestMobs(const std::array<double, 3>& camPos);
     // The player or mob (or boat) that the line from the eye along the look meets first within `maxDistance`, or -1 (its entity id): what a click hits.
-    [[nodiscard]] int entityUnderCrosshair(const std::array<double, 3>& eye, const std::array<double, 3>& look, double maxDistance) const;
+    // The entity under the crosshair (its number or -1), and how far along the look the ray reaches it.
+    [[nodiscard]] int entityUnderCrosshair(const std::array<double, 3>& eye, const std::array<double, 3>& look, double maxDistance, double* distance = nullptr) const;
     void drawNameTags(GuiGraphics& g, int guiWidth, int guiHeight, const Camera& cam);
     void drawPlayerList(GuiGraphics& g, int guiWidth);
     // A flint and steel or a fire charge used on a block (TNT goes off, a campfire or candle lights, else a fire starts next to it). True if it did something.

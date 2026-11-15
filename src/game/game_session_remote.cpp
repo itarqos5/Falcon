@@ -406,24 +406,44 @@ bool GameSession::connectRemote(const std::string& host, int port, const std::st
 // Skins that finished downloading are put on the graphics card (here, where there is a context), and the account's own skin goes on the hand too.
 // What a click hits (MultiPlayerGameMode.attack, Minecraft.pick): the nearest of the players and mobs whose box the line from the eye meets within reach. A player's box is 0.6 wide
 // and 1.8 high (1.5 sneaking), a mob's is its type's; arrows in the air are not hit.
-int GameSession::entityUnderCrosshair(const std::array<double, 3>& eye, const std::array<double, 3>& look, double maxDistance) const {
+int GameSession::entityUnderCrosshair(const std::array<double, 3>& eye, const std::array<double, 3>& look, double maxDistance, double* distance) const {
     if (!remote_) return -1;
     int found = -1;
     double best = maxDistance;
     for (const auto& [id, p] : remote_->players()) {
         double halfWidth = 0.0, height = 0.0;
+        double half[3] = {0.0, 0.0, 0.0};  // for a thing hung on a wall: the box is round its position (HangingEntity)
+        bool hanging = false;
         if (remote_->isPlayerEntity(p)) {
             halfWidth = 0.3;
             height = p.sneaking ? 1.5 : 1.8;
         } else {
             const std::string* type = remote_->mobName(p.type);
             float w = 0.0f, h = 0.0f;
-            if (type == nullptr || !MobRenderer::attackable(*type) || !MobRenderer::sizeOf(*type, w, h)) continue;
-            halfWidth = static_cast<double>(w) / 2.0;
-            height = static_cast<double>(h);
+            if (type != nullptr && (*type == "item_frame" || *type == "glow_item_frame" || *type == "painting")) {
+                double across = 0.75, up = 0.75;  // a frame is 12 pixels square; a painting is as big as its variant says
+                if (*type == "painting") {
+                    const net::PaintingVariantInfo* variant = remote_->paintingVariant(p.variant);
+                    if (variant == nullptr) continue;
+                    across = variant->width;
+                    up = variant->height;
+                }
+                const bool onX = p.data == 4 || p.data == 5, onY = p.data == 0 || p.data == 1;  // (west and east walls: flat in x; floor and ceiling: flat in y)
+                const double thin = 0.03125;  // (a sixteenth of a block thick, round the position)
+                if (onX) { half[0] = thin; half[1] = up / 2.0; half[2] = across / 2.0; }
+                else if (onY) { half[0] = across / 2.0; half[1] = thin; half[2] = up / 2.0; }
+                else { half[0] = across / 2.0; half[1] = up / 2.0; half[2] = thin; }
+                hanging = true;
+            } else if (type == nullptr || !MobRenderer::attackable(*type) || !MobRenderer::sizeOf(*type, w, h)) {
+                continue;
+            } else {
+                halfWidth = static_cast<double>(w) / 2.0;
+                height = static_cast<double>(h);
+            }
         }
         const double px = p.xo + (p.x - p.xo) * partialTick_, py = p.yo + (p.y - p.yo) * partialTick_, pz = p.zo + (p.z - p.zo) * partialTick_;
-        const double lo[3] = {px - halfWidth, py, pz - halfWidth}, hi[3] = {px + halfWidth, py + height, pz + halfWidth};
+        const double lo[3] = {hanging ? px - half[0] : px - halfWidth, hanging ? py - half[1] : py, hanging ? pz - half[2] : pz - halfWidth};
+        const double hi[3] = {hanging ? px + half[0] : px + halfWidth, hanging ? py + half[1] : py + height, hanging ? pz + half[2] : pz + halfWidth};
         double tNear = 0.0, tFar = best;
         bool hit = true;
         for (int axis = 0; axis < 3 && hit; ++axis) {  // the slabs of the box
@@ -443,6 +463,7 @@ int GameSession::entityUnderCrosshair(const std::array<double, 3>& eye, const st
             found = id;
         }
     }
+    if (found >= 0 && distance != nullptr) *distance = best;
     return found;
 }
 

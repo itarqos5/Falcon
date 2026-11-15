@@ -204,6 +204,9 @@ public:
     void sendHeldSlot(int slot);
     void sendDig(int action, int x, int y, int z, int face);  // 0 start, 1 abort, 2 finish
     void sendUseItemOn(int x, int y, int z, int face, double cx, double cy, double cz);
+    // The player uses something on an entity (ServerboundInteractPacket): the point that was hit, relative to the entity, and whether sneaking. A boat is boarded, a villager trades,
+    // a frame takes the item, an armor stand is dressed ... all of it by the server's answer.
+    void sendInteract(int entityId, double dx, double dy, double dz, bool secondary);
     void sendAttack(int entityId);  // the player hits this entity (ServerboundAttackPacket)
     void sendSwing();                                          // the arm swings (ServerboundPunchPacket: the main hand)
     void sendCreativeSlot(int inventorySlot, const ItemStack& stack);  // creative mode: this slot of the inventory now holds this
