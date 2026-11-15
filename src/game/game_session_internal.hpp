@@ -20,6 +20,7 @@ inline constexpr double kRepeatDelay = 0.25;  // holding break or place repeats 
 inline constexpr int kLoadRadius = 4;         // chunks around the spawn that must be ready before play starts
 inline constexpr double kLoadTimeoutSeconds = 30.0;  // the game's client wait timeout (LevelLoadTracker.CLIENT_WAIT_TIMEOUT_MS)
 inline constexpr double kTickSeconds = 0.05;  // the game runs at 20 ticks a second
+inline constexpr int kMaxRemoteTicksPerFrame = 2;  // the same on a server, where a burst of ticks is what an anti-cheat flags as a fast client
 inline constexpr int kMaxTicksPerFrame = 10;  // after a stall the game catches up by at most this many ticks and drops the rest
 
 inline std::string format(const char* pattern, ...) {

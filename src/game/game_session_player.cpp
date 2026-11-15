@@ -40,7 +40,9 @@ void GameSession::tickPlayer(double seconds, bool steering) {
     // A menu that does not stop the game (the inventory) takes the keys: no walking, no jumping, but the world goes on.
     const PlayerInput input = steering ? sampleInput() : PlayerInput{};
     if (steering && services_.options.toggleSprint && !input.forward) sprintLatched_ = false;  // stopping ends a toggled sprint
-    for (int i = 0; i < std::min(due, kMaxTicksPerFrame); ++i) {
+    // On a server a stall is not caught up in a burst: an anti-cheat (Grim's Timer) reads ten ticks in one frame as a client that runs fast. The late ticks are dropped.
+    const int limit = remote_ ? kMaxRemoteTicksPerFrame : kMaxTicksPerFrame;
+    for (int i = 0; i < std::min(due, limit); ++i) {
         playerAgeTicks_ += 1.0;
         if (!pinnedPose_) {  // (a pinned camera, for screenshots, freezes the player; the world goes on)
             const double vx = player_.vx, vy = player_.vy, vz = player_.vz;  // (what it was going at, for a splash)
