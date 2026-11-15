@@ -1,6 +1,7 @@
 #include "falcon/net/crypto.hpp"
 
 #include <algorithm>
+#include <climits>
 #include <cstdio>
 #include <vector>
 
@@ -14,11 +15,21 @@
 #ifndef NT_SUCCESS
 #define NT_SUCCESS(status) (((NTSTATUS)(status)) >= 0)
 #endif
+#else
+#include <openssl/err.h>
+#include <openssl/evp.h>
+#include <openssl/rand.h>
+#include <openssl/rsa.h>
+#include <openssl/x509.h>
+
+#include <memory>
 #endif
 
 namespace falcon::net {
 
 namespace {
+
+#ifdef _WIN32
 
 std::string statusText(long status) {
     char text[32];
@@ -127,8 +138,6 @@ bool parsePrivateKey(const Bytes& der, Bytes& n, Bytes& e, Bytes& p, Bytes& q) {
     return !n.empty() && !e.empty() && !p.empty() && !q.empty();
 }
 
-#ifdef _WIN32
-
 // ---- CNG ----------------------------------------------------------------------------------------------------------------------------------------------------
 
 Bytes hashWith(const wchar_t* algorithm, const Bytes& data) {
@@ -169,6 +178,37 @@ Bytes rsaBlob(bool isPrivate, const Bytes& n, const Bytes& e, const Bytes& p, co
     return blob;
 }
 
+#else
+
+// ---- OpenSSL ------------------------------------------------------------------------------------------------------------------------------------------------
+
+// OpenSSL reads the DER keys itself and does the arithmetic of RSA; only what it answers with has to be turned into text.
+std::string sslError() {
+    const unsigned long code = ERR_get_error();
+    if (code == 0) return "no details";
+    char text[256];
+    ERR_error_string_n(code, text, sizeof text);
+    return text;
+}
+
+struct KeyFree {
+    void operator()(EVP_PKEY* key) const { EVP_PKEY_free(key); }
+};
+struct ContextFree {
+    void operator()(EVP_PKEY_CTX* context) const { EVP_PKEY_CTX_free(context); }
+};
+struct DigestFree {
+    void operator()(EVP_MD_CTX* context) const { EVP_MD_CTX_free(context); }
+};
+
+Bytes hashWith(const EVP_MD* algorithm, const Bytes& data) {
+    Bytes digest(EVP_MAX_MD_SIZE);
+    unsigned int size = 0;
+    if (EVP_Digest(data.data(), data.size(), digest.data(), &size, algorithm, nullptr) != 1) return {};
+    digest.resize(size);
+    return digest;
+}
+
 #endif
 
 }  // namespace
@@ -179,9 +219,7 @@ bool randomBytes(std::uint8_t* out, std::size_t n) {
 #ifdef _WIN32
     return NT_SUCCESS(BCryptGenRandom(nullptr, out, static_cast<ULONG>(n), BCRYPT_USE_SYSTEM_PREFERRED_RNG));
 #else
-    (void)out;
-    (void)n;
-    return false;
+    return n <= static_cast<std::size_t>(INT_MAX) && RAND_bytes(out, static_cast<int>(n)) == 1;
 #endif
 }
 
@@ -189,8 +227,7 @@ Bytes sha1(const Bytes& data) {
 #ifdef _WIN32
     return hashWith(BCRYPT_SHA1_ALGORITHM, data);
 #else
-    (void)data;
-    return {};
+    return hashWith(EVP_sha1(), data);
 #endif
 }
 
@@ -198,8 +235,7 @@ Bytes sha256(const Bytes& data) {
 #ifdef _WIN32
     return hashWith(BCRYPT_SHA256_ALGORITHM, data);
 #else
-    (void)data;
-    return {};
+    return hashWith(EVP_sha256(), data);
 #endif
 }
 
@@ -262,11 +298,29 @@ bool rsaEncrypt(const Bytes& publicKey, const Bytes& plain, Bytes& out, std::str
     BCryptCloseAlgorithmProvider(alg, 0);
     return ok;
 #else
-    (void)publicKey;
-    (void)plain;
-    (void)out;
-    error = "no cryptography for this system";
-    return false;
+    const unsigned char* cursor = publicKey.data();
+    const std::unique_ptr<EVP_PKEY, KeyFree> key(d2i_PUBKEY(nullptr, &cursor, static_cast<long>(publicKey.size())));
+    if (!key) {
+        error = "the server's public key cannot be read";
+        return false;
+    }
+    const std::unique_ptr<EVP_PKEY_CTX, ContextFree> context(EVP_PKEY_CTX_new(key.get(), nullptr));
+    if (!context || EVP_PKEY_encrypt_init(context.get()) != 1 || EVP_PKEY_CTX_set_rsa_padding(context.get(), RSA_PKCS1_PADDING) <= 0) {
+        error = "the key exchange failed (" + sslError() + ")";
+        return false;
+    }
+    std::size_t size = 0;
+    if (EVP_PKEY_encrypt(context.get(), nullptr, &size, plain.data(), plain.size()) != 1) {
+        error = "the key exchange failed (" + sslError() + ")";
+        return false;
+    }
+    out.assign(size, 0);
+    if (EVP_PKEY_encrypt(context.get(), out.data(), &size, plain.data(), plain.size()) != 1) {
+        error = "the key exchange failed (" + sslError() + ")";
+        return false;
+    }
+    out.resize(size);
+    return true;
 #endif
 }
 
@@ -308,11 +362,26 @@ bool rsaSign(const Bytes& privateKey, const Bytes& message, Bytes& signature, st
     BCryptCloseAlgorithmProvider(alg, 0);
     return ok;
 #else
-    (void)privateKey;
-    (void)message;
-    (void)signature;
-    error = "no cryptography for this system";
-    return false;
+    const unsigned char* cursor = privateKey.data();
+    const std::unique_ptr<EVP_PKEY, KeyFree> key(d2i_AutoPrivateKey(nullptr, &cursor, static_cast<long>(privateKey.size())));  // (PKCS#8 or PKCS#1)
+    if (!key) {
+        error = "the private key cannot be read";
+        return false;
+    }
+    const std::unique_ptr<EVP_MD_CTX, DigestFree> context(EVP_MD_CTX_new());
+    std::size_t size = 0;
+    if (!context || EVP_DigestSignInit(context.get(), nullptr, EVP_sha256(), nullptr, key.get()) != 1 ||
+        EVP_DigestSign(context.get(), nullptr, &size, message.data(), message.size()) != 1) {
+        error = "signing failed (" + sslError() + ")";
+        return false;
+    }
+    signature.assign(size, 0);
+    if (EVP_DigestSign(context.get(), signature.data(), &size, message.data(), message.size()) != 1) {
+        error = "signing failed (" + sslError() + ")";
+        return false;
+    }
+    signature.resize(size);  // (PKCS#1 v1.5 padding, the default for an RSA key)
+    return true;
 #endif
 }
 
@@ -322,6 +391,10 @@ Cfb8::~Cfb8() {
 #ifdef _WIN32
     if (key_ != nullptr) BCryptDestroyKey(static_cast<BCRYPT_KEY_HANDLE>(key_));
     if (alg_ != nullptr) BCryptCloseAlgorithmProvider(static_cast<BCRYPT_ALG_HANDLE>(alg_), 0);
+#else
+    // (alg_ is the context that encrypts and key_ the one that decrypts: a stream in CFB mode goes one way, and each of the two directions has its own Cfb8)
+    if (alg_ != nullptr) EVP_CIPHER_CTX_free(static_cast<EVP_CIPHER_CTX*>(alg_));
+    if (key_ != nullptr) EVP_CIPHER_CTX_free(static_cast<EVP_CIPHER_CTX*>(key_));
 #endif
 }
 
@@ -343,9 +416,19 @@ bool Cfb8::init(const std::uint8_t* key, const std::uint8_t* iv) {
     std::copy(iv, iv + 16, iv_);
     return true;
 #else
-    (void)key;
-    (void)iv;
-    return false;
+    EVP_CIPHER_CTX* encrypting = EVP_CIPHER_CTX_new();
+    EVP_CIPHER_CTX* decrypting = EVP_CIPHER_CTX_new();
+    const bool ok = encrypting != nullptr && decrypting != nullptr &&
+                    EVP_EncryptInit_ex(encrypting, EVP_aes_128_cfb8(), nullptr, key, iv) == 1 &&
+                    EVP_DecryptInit_ex(decrypting, EVP_aes_128_cfb8(), nullptr, key, iv) == 1;
+    if (!ok) {
+        EVP_CIPHER_CTX_free(encrypting);
+        EVP_CIPHER_CTX_free(decrypting);
+        return false;
+    }
+    alg_ = encrypting;
+    key_ = decrypting;
+    return true;
 #endif
 }
 
@@ -358,9 +441,12 @@ void Cfb8::process(std::uint8_t* data, std::size_t n, bool encrypt) {
     if (encrypt) BCryptEncrypt(handle, const_cast<PUCHAR>(input.data()), static_cast<ULONG>(n), nullptr, iv_, 16, data, static_cast<ULONG>(n), &written, 0);
     else BCryptDecrypt(handle, const_cast<PUCHAR>(input.data()), static_cast<ULONG>(n), nullptr, iv_, 16, data, static_cast<ULONG>(n), &written, 0);
 #else
-    (void)data;
-    (void)n;
-    (void)encrypt;
+    if (key_ == nullptr || n == 0) return;
+    EVP_CIPHER_CTX* context = static_cast<EVP_CIPHER_CTX*>(encrypt ? alg_ : key_);
+    int written = 0;
+    // (in place is allowed for a stream mode; a chunk is far below the 2 GB an int holds)
+    if (encrypt) EVP_EncryptUpdate(context, data, &written, data, static_cast<int>(n));
+    else EVP_DecryptUpdate(context, data, &written, data, static_cast<int>(n));
 #endif
 }
 

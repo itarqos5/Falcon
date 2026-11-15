@@ -8,6 +8,10 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <winhttp.h>
+#else
+#include "falcon/platform/tls_http.hpp"
+
+#include <cstdlib>
 #endif
 
 namespace falcon {
@@ -71,9 +75,29 @@ HttpAnswer httpsRequest(const std::string& method, const std::string& host, cons
 
 #else
 
-HttpAnswer httpsRequest(const std::string&, const std::string&, const std::string&, const std::string&, const std::string&) {
+// HTTP/1.1 over OpenSSL (platform/tls_http.cpp), one connection for one request.
+HttpAnswer httpsRequest(const std::string& method, const std::string& host, const std::string& path, const std::string& bearer, const std::string& jsonBody) {
     HttpAnswer answer;
-    answer.error = "no network code for this system";
+    TlsStream stream;
+    if (!stream.connect(host, 443, 5000, 8000, answer.error)) return answer;
+    HttpHeaderList headers = {{"User-Agent", "Falcon"}, {"Accept", "application/json"}};
+    if (!bearer.empty()) headers.emplace_back("Authorization", "Bearer " + bearer);
+    if (!jsonBody.empty()) headers.emplace_back("Content-Type", "application/json");
+    if (!sendHttpRequest(stream, method, host, path, headers, jsonBody, false, answer.error)) return answer;
+    HttpHead head;
+    if (!readHttpHead(stream, head, answer.error)) return answer;
+    answer.status = head.status;
+    if (head.status == 429 || head.status == 503) answer.retryAfterSeconds = std::max(0, std::atoi(head.header("Retry-After").c_str()));
+    constexpr std::size_t kMaxBody = 1u << 20;  // (nothing these answers need is anywhere near a megabyte)
+    bool reusable = false;
+    std::string ignored;  // (an answer that breaks off is kept as far as it came, like the WinHTTP version does)
+    readHttpBody(
+        stream, head,
+        [&](const char* data, std::size_t size) {
+            answer.body.append(data, std::min(size, kMaxBody - answer.body.size()));
+            return answer.body.size() < kMaxBody;
+        },
+        reusable, ignored);
     return answer;
 }
 

@@ -194,6 +194,17 @@ target_link_libraries(falcon_base
 )
 if(WIN32)
     target_link_libraries(falcon_base PRIVATE user32 psapi dwmapi winmm winhttp)  # message boxes, console attach; memory use; dark title bar; the ownership check
+else()
+    # Linux: HTTPS (the ownership check, the session server, skins) and the cryptography of a server in online mode are OpenSSL's; threads and dlopen for
+    # the audio backends miniaudio loads at run time.
+    find_package(Threads REQUIRED)
+    option(FALCON_STATIC_OPENSSL "Link OpenSSL into the program (the released build does: no libssl on the player's PC is needed)" OFF)
+    if(FALCON_STATIC_OPENSSL)
+        set(OPENSSL_USE_STATIC_LIBS TRUE)
+    endif()
+    find_package(OpenSSL 1.1.1 REQUIRED)
+    target_sources(falcon_base PRIVATE src/platform/tls_http.cpp)  # HTTPS: the part the game and the launcher share
+    target_link_libraries(falcon_base PUBLIC OpenSSL::SSL OpenSSL::Crypto Threads::Threads ${CMAKE_DL_LIBS})
 endif()
 
 # ---------------------------------------------------------------------------
@@ -351,6 +362,8 @@ add_library(falcon_core
 add_library(falcon::core ALIAS falcon_core)
 if(WIN32)
     target_link_libraries(falcon_core PUBLIC ws2_32 dnsapi bcrypt)  # server status pings: sockets and the SRV lookup; the login of a server in online mode: RSA, AES, SHA
+else()
+    target_link_libraries(falcon_core PUBLIC resolv)  # the SRV lookup (res_query: in libc since glibc 2.34, in libresolv before)
 endif()
 target_link_libraries(falcon_core
     PUBLIC  falcon_ui
@@ -399,6 +412,9 @@ set_target_properties(falcon_client PROPERTIES OUTPUT_NAME "Falcon")
 if(MINGW)
     # Ship a self-contained exe: no dependency on the MinGW runtime DLLs being on PATH.
     target_link_options(falcon_client PRIVATE -static)
+elseif(UNIX AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    # Linux: the C++ runtime goes inside the program, so it does not need the (newer) libstdc++ of the machine that built it. glibc stays dynamic.
+    target_link_options(falcon_client PRIVATE -static-libstdc++ -static-libgcc)
 endif()
 if(NOT MSVC)
     # Release: strip symbols from the shipped exe (a large part of its size).
@@ -488,6 +504,8 @@ target_link_libraries(falcon_client_licensed PRIVATE falcon::core falcon_warning
 set_target_properties(falcon_client_licensed PROPERTIES OUTPUT_NAME "Falcon" RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/licensed")
 if(MINGW)
     target_link_options(falcon_client_licensed PRIVATE -static)
+elseif(UNIX AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    target_link_options(falcon_client_licensed PRIVATE -static-libstdc++ -static-libgcc)
 endif()
 if(NOT MSVC)
     target_link_options(falcon_client_licensed PRIVATE $<$<CONFIG:Release>:-s>)
