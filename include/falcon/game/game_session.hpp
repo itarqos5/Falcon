@@ -222,6 +222,8 @@ private:
     void digSurvival(double dt, bool fresh);   // MultiPlayerGameMode.startDestroyBlock / continueDestroyBlock; `fresh`: the button went down this frame
     void stopDigging();
     void damageHeldTool(int amount);
+    // A flint and steel or a fire charge used on a block (TNT goes off, a campfire or candle lights, else a fire starts next to it). True if it did something.
+    bool useFireStarter(const std::string& item, const BlockHit& hit);
     void interact(double dt, bool active);
     [[nodiscard]] Camera camera() const;
     [[nodiscard]] std::vector<std::string> debugLines() const;
@@ -322,10 +324,10 @@ private:
     bool digHeld_ = false;  // the attack button was down last frame
     Item digItem_ = Item::Air;
     double digClock_ = 0.0;
-    std::unique_ptr<BlockTags> blockTags_;
-    std::unique_ptr<MiningRules> mining_;
     std::shared_ptr<const BlockBehaviours> behaviours_;  // which blocks fall, burn or explode (null: the game files are missing)
     std::unique_ptr<BlockPhysics> physics_;              // falling blocks, fire, TNT
+    std::unique_ptr<BlockTags> blockTags_;
+    std::unique_ptr<MiningRules> mining_;
     std::unique_ptr<BlockLoot> loot_;
     double placeCooldown_ = 0.0;
     double fps_ = 0.0;

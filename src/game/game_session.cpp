@@ -440,7 +440,8 @@ bool GameSession::setBlock(int x, int y, int z, Block block) {
                 const int nx = c[0] + d[0], ny = c[1] + d[1], nz = c[2] + d[2];
                 if (ny < kMinY || ny >= kMaxY) continue;
                 const Block neighbour = at(nx, ny, nz);
-                const Block now = support_->afterNeighborChange(neighbour, nx, ny, nz, at);
+                Block now = support_ ? support_->afterNeighborChange(neighbour, nx, ny, nz, at) : neighbour;
+                if (physics_ && now == neighbour) now = physics_->afterNeighborChange(neighbour, nx, ny, nz, at);  // (a block over a hole falls, fire follows what burns)
                 if (now != neighbour && renderer_.setBlock(nx, ny, nz, now)) {
                     fluids_.blockChanged(renderer_.level(), nx, ny, nz);
                     pending.push_back({nx, ny, nz});
@@ -479,8 +480,8 @@ void GameSession::tickPlayer(double seconds, bool steering) {
         if (ready_) itemEntities_.tick(renderer_.level());
         // The water that flows: its updates that are due this tick.
         fluids_.tick(renderer_.level(), [this](int bx, int by, int bz, Block b) { return renderer_.setBlock(bx, by, bz, b); });
-    }
         if (ready_ && physics_) physics_->tick();
+    }
     // Out of the world (below the void line) the void hurts a survival player (4 a tick, through any protection) until they die; anyone else
     // starts again at the spawn.
     if (!pinnedPose_ && player_.y < static_cast<double>(kMinY) - 64.0) {
@@ -553,6 +554,49 @@ void GameSession::breakBlockAt(int x, int y, int z, bool survival) {
     collectDrop(broken, x, y, z, tool, !mining_ || mining_->correctForDrops(tool, broken));
     // Item.mineBlock: a tool wears by one use (more for some) from a block that was not instant to dig.
     if (!tool.isEmpty() && tool.type().isTool && registry_->state(broken).hardness != 0.0f) damageHeldTool(tool.type().toolDamagePerBlock);
+}
+
+// FlintAndSteelItem.useOn / FireChargeItem.useOn, and TntBlock.useItemOn for TNT: the block clicked decides.
+bool GameSession::useFireStarter(const std::string& item, const BlockHit& hit) {
+    if (!physics_ || !behaviours_) return false;
+    const bool flint = item == "flint_and_steel";
+    const Block clicked = renderer_.level().block(hit.x, hit.y, hit.z);
+    const int index = registry_->state(clicked).block;
+    const std::array<double, 3> where = {hit.x + 0.5, hit.y + 0.5, hit.z + 0.5};
+    const auto spend = [&] {
+        if (creative()) return;
+        if (flint) {
+            damageHeldTool(1);
+        } else {
+            ItemStack& held = inventory_.selectedItem();
+            held.shrink(1);
+            if (held.isEmpty()) held = ItemStack();
+        }
+    };
+    if (behaviours_->isTnt(index)) {  // the TNT is lit where it stands: it becomes primed TNT
+        setBlock(hit.x, hit.y, hit.z, Block::Air);
+        physics_->primeTnt(hit.x, hit.y, hit.z);
+        hand_.swing();
+        spend();
+        return true;
+    }
+    const std::string& name = registry_->type(index).name;
+    if ((name.find("campfire") != std::string::npos || name.find("candle") != std::string::npos) && registry_->get(clicked, "lit") == "false" &&
+        registry_->get(clicked, "waterlogged") != "true") {  // CampfireBlock.canLight, CandleBlock.canLight
+        setBlock(hit.x, hit.y, hit.z, registry_->with(clicked, "lit", "true"));
+        playWorldSound(flint ? "item.flintandsteel.use" : "item.firecharge.use", SoundSource::Blocks, 1.0f, flint ? randomFloat() * 0.4f + 0.8f : (randomFloat() - randomFloat()) * 0.2f + 1.0f, &where);
+        hand_.swing();
+        spend();
+        return true;
+    }
+    const std::array<int, 3> at = hit.placePosition();
+    if (!physics_->canPlaceFireAt(at[0], at[1], at[2])) return false;
+    const std::array<double, 3> fireAt = {at[0] + 0.5, at[1] + 0.5, at[2] + 0.5};
+    playWorldSound(flint ? "item.flintandsteel.use" : "item.firecharge.use", SoundSource::Blocks, 1.0f, flint ? randomFloat() * 0.4f + 0.8f : (randomFloat() - randomFloat()) * 0.2f + 1.0f, &fireAt);
+    setBlock(at[0], at[1], at[2], physics_->fireStateAt(at[0], at[1], at[2]));
+    hand_.swing();
+    spend();
+    return true;
 }
 
 void GameSession::stopDigging() {
@@ -885,6 +929,10 @@ void GameSession::interact(double dt, bool active) {
     if (attack && !creative()) target_ = raycastBlocks(renderer_.level(), eye, look, kReach);  // (a block that was dug is gone: aim past it)
     if (use && placeCooldown_ <= 0.0 && target_) {
         placeCooldown_ = kRepeatDelay;
+        if (!inventory_.selectedItem().isEmpty()) {
+            const std::string& heldName = inventory_.selectedItem().type().name;
+            if ((heldName == "flint_and_steel" || heldName == "fire_charge") && useFireStarter(heldName, *target_)) return;
+        }
         // BlockPlaceContext: aiming at a block that can be replaced (grass, ferns, dead bushes, snow, water ...) puts the new block in ITS place; any other
         // block gets the new one next to the face that was hit (a flower, a torch, a slab: beside or on top of it).
         const bool replaceClicked = registry_->state(renderer_.level().block(target_->x, target_->y, target_->z)).has(kStateReplaceable);
@@ -1181,6 +1229,7 @@ void GameSession::renderWorld(int framebufferWidth, int framebufferHeight) {
     if (ready_) {
         const std::array<double, 3> camPos = {cam.x, cam.y, cam.z};
         hand_.renderGroundItems(renderer_, renderer_.viewProjection(), camPos, itemEntities_.items(), partialTick_);
+        if (physics_) hand_.renderBlockEntities(renderer_, renderer_.viewProjection(), physics_->fallingBlocks(), physics_->primedTnt(), camPos, partialTick_);
         if (perspective_ != 0 && body_ && info_.gameType != 3) {  // F5: the player seen from outside
             const float t = static_cast<float>(partialTick_);
             const auto wrap = [](float degrees) {
@@ -1229,7 +1278,6 @@ void GameSession::renderWorld(int framebufferWidth, int framebufferHeight) {
 std::vector<std::string> GameSession::debugLines() const {
     const RenderStats s = renderer_.stats();
     const auto eye = player_.eye();
-        if (physics_) hand_.renderBlockEntities(renderer_, renderer_.viewProjection(), physics_->fallingBlocks(), physics_->primedTnt(), camPos, partialTick_);
     std::vector<std::string> lines;
     lines.push_back(format("Falcon 0.1.0 (Minecraft 26.3) - %s", info_.name.c_str()));
     lines.push_back(format("%.0f fps (%.1f ms)  cpu %.1f  gpu %.1f", fps_, frameMillis_, cpuMillis_, renderer_.gpuMillis()));
