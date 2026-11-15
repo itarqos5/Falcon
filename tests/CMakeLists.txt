@@ -65,3 +65,7 @@ if(FALCON_VULKAN)
     add_test(NAME falcon_vulkan_tests COMMAND falcon_vulkan_tests)
     add_dependencies(check falcon_vulkan_tests)
 endif()
+
+# How fast chunks are made, and a hash of them (tools/bench_chunks.cpp): for making generation faster without changing a block.
+add_executable(falcon_bench_chunks EXCLUDE_FROM_ALL ../tools/bench_chunks.cpp)
+target_link_libraries(falcon_bench_chunks PRIVATE falcon::core falcon_warnings)
