@@ -2,6 +2,7 @@
 
 #include "falcon/net/connection.hpp"
 #include "falcon/net/protocol_data.hpp"
+#include "falcon/net/session_auth.hpp"
 #include "falcon/text/styled_text.hpp"
 #include "falcon/world/block_registry.hpp"
 #include "falcon/world/chunk.hpp"
@@ -9,6 +10,7 @@
 
 #include <array>
 #include <functional>
+#include <future>
 #include <map>
 #include <memory>
 #include <set>
@@ -23,6 +25,13 @@ using Uuid = std::array<std::uint8_t, 16>;
 [[nodiscard]] int defaultSkinOf(const Uuid& id);
 // Steps over one value of entity data by the number of its kind; false when that kind's layout is not known (the rest of the entries cannot then be read).
 [[nodiscard]] bool skipEntityDataValue(int serializer, Reader& r);
+
+// The account that plays: what a server in online mode asks to see. Without a token only a server that does not check accounts can be joined.
+struct Account {
+    std::string accessToken;  // Minecraft's, for Mojang's servers (the launcher hands it over)
+    std::string profileId;    // the account's id, with or without dashes
+    std::string name;
+};
 
 // One line of the player list (Tab).
 struct TabEntry {
@@ -116,6 +125,9 @@ public:
     void setPlayerEntityType(int type) { playerType_ = type; }  // the number of minecraft:player in the entity type registry
     void setItemEntityType(int type) { itemType_ = type; }      // and of minecraft:item
     void setComponentIds(const ComponentIds& ids) { componentIds_ = ids; }
+    void setAccount(const Account& account) { account_ = account; }  // before start()
+    [[nodiscard]] bool encrypted() const { return connection_.encrypted(); }
+    [[nodiscard]] bool chatSigned() const { return chatSessionSent_; }  // the chat is signed with the account's key (what a server that enforces secure profiles wants)
     void setSoundNames(std::vector<std::string> names) { soundNames_ = std::move(names); }  // by the number the game gives each sound event
     [[nodiscard]] Phase phase() const { return phase_; }
     [[nodiscard]] bool inPlay() const { return phase_ == Phase::Play; }
@@ -161,6 +173,9 @@ private:
     void handlePlay(const Packet& p, RemoteHandler& h);
     void fail(const std::string& why, RemoteHandler* h);
     void sendClientInformation(int configurationOrPlay);
+    void startEncryption(Reader& r, RemoteHandler& h);   // the server asks for encryption (online mode): tell Mojang, then answer
+    void finishEncryption(RemoteHandler& h);              // Mojang has answered: send the key and turn the encryption on
+    void sendChatSession();                               // the key that signs chat is told to the server
 
     const BlockRegistry& registry_;
     Connection connection_;
@@ -173,6 +188,22 @@ private:
     int itemType_ = -1;    // and of an item
     std::map<int, RemoteItem> items_;
     ComponentIds componentIds_;
+    Account account_;
+    struct KeyExchange {
+        Bytes publicKey, challenge;
+        std::uint8_t secret[16] = {};
+    } exchange_;
+    std::future<std::string> joinResult_;  // "" when the session server took the join, else why not
+    struct KeysResult {
+        bool ok = false;
+        ChatKeys keys;
+        std::string error;
+    };
+    std::future<KeysResult> keysResult_;
+    ChatKeys chatKeys_;
+    bool haveChatKeys_ = false, chatSessionSent_ = false;
+    Uuid chatSessionId_{};
+    int chatIndex_ = 0;  // the number of the next signed message in the chain
     int menuStateId_ = 0;  // the state of the player's menu as the server last said it (a click must carry it)
     std::vector<std::string> soundNames_;
     int sequence_ = 0;

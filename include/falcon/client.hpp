@@ -58,6 +58,7 @@ struct ClientOptions {
     std::optional<std::string> language;             // --language <code>: start in this language (e.g. de_de)
     std::optional<std::string> username;             // --username <name>: the player's name (the launcher passes the account's)
     std::optional<std::string> uuid;                 // --uuid <id>: the player's account id
+    std::string accessToken;                         // FALCON_MC_TOKEN: the account's Minecraft access token (the launcher hands it over; kept for servers in online mode, never printed)
     std::optional<std::filesystem::path> gameDir;    // --game-dir <dir>: the ".minecraft" folder (resourcepacks/ lives in it)
     std::vector<ScriptedPacks> packs;                // --packs ID,ID@S, for tests
     int width = 854;                                  // --size WxH (the game's default window)

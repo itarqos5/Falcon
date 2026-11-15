@@ -46,6 +46,9 @@ struct ScreenServices {
     // Who is playing: the name the chat shows, and the account's uuid (the launcher passes both with --username / --uuid).
     std::string playerName = "Player";
     std::string playerUuid;
+    std::string accessToken;  // the account's Minecraft access token, for servers in online mode (empty when Falcon was not started by the launcher)
+    // Joins the server at this address ("host" or "host:port"): the main loop starts the session between frames.
+    std::function<void(const std::string& address)> joinServer;
 };
 
 // A button handler that opens screen T on top of the current one (T's constructor takes the

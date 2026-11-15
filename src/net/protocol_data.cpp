@@ -1,5 +1,7 @@
 #include "falcon/net/protocol_data.hpp"
 
+#include <nlohmann/json.hpp>
+
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -87,15 +89,7 @@ std::string plainOf(const NbtTag& c) {
 }
 
 // A translated text with its arguments: %s in turn, %1$s by number.
-std::string translated(const NbtTag& c, const std::string& key) {
-    std::string pattern = translator() ? translator()(key) : key;
-    if (pattern == key) {
-        if (const NbtTag* fallback = field(c, "fallback"); fallback != nullptr && fallback->type == NbtTag::Type::String) pattern = fallback->text;
-    }
-    std::vector<std::string> args;
-    if (const NbtTag* with = field(c, "with"); with != nullptr) {
-        for (const NbtTag& a : with->items) args.push_back(plainOf(a));
-    }
+std::string substituteArguments(const std::string& pattern, const std::vector<std::string>& args) {
     std::string out;
     std::size_t next = 0;
     for (std::size_t i = 0; i < pattern.size(); ++i) {
@@ -109,6 +103,48 @@ std::string translated(const NbtTag& c, const std::string& key) {
         } else out += pattern[i];
     }
     return out;
+}
+
+std::string translated(const NbtTag& c, const std::string& key) {
+    std::string pattern = translator() ? translator()(key) : key;
+    if (pattern == key) {
+        if (const NbtTag* fallback = field(c, "fallback"); fallback != nullptr && fallback->type == NbtTag::Type::String) pattern = fallback->text;
+    }
+    std::vector<std::string> args;
+    if (const NbtTag* with = field(c, "with"); with != nullptr) {
+        for (const NbtTag& a : with->items) args.push_back(plainOf(a));
+    }
+    return substituteArguments(pattern, args);
+}
+
+// The same for a component written as JSON (the text of a login disconnect).
+void jsonText(const nlohmann::json& j, std::string& out, int depth) {
+    if (depth > 16) return;
+    if (j.is_string()) {
+        out += j.get<std::string>();
+    } else if (j.is_array()) {
+        for (const nlohmann::json& e : j) jsonText(e, out, depth + 1);
+    } else if (j.is_object()) {
+        if (j.contains("text") && j["text"].is_string()) {
+            out += j["text"].get<std::string>();
+        } else if (j.contains("translate") && j["translate"].is_string()) {
+            const std::string key = j["translate"].get<std::string>();
+            std::string pattern = translator() ? translator()(key) : key;
+            if (pattern == key && j.contains("fallback") && j["fallback"].is_string()) pattern = j["fallback"].get<std::string>();
+            std::vector<std::string> args;
+            if (j.contains("with") && j["with"].is_array()) {
+                for (const nlohmann::json& a : j["with"]) {
+                    std::string text;
+                    jsonText(a, text, depth + 1);
+                    args.push_back(text);
+                }
+            }
+            out += substituteArguments(pattern, args);
+        }
+        if (j.contains("extra") && j["extra"].is_array()) {
+            for (const nlohmann::json& e : j["extra"]) jsonText(e, out, depth + 1);
+        }
+    }
 }
 
 const NbtTag* field(const NbtTag& t, const char* name) {
@@ -227,6 +263,14 @@ bool readSections(Reader& data, int stateCount, bool lengthPrefixed, Chunk& chun
 }  // namespace
 
 void setComponentTranslator(std::function<std::string(const std::string&)> translate) { translator() = std::move(translate); }
+
+std::string componentJsonToPlain(const std::string& json) {
+    const nlohmann::json j = nlohmann::json::parse(json, nullptr, false);
+    if (j.is_discarded()) return json;
+    std::string out;
+    jsonText(j, out, 0);
+    return out;
+}
 
 NbtTag readNetworkNbt(Reader& r) {
     const int type = r.u8();

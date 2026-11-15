@@ -370,11 +370,12 @@ int Client::run() {
     int framebufferNowW = options_.width;  // the window's current size, for the GUI Scale button's range
     int framebufferNowH = options_.height;
     ScreenServices services{language, font, panorama, gameOptions, sounds, music, packs, {}, gameDir, {}, {},
-                            loadLanguageList(resources), nullptr, {}, {}, "Player", {}};
+                            loadLanguageList(resources), nullptr, {}, {}, "Player", {}, {}, {}};
     if (options_.username && !options_.username->empty()) services.playerName = *options_.username;
     if (options_.uuid) services.playerUuid = *options_.uuid;
     services.maxGuiScale = [&] { return calculateGuiScale(framebufferNowW, framebufferNowH, /*requested=*/0, false); };
     services.videoModes = [&window] { return window.videoModes(); };
+    services.accessToken = options_.accessToken;
     GameUiContext gameUi(services);  // what the UI library needs from the game
     navigator.setUi(gameUi);
     services.packsChanged = [&] { reloader.request(gameOptions.resourcePacks, gameOptions.language); };

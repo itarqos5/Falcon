@@ -18,6 +18,9 @@ namespace falcon::net {
 // What a translation key says (the language of the player); without one a key is shown as it is.
 void setComponentTranslator(std::function<std::string(const std::string&)> translate);
 
+// The text of a component written as JSON ({"text":"..."}, {"translate":"..."}, a string, a list), as plain text; the text itself when it is not JSON.
+[[nodiscard]] std::string componentJsonToPlain(const std::string& json);
+
 // A text component (a plain string tag or a compound: text, translate, color, bold, italic, underlined, strikethrough, extra) as coloured runs of text.
 [[nodiscard]] StyledText componentToStyled(const NbtTag& component);
 [[nodiscard]] StyledText readComponent(Reader& r);  // (reads the tag first)

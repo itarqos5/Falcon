@@ -146,6 +146,22 @@ void GameSession::syncCreativeSlots() {
 
 bool GameSession::connectRemote(const std::string& host, int port, const std::string& username, std::string& error) {
     remote_ = std::make_unique<net::MultiplayerClient>(*registry_);
+    {  // the account (a server in online mode asks for it); without a token only a server that does not check accounts can be joined
+        net::Account account;
+        account.accessToken = services_.accessToken;
+        account.profileId = services_.playerUuid;
+        account.name = username;
+        if (!account.accessToken.empty() && account.profileId.empty()) {  // not told who it is: Mojang knows
+            std::string id, name;
+            if (!net::fetchProfile(account.accessToken, id, name, error)) {
+                remote_.reset();
+                return false;
+            }
+            account.profileId = id;
+            account.name = name;
+        }
+        remote_->setAccount(account);
+    }
     remote_->setPlayerEntityType(entityTypeNumber(dataRoot_, "minecraft:player"));
     remote_->setItemEntityType(entityTypeNumber(dataRoot_, "minecraft:item"));
     remote_->setComponentIds(componentIds(dataRoot_));

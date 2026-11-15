@@ -1,10 +1,13 @@
 #include "falcon/net/multiplayer_client.hpp"
 
+#include "falcon/net/crypto.hpp"
+
 #include <algorithm>
 #include <cctype>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 
 namespace falcon::net {
 
@@ -116,7 +119,8 @@ void MultiplayerClient::close() {
     phase_ = Phase::Closed;
 }
 
-bool MultiplayerClient::start(const std::string& host, int port, const std::string& username, std::string& error) {
+bool MultiplayerClient::start(const std::string& host, int port, const std::string& requestedName, std::string& error) {
+    const std::string username = account_.name.empty() ? requestedName : account_.name;  // (a server in online mode knows the player by the account's name)
     username_ = username;
     if (!connection_.connect(host, port, error)) {
         phase_ = Phase::Closed;
@@ -124,7 +128,9 @@ bool MultiplayerClient::start(const std::string& host, int port, const std::stri
         return false;
     }
     // The id the server will call this player in a server that does not check accounts is made from the name; what is sent here is not looked at.
-    for (std::size_t i = 0; i < selfId_.size(); ++i) selfId_[i] = static_cast<std::uint8_t>(0x46 + i * 7 + (i < username.size() ? username[i] : 0));
+    if (account_.profileId.empty() || !parseUuid(account_.profileId, selfId_)) {
+        for (std::size_t i = 0; i < selfId_.size(); ++i) selfId_[i] = static_cast<std::uint8_t>(0x46 + i * 7 + (i < username.size() ? username[i] : 0));
+    }
     Writer hello;
     hello.varint(kProtocolVersion);
     hello.string(host);
@@ -163,6 +169,17 @@ void MultiplayerClient::sendClientInformation(int target) {
 }
 
 void MultiplayerClient::pump(RemoteHandler& h) {
+    if (phase_ != Phase::Closed && joinResult_.valid() && joinResult_.wait_for(std::chrono::seconds(0)) == std::future_status::ready) finishEncryption(h);
+    if (keysResult_.valid() && keysResult_.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+        KeysResult keys = keysResult_.get();
+        if (keys.ok) {
+            chatKeys_ = std::move(keys.keys);
+            haveChatKeys_ = true;
+        } else {
+            std::printf("[falcon] chat is not signed: %s\n", keys.error.c_str());
+        }
+    }
+    if (haveChatKeys_ && !chatSessionSent_ && phase_ == Phase::Play) sendChatSession();
     Packet p;
     int budget = 4000;
     while (phase_ != Phase::Closed && budget-- > 0 && connection_.poll(p)) {
@@ -179,13 +196,100 @@ void MultiplayerClient::pump(RemoteHandler& h) {
     }
 }
 
+// ClientboundHelloPacket: the server wants the connection encrypted (online mode). Its public key, a challenge, and whether it will ask Mojang who we are. The shared secret
+// is made up here, Mojang's session server is told that this account joins the server with this secret (which is what the server later asks it), and only then is the
+// answer sent, with the secret and the challenge locked with the server's key; everything after it is encrypted. The talk to Mojang is on another thread.
+void MultiplayerClient::startEncryption(Reader& r, RemoteHandler& h) {
+    const std::string serverId = r.string();
+    const auto bytesOf = [&r]() {
+        const int n = r.varint();
+        Bytes out;
+        if (n < 0 || static_cast<std::size_t>(n) > r.left()) {
+            r.ok = false;
+            return out;
+        }
+        out.assign(r.here(), r.here() + n);
+        r.skip(static_cast<std::size_t>(n));
+        return out;
+    };
+    exchange_.publicKey = bytesOf();
+    exchange_.challenge = bytesOf();
+    const bool authenticate = r.boolean();
+    if (!r.ok || exchange_.publicKey.empty()) {
+        fail("the server's request for encryption cannot be read", &h);
+        return;
+    }
+    if (authenticate && account_.accessToken.empty()) {
+        fail("this server checks accounts (online mode): start Falcon from the Falcon Launcher, which signs in with your Minecraft account", &h);
+        return;
+    }
+    if (!randomBytes(exchange_.secret, sizeof exchange_.secret)) {
+        fail("the system cannot make a secret for the encryption", &h);
+        return;
+    }
+    const std::string hash = sessionHash(serverId, Bytes(exchange_.secret, exchange_.secret + sizeof exchange_.secret), exchange_.publicKey);
+    const std::string token = account_.accessToken, profile = account_.profileId;
+    // (a test of the exchange against a server of a test rig, where there is no session to join: the server will then say that the name could not be verified)
+    const bool skipJoin = std::getenv("FALCON_TEST_SKIP_SESSION_JOIN") != nullptr;
+    joinResult_ = std::async(std::launch::async, [authenticate, skipJoin, token, profile, hash]() -> std::string {
+        if (!authenticate || skipJoin) return {};
+        std::string error;
+        if (joinSession(token, profile, hash, error)) return {};
+        return error.empty() ? "Minecraft's session server refused the sign-in" : error;
+    });
+    if (authenticate && !token.empty()) {  // the key that signs chat is fetched meanwhile
+        keysResult_ = std::async(std::launch::async, [token]() {
+            KeysResult result;
+            result.ok = fetchChatKeys(token, result.keys, result.error);
+            return result;
+        });
+    }
+}
+
+void MultiplayerClient::finishEncryption(RemoteHandler& h) {
+    const std::string refused = joinResult_.get();
+    if (!refused.empty()) {
+        fail(refused, &h);
+        return;
+    }
+    Bytes secret(exchange_.secret, exchange_.secret + sizeof exchange_.secret), lockedSecret, lockedChallenge;
+    std::string error;
+    if (!rsaEncrypt(exchange_.publicKey, secret, lockedSecret, error) || !rsaEncrypt(exchange_.publicKey, exchange_.challenge, lockedChallenge, error)) {
+        fail(error, &h);
+        return;
+    }
+    Writer w;
+    w.varint(static_cast<std::int32_t>(lockedSecret.size()));
+    w.raw(lockedSecret);
+    w.varint(static_cast<std::int32_t>(lockedChallenge.size()));
+    w.raw(lockedChallenge);
+    if (!connection_.sendAndEncrypt(1, w.data, exchange_.secret)) fail("the connection cannot be encrypted", &h);
+}
+
+// ServerboundChatSessionUpdatePacket: a new chat session (a random id) with the key that its messages are signed with, and Mojang's signature that the key is the account's.
+void MultiplayerClient::sendChatSession() {
+    chatSessionSent_ = true;
+    if (!randomBytes(chatSessionId_.data(), chatSessionId_.size())) return;
+    chatSessionId_[6] = static_cast<std::uint8_t>((chatSessionId_[6] & 0x0F) | 0x40);  // (a random UUID: version 4)
+    chatSessionId_[8] = static_cast<std::uint8_t>((chatSessionId_[8] & 0x3F) | 0x80);
+    chatIndex_ = 0;
+    Writer w;
+    w.uuid(chatSessionId_);
+    w.i64(chatKeys_.expiresAtMillis);
+    w.varint(static_cast<std::int32_t>(chatKeys_.publicKey.size()));
+    w.raw(chatKeys_.publicKey);
+    w.varint(static_cast<std::int32_t>(chatKeys_.signature.size()));
+    w.raw(chatKeys_.signature);
+    connection_.send(10, w.data);
+}
+
 void MultiplayerClient::handleLogin(const Packet& p, RemoteHandler& h) {
     Reader r(p.body);
     switch (p.id) {
-        case 0: fail("the server refused the login: " + r.string(), &h); break;  // (login_disconnect has its text as JSON)
-        case 1: fail("this server checks accounts (online mode): Falcon can only join servers that do not, yet", &h); break;
+        case 0: fail(componentJsonToPlain(r.string()), &h); break;  // (login_disconnect has its text as JSON)
+        case 1: startEncryption(r, h); break;
         case 2: {  // login_finished: the profile (id, name, properties); then the configuration begins
-            r.skip(16);
+            selfId_ = r.uuid();
             username_ = r.string();
             connection_.send(3, {});  // login_acknowledged
             phase_ = Phase::Configuration;
@@ -808,13 +912,28 @@ void MultiplayerClient::sendPlayerLoaded() {
 
 void MultiplayerClient::sendChat(const std::string& text) {
     if (phase_ != Phase::Play) return;
+    const std::int64_t millis = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+    std::int64_t salt = 0;
+    Bytes signature;
+    if (chatSessionSent_ && haveChatKeys_) {  // SignedMessageLink and SignedMessageBody: what the signature covers, in the order the game feeds it
+        std::uint8_t random[8];
+        if (randomBytes(random, sizeof random)) {
+            for (const std::uint8_t b : random) salt = (salt << 8) | b;
+            const Bytes payload = chatSignaturePayload(selfId_, chatSessionId_, chatIndex_, salt, millis / 1000, text);
+            std::string error;
+            if (rsaSign(chatKeys_.privateKey, payload, signature, error)) ++chatIndex_;
+            else std::printf("[falcon] a chat message could not be signed: %s\n", error.c_str());
+        }
+    }
     Writer w;
     w.string(text);
-    w.i64(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count());
-    w.i64(0);          // the salt of a message that carries no signature
-    w.boolean(false);  // no signature
-    w.varint(0);       // messages acknowledged
-    w.u8(0); w.u8(0); w.u8(0);
+    w.i64(millis);
+    w.i64(signature.empty() ? 0 : salt);
+    w.boolean(!signature.empty());
+    if (!signature.empty()) w.raw(signature);  // 256 bytes
+    w.varint(0);  // LastSeenMessages.Update: the offset,
+    w.u8(0); w.u8(0); w.u8(0);  // the 20 messages seen (a bit each; none),
+    w.u8(1);  // and the checksum of that (of an empty list: 1)
     connection_.send(9, w.data);
 }
 
