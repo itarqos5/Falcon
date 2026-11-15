@@ -305,6 +305,7 @@ void GameSession::renderRemotePlayers(const std::array<double, 3>& camPos) {
         pose.walkSpeed = std::min(1.0f, p.walkSpeedO + (p.walkSpeed - p.walkSpeedO) * t);
         pose.attackProgress = p.swing;
         pose.crouching = p.sneaking;
+        pose.skin = net::defaultSkinOf(p.id);
         pose.ageTicks = playerAgeTicks_ + partialTick_;
         int sky = 15, block = 0;
         renderer_.lightAtWithCarried(static_cast<int>(std::floor(pose.position[0])), static_cast<int>(std::floor(pose.position[1] + 1.0)), static_cast<int>(std::floor(pose.position[2])), sky, block);

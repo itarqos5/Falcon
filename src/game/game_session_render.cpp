@@ -75,6 +75,7 @@ void GameSession::renderWorld(int framebufferWidth, int framebufferHeight) {
             pose.crouching = player_.sneaking;
             pose.ageTicks = playerAgeTicks_ + partialTick_;
             pose.parts = services_.options.modelParts;
+            if (const char* skin = std::getenv("FALCON_BODY_SKIN")) pose.skin = std::atoi(skin);  // (tests: one of the default skins, 0-17)
             pose.swimAmount = swimAmountOld_ + (swimAmount_ - swimAmountOld_) * t;
             pose.visuallySwimming = player_.isVisuallySwimming();
             pose.inWater = player_.inWater;

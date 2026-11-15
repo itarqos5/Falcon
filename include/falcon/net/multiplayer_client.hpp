@@ -19,6 +19,9 @@ namespace falcon::net {
 
 using Uuid = std::array<std::uint8_t, 16>;
 
+// The default skin of a player (PlayerSkin.get(UUID): the hash of the UUID, modulo the 18 skins; 0-8 slim, 9-17 wide) as BodyPose::skin counts them.
+[[nodiscard]] int defaultSkinOf(const Uuid& id);
+
 // One line of the player list (Tab).
 struct TabEntry {
     Uuid id{};

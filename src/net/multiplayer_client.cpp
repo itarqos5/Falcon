@@ -72,6 +72,18 @@ int inventorySlotOfMenu(int menu) {
 
 }  // namespace
 
+int defaultSkinOf(const Uuid& id) {
+    std::uint64_t msb = 0, lsb = 0;
+    for (int i = 0; i < 8; ++i) {
+        msb = (msb << 8) | id[static_cast<std::size_t>(i)];
+        lsb = (lsb << 8) | id[static_cast<std::size_t>(8 + i)];
+    }
+    // UUID.hashCode: the two halves xored, then the two halves of that xored again (as signed 32-bit numbers).
+    const std::int64_t hilo = static_cast<std::int64_t>(msb ^ lsb);
+    const std::int32_t hash = static_cast<std::int32_t>(hilo >> 32) ^ static_cast<std::int32_t>(hilo);
+    return ((hash % 18) + 18) % 18;  // Math.floorMod
+}
+
 MultiplayerClient::MultiplayerClient(const BlockRegistry& registry) : registry_(registry) {}
 MultiplayerClient::~MultiplayerClient() { close(); }
 

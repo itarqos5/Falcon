@@ -1,5 +1,6 @@
 // The multiplayer protocol's data: the byte reader and writer and the item stacks as the network writes them (no game data is needed).
 #include "falcon/net/bytes.hpp"
+#include "falcon/net/multiplayer_client.hpp"
 #include "falcon/net/protocol_data.hpp"
 
 #include <iostream>
@@ -135,12 +136,31 @@ void test_item_stacks() {
     }
 }
 
+// Which of the 18 default skins a UUID gets: Java's UUID.hashCode and Math.floorMod, worked out by hand.
+void test_default_skins() {
+    Uuid id{};
+    CHECK(defaultSkinOf(id) == 0);  // the nil UUID hashes to 0
+    id[7] = 1;                      // most significant half 1
+    CHECK(defaultSkinOf(id) == 1);
+    id = Uuid{};
+    id[15] = 0x80;  // the least significant half 0x80 (the hash's low half is then 0x80 = 128; 128 mod 18 = 2)
+    CHECK(defaultSkinOf(id) == 2);
+    id = Uuid{};
+    for (int i = 8; i < 16; ++i) id[static_cast<std::size_t>(i)] = 0xFF;
+    id[15] = 0xFE;  // the least significant half is -2: the hash is (-1) ^ (-2) = 1
+    CHECK(defaultSkinOf(id) == 1);
+    id = Uuid{};
+    id[12] = 0x80;  // the low half of the hash is 0x80000000, which is -2147483648 as a signed number; floorMod(-2147483648, 18) is 16
+    CHECK(defaultSkinOf(id) == 16);
+}
+
 }  // namespace
 
 int main() {
     test_varints();
     test_reader_runs_out();
     test_item_stacks();
+    test_default_skins();
     if (g_failures != 0) {
         std::cerr << g_failures << " check(s) failed\n";
         return 1;

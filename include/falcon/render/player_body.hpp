@@ -25,6 +25,9 @@ struct BodyPose {
     float walkSpeed = 0.0f;
     float attackProgress = 0.0f;       // 0..1 through the swing of the right arm; 0 = not swinging
     bool crouching = false;
+    // The skin: -1 is the plain Steve (wide arms); 0-8 are the nine default skins with slim arms and 9-17 the same with wide arms, in the order of the game's own
+    // PlayerSkin.DEFAULT_SKINS (alex, ari, efe, kai, makena, noor, steve, sunny, zuri), which is how a player without a skin of their own gets one.
+    int skin = -1;
     double ageTicks = 0.0;             // the arms sway a little as they do in the game
     std::array<float, 3> light{1.0f, 1.0f, 1.0f};  // the light colour where the player stands
     // Cape, Jacket, Left Sleeve, Right Sleeve, Left Pant Leg, Right Pant Leg, Hat: the Skin Customization options.
@@ -53,6 +56,12 @@ public:
 private:
     PlayerBodyRenderer() = default;
     EntityPart model_;
+    EntityPart slimModel_;  // the same with arms of three pixels (the slim skins)
+    bool haveSlim_ = false;
+    std::array<EntityPart, 4> armorModelsSlim_;
+    std::array<bool, 4> haveArmorSlim_{};
+    std::map<int, std::unique_ptr<Texture2D>> skins_;  // the default skins, loaded when a player wears one; null for one that cannot be read
+    const Texture2D& skinTexture(int index);
     std::array<EntityPart, 4> armorModels_;  // helmet, chestplate, leggings, boots (the armor layers of the player model)
     std::array<bool, 4> haveArmorModel_{};
     std::map<std::string, std::unique_ptr<Texture2D>> armorTextures_;  // by "humanoid/iron"; null for one that cannot be read

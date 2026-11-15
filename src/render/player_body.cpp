@@ -181,6 +181,21 @@ std::unique_ptr<PlayerBodyRenderer> PlayerBodyRenderer::create(const ResourceMan
     }
     out->skin_ = Texture2D(*skin, FilterMode::Nearest);
     out->resources_ = &resources;
+    {  // the model with slim arms, and its armor layers (without them the slim skins are drawn with the wide model)
+        std::string slimError;
+        if (auto slim = loadEntityModel(dir, "minecraft:player_slim#main", slimError)) {
+            out->slimModel_ = std::move(*slim);
+            out->haveSlim_ = true;
+        }
+        static const char* const kSlimLayers[4] = {"minecraft:player_slim#helmet", "minecraft:player_slim#chestplate", "minecraft:player_slim#leggings", "minecraft:player_slim#boots"};
+        for (std::size_t i = 0; i < 4; ++i) {
+            std::string armorError;
+            if (auto armorModel = loadEntityModel(dir, kSlimLayers[i], armorError)) {
+                out->armorModelsSlim_[i] = std::move(*armorModel);
+                out->haveArmorSlim_[i] = true;
+            }
+        }
+    }
     {  // the armor layers of the model (without them nothing is worn)
         static const char* const kLayers[4] = {"minecraft:player#helmet", "minecraft:player#chestplate", "minecraft:player#leggings", "minecraft:player#boots"};
         for (std::size_t i = 0; i < 4; ++i) {
@@ -215,6 +230,23 @@ PlayerBodyRenderer::~PlayerBodyRenderer() {
     if (vbo_ != 0) gl::DeleteBuffers(1, &vbo_);
 }
 
+// One of the default skins (see BodyPose::skin); the plain Steve for -1 or for a picture the game's files do not have.
+const Texture2D& PlayerBodyRenderer::skinTexture(int index) {
+    if (index < 0 || index > 17) return skin_;
+    auto it = skins_.find(index);
+    if (it == skins_.end()) {
+        static const char* const kNames[9] = {"alex", "ari", "efe", "kai", "makena", "noor", "steve", "sunny", "zuri"};
+        std::unique_ptr<Texture2D> texture;
+        if (resources_ != nullptr) {
+            const std::string path = std::string("textures/entity/player/") + (index < 9 ? "slim/" : "wide/") + kNames[index % 9] + ".png";
+            const auto bytes = resources_->readBytes(ResourceLocation("minecraft", path));
+            if (const auto image = bytes ? decodePng(*bytes) : std::nullopt) texture = std::make_unique<Texture2D>(*image, FilterMode::Nearest);
+        }
+        it = skins_.emplace(index, std::move(texture)).first;
+    }
+    return it->second ? *it->second : skin_;
+}
+
 // The picture of an armor layer ("humanoid" or "humanoid_leggings") for a material ("iron"); null when the game has none.
 const Texture2D* PlayerBodyRenderer::armorTexture(const std::string& layer, const std::string& material) {
     const std::string key = layer + "/" + material;
@@ -232,7 +264,8 @@ const Texture2D* PlayerBodyRenderer::armorTexture(const std::string& layer, cons
 
 void PlayerBodyRenderer::render(const Matrix4f& viewProj, const std::array<double, 3>& cam, const BodyPose& pose) {
     // HumanoidModel.setupAnim on a copy of the model.
-    EntityPart model = model_;
+    const bool slim = haveSlim_ && pose.skin >= 0 && pose.skin < 9;
+    EntityPart model = slim ? slimModel_ : model_;
     EntityPart* head = model.find("head");
     EntityPart* body = model.find("body");
     EntityPart* rightArm = model.find("right_arm");
@@ -363,7 +396,7 @@ void PlayerBodyRenderer::render(const Matrix4f& viewProj, const std::array<doubl
         gl::BufferData(gl::ARRAY_BUFFER, static_cast<gl::GLsizeiptr>(list.size() * sizeof(Vertex)), list.data(), gl::STREAM_DRAW);
         gl::DrawArrays(gl::TRIANGLES, 0, static_cast<gl::GLsizei>(list.size()));
     };
-    draw(vertices, skin_, 1.0f, 1.0f, 1.0f);
+    draw(vertices, skinTexture(pose.skin), 1.0f, 1.0f, 1.0f);
     // The armor worn: each layer of the model in the posed body's pose, with its own picture (leather is brown unless dyed, with a plain overlay on top).
     for (std::size_t slot = 0; slot < 4; ++slot) {
         const std::string& item = pose.armor[slot];
@@ -375,7 +408,7 @@ void PlayerBodyRenderer::render(const Matrix4f& viewProj, const std::array<doubl
         if (material == "turtle") material = "turtle_scute";
         const Texture2D* texture = armorTexture(slot == 2 ? "humanoid_leggings" : "humanoid", material);
         if (texture == nullptr) continue;
-        EntityPart worn = armorModels_[slot];
+        EntityPart worn = slim && haveArmorSlim_[slot] ? armorModelsSlim_[slot] : armorModels_[slot];
         copyPose(worn, model);
         std::vector<Vertex> list;
         collect(worn, Xf{}, entity, pose.parts, list);
