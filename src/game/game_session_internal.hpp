@@ -35,6 +35,8 @@ inline std::string format(const char* pattern, ...) {
 // Chunks are made and meshed on this many threads: about half the logical cores (min 3, max 8), so loading and
 // terrain fill-in are quick while the main and render threads - and anything else running - still keep cores.
 inline unsigned workerCount() { return std::clamp(std::thread::hardware_concurrency() / 2, 3u, 8u); }
+// ... and while the world loads (the loading screen: nothing else is going on) all but two of them, at below-normal priority.
+inline unsigned loadWorkerCount() { return std::clamp(std::thread::hardware_concurrency() > 2 ? std::thread::hardware_concurrency() - 2 : 1u, workerCount(), 16u); }
 
 // A body that glides with elytra (AvatarRenderer.setupRotations, HumanoidModel.setupAnim): the body leans over as it picks up speed (in the first 10 ticks), turns toward where it
 // is going when that is not where it looks, and the limbs hardly swing at speed. `flown` is how long it has glided (ticks, with the part of this one), the look is in degrees, the

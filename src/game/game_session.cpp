@@ -130,7 +130,7 @@ GameSession::GameSession(ScreenServices& services, const ResourceManager& resour
       itemIcons_(models_),
       hand_(resources, models_, itemIcons_),
       overworld_(makeOverworld(resources, *registry_, info)),
-      renderer_(models_, info.seed, info.style, workerCount(), overworld_) {
+      renderer_(models_, info.seed, info.style, loadWorkerCount(), overworld_) {
     (void)loadItems(services, resources, *registry_);
     dataRoot_ = resources.dataRoot();
     if (!services.playerUuid.empty()) {  // the account's own skin (what anyone sees of an account is public)
@@ -516,6 +516,7 @@ void GameSession::update(double dt, bool active, int framebufferWidth, int frame
         const bool timedOut = loadElapsed_ >= kLoadTimeoutSeconds;
         if (loaded || timedOut) {
             ready_ = true;
+            renderer_.setActiveWorkers(workerCount());  // playing: about half of the PC (it all made the spawn area)
             progress_ = smoothedProgress_ = 1.0f;
             if (timedOut && !loaded) std::printf("[falcon] the spawn area did not finish loading in %.0f s: starting anyway\n", loadElapsed_);
             std::printf("[falcon] spawn area loaded in %.2f s\n", loadElapsed_);

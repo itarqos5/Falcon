@@ -200,4 +200,10 @@ std::optional<GpuAdapter> findGpuAdapter(const std::string& glRenderer) {
 #endif
 }
 
+void lowerCurrentThreadPriority() {
+#ifdef _WIN32
+    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
+#endif
+}
+
 }  // namespace falcon

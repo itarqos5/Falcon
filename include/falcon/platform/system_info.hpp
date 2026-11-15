@@ -38,4 +38,8 @@ struct GpuAdapter {
 // "31.9 GB" or "512 MB": bytes in the unit people read them in.
 [[nodiscard]] std::string formatByteSize(std::uint64_t bytes);
 
+// Lets the calling thread run only on time the frame thread and the other programs on the PC leave over (Windows: below-normal priority; elsewhere it does nothing). For the
+// worker threads that make chunks: with it there can be many of them while the world loads without taking the frame thread's cores.
+void lowerCurrentThreadPriority();
+
 }  // namespace falcon
