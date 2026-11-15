@@ -68,6 +68,7 @@ bool Connection::readExact(std::uint8_t* out, std::size_t n) {
     while (got < n) {
         const int r = ::recv(asSocket(socket_), reinterpret_cast<char*>(out + got), static_cast<int>(n - got), 0);
         if (r <= 0) return false;
+        if (decrypting_.load(std::memory_order_acquire)) receiveCipher_.decrypt(out + got, static_cast<std::size_t>(r));
         got += static_cast<std::size_t>(r);
     }
     return true;
@@ -149,13 +150,11 @@ bool Connection::poll(Packet& out) {
     return true;
 }
 
-void Connection::send(int id, const Bytes& body) {
-    if (!open_.load()) return;
+Bytes Connection::frameOf(int id, const Bytes& body, int threshold) {
     Writer inner;
     inner.varint(id);
     inner.raw(body);
     Writer frame;
-    const int threshold = threshold_.load();
     if (threshold >= 0) {
         if (static_cast<int>(inner.data.size()) >= threshold) {
             int outLength = 0;
@@ -173,16 +172,40 @@ void Connection::send(int id, const Bytes& body) {
     Writer out;
     out.varint(static_cast<std::int32_t>(frame.data.size()));
     out.raw(frame.data);
-    std::lock_guard<std::mutex> lock(sendMutex_);
+    return std::move(out.data);
+}
+
+void Connection::transmit(Bytes& bytes) {
+    if (encrypting_) sendCipher_.encrypt(bytes.data(), bytes.size());
     std::size_t sent = 0;
-    while (sent < out.data.size()) {
-        const int r = ::send(asSocket(socket_), reinterpret_cast<const char*>(out.data.data() + sent), static_cast<int>(out.data.size() - sent), 0);
+    while (sent < bytes.size()) {
+        const int r = ::send(asSocket(socket_), reinterpret_cast<const char*>(bytes.data() + sent), static_cast<int>(bytes.size() - sent), 0);
         if (r <= 0) {
             setClosed("the connection was closed");
             return;
         }
         sent += static_cast<std::size_t>(r);
     }
+}
+
+void Connection::send(int id, const Bytes& body) {
+    if (!open_.load()) return;
+    Bytes bytes = frameOf(id, body, threshold_.load());
+    std::lock_guard<std::mutex> lock(sendMutex_);  // (the cipher goes through the stream in order: the packets must too)
+    transmit(bytes);
+}
+
+bool Connection::sendAndEncrypt(int id, const Bytes& body, const std::uint8_t* secret) {
+    if (!open_.load()) return false;
+    if (!sendCipher_.init(secret, secret) || !receiveCipher_.init(secret, secret)) return false;
+    Bytes bytes = frameOf(id, body, threshold_.load());
+    std::lock_guard<std::mutex> lock(sendMutex_);
+    // The server will encrypt its next packet as soon as it has this one: the reader must be ready to decrypt before this goes out. Nothing of the server's is on its way
+    // before that (it waits for this answer), so no byte that is decrypted was sent as it was.
+    decrypting_.store(true, std::memory_order_release);
+    transmit(bytes);
+    encrypting_ = true;
+    return true;
 }
 
 void Connection::close() {

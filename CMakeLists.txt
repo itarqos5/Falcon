@@ -281,6 +281,8 @@ add_library(falcon_core
     src/net/connection.cpp
     src/net/protocol_data.cpp
     src/net/multiplayer_client.cpp
+    src/net/crypto.cpp
+    src/net/session_auth.cpp
     src/audio/vorbis_impl.c
     src/audio/miniaudio_impl.cpp
     src/audio/ogg.cpp
@@ -334,7 +336,7 @@ add_library(falcon_core
 )
 add_library(falcon::core ALIAS falcon_core)
 if(WIN32)
-    target_link_libraries(falcon_core PUBLIC ws2_32 dnsapi)  # server status pings: sockets and the SRV lookup
+    target_link_libraries(falcon_core PUBLIC ws2_32 dnsapi bcrypt)  # server status pings: sockets and the SRV lookup; the login of a server in online mode: RSA, AES, SHA
 endif()
 target_link_libraries(falcon_core
     PUBLIC  falcon_ui
