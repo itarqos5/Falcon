@@ -160,6 +160,9 @@ public:
 
     // Changes a block and remeshes the sections it touches at once.
     bool setBlock(int x, int y, int z, Block block);
+    // Between these two, setBlock only records what it touched and the meshes and the light are redone once, at the end (an explosion changes hundreds of blocks).
+    void beginBatch() { ++batchDepth_; }
+    void endBatch();
 
     [[nodiscard]] RenderStats stats() const { return stats_; }
     // GPU time of the last finished world pass, in milliseconds (0 until a measurement is back).
@@ -300,6 +303,9 @@ private:
     std::unordered_set<ChunkPos, ChunkPosHash> lightRequested_;                // light job asked for, not applied yet
     std::unordered_map<ChunkPos, std::uint32_t, ChunkPosHash> lightStamps_;     // latest light request of each chunk
     std::unordered_map<ChunkPos, std::uint32_t, ChunkPosHash> editStamps_;
+    int batchDepth_ = 0;
+    std::vector<SectionKey> batchTouched_;
+    std::unordered_set<ChunkPos, ChunkPosHash> batchLight_;
 
     mutable std::mutex resultsMutex_;
     std::vector<ChunkResult> chunkResults_;

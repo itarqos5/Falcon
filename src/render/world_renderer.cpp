@@ -1547,12 +1547,31 @@ bool WorldRenderer::setBlock(int x, int y, int z, Block block) {
     if (ly == 0) touched.push_back({cx, cz, sy - 1});
     if (ly == 15) touched.push_back({cx, cz, sy + 1});
     for (const SectionKey& k : touched) ++editStamps_[{k.x, k.z}];  // any mesh still being made from older data is stale
+    if (batchDepth_ > 0) {  // (see beginBatch: the meshes and the light wait for the end of the batch)
+        for (const SectionKey& k : touched) {
+            if (std::find(batchTouched_.begin(), batchTouched_.end(), k) == batchTouched_.end()) batchTouched_.push_back(k);
+        }
+        for (int dz = -1; dz <= 1; ++dz) {
+            for (int dx = -1; dx <= 1; ++dx) batchLight_.insert({cx + dx, cz + dz});
+        }
+        return true;
+    }
     for (const SectionKey& k : touched) meshNow(k);
     // The light changes too (a torch, a roof, a hole in the ground): redo it for the chunk and the ones around it.
     for (int dz = -1; dz <= 1; ++dz) {
         for (int dx = -1; dx <= 1; ++dx) requestLight({cx + dx, cz + dz}, true);
     }
     return true;
+}
+
+void WorldRenderer::endBatch() {
+    if (batchDepth_ > 0 && --batchDepth_ > 0) return;
+    batchDepth_ = 0;
+    const std::vector<SectionKey> touched = std::move(batchTouched_);
+    batchTouched_.clear();
+    for (const SectionKey& k : touched) meshNow(k);
+    for (const ChunkPos& c : batchLight_) requestLight(c, true);
+    batchLight_.clear();
 }
 
 }  // namespace falcon
