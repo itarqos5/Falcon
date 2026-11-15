@@ -3,6 +3,7 @@
 #include "falcon/net/connection.hpp"
 #include "falcon/net/last_seen.hpp"
 #include "falcon/net/protocol_data.hpp"
+#include "falcon/net/server_commands.hpp"
 #include "falcon/net/session_auth.hpp"
 #include "falcon/net/skin_fetcher.hpp"
 #include "falcon/text/styled_text.hpp"
@@ -247,3 +248,4 @@ private:
 };
 
 }  // namespace falcon::net
+    ServerCommands commands_;  // the server's command tree: which arguments of a command are messages that must be signed

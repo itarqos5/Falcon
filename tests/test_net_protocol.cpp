@@ -5,6 +5,7 @@
 #include "falcon/net/crypto.hpp"
 #include "falcon/net/last_seen.hpp"
 #include "falcon/net/multiplayer_client.hpp"
+#include "falcon/net/server_commands.hpp"
 #include "falcon/net/session_auth.hpp"
 #include "falcon/net/skin_fetcher.hpp"
 #include "falcon/render/mob_renderer.hpp"
@@ -483,6 +484,56 @@ void test_mob_table() {
     }
 }
 
+// A command tree as a server sends it, and which arguments of what is typed are messages to sign.
+void test_server_commands() {
+    Writer w;
+    w.varint(6);
+    const auto node = [&](int flags, std::vector<int> children, int redirect, const char* name, int parser) {
+        w.u8(flags);
+        w.varint(static_cast<std::int32_t>(children.size()));
+        for (const int c : children) w.varint(c);
+        if (flags & 8) w.varint(redirect);
+        if ((flags & 3) != 0) w.string(name);
+        if ((flags & 3) == 2) {
+            w.varint(parser);
+            if (parser == 6) w.u8(0);  // an entity: one or many, players or all
+            if (parser == 1) {         // a float with a least and a most
+                w.u8(3);
+                w.f32(0.0f);
+                w.f32(1.0f);
+            }
+        }
+    };
+    node(0, {1, 2}, -1, "", -1);           // 0: the root
+    node(1, {3}, -1, "msg", -1);            // 1: msg
+    node(1, {5}, -1, "say", -1);            // 2: say
+    node(2, {4}, -1, "targets", 6);         // 3: <targets> (an entity)
+    node(2 | 4, {}, -1, "message", 20);     // 4: <message>, a message
+    node(2 | 4, {}, -1, "message", 20);     // 5: <message>
+    w.varint(0);                            // the root is node 0
+    ServerCommands commands;
+    Reader r(w.data);
+    CHECK(commands.read(r) && !commands.empty());
+    auto args = commands.signableArguments("msg Steve hello world");
+    CHECK(args.size() == 1 && args[0].name == "message" && args[0].value == "hello world");
+    args = commands.signableArguments("say hi");
+    CHECK(args.size() == 1 && args[0].value == "hi");
+    args = commands.signableArguments("msg @a[team=red, limit=2] yo");  // a selector with a space in its brackets is one word
+    CHECK(args.size() == 1 && args[0].value == "yo");
+    CHECK(commands.signableArguments("msg Steve").empty());       // no message yet
+    CHECK(commands.signableArguments("gamemode creative").empty());  // not in the tree
+    CHECK(commands.signableArguments("").empty());
+    // a tree that cannot be read leaves nothing behind
+    Writer bad;
+    bad.varint(2);
+    bad.u8(0);
+    bad.varint(1);
+    bad.varint(5);  // a child that is not there... and the data ends
+    Reader badReader(bad.data);
+    ServerCommands none;
+    CHECK(!none.read(badReader) && none.empty());
+}
+
 }  // namespace
 
 int main() {
@@ -498,6 +549,7 @@ int main() {
     test_last_seen();
     test_skins();
     test_mob_table();
+    test_server_commands();
 #ifdef _WIN32
     test_encrypted_connection();
 #endif

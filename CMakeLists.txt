@@ -286,6 +286,7 @@ add_library(falcon_core
     src/net/session_auth.cpp
     src/net/last_seen.cpp
     src/net/skin_fetcher.cpp
+    src/net/server_commands.cpp
     src/audio/vorbis_impl.c
     src/audio/miniaudio_impl.cpp
     src/audio/ogg.cpp

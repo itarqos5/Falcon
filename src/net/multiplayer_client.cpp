@@ -566,6 +566,10 @@ void MultiplayerClient::handlePlay(const Packet& p, RemoteHandler& h) {
         case 107: {  // set_held_slot
             const int slot = r.varint();
             if (r.ok && slot >= 0 && slot < 9 && h.heldSlot) h.heldSlot(slot);
+        case 16: {      // commands: the command tree (only to know which arguments are messages)
+            if (!commands_.read(r)) std::printf("[falcon] the server's command tree could not be read: commands with messages go unsigned\n");
+            break;
+        }
             break;
         }
         case 119: {  // sound: an event at a place (the position is in eighths of a block)
@@ -1045,8 +1049,54 @@ void MultiplayerClient::sendCreativeSlot(int inventorySlot, const ItemStack& sta
     w.i16(menuSlot);
     writeItemStack(w, stack);
     connection_.send(57, w.data);
+// A command: when it has message arguments (/msg, /say, /me ...), and there is a chat session, they are signed the way a chat message is (ServerboundChatCommandSignedPacket: the
+// command, the time, the salt, a signature for each message argument and which messages of others were seen); otherwise the command goes as it is.
 }
 
+    const std::vector<SignableArgument> arguments = commands_.signableArguments(text);
+    if (!arguments.empty() && chatSessionSent_ && haveChatKeys_) {
+        const std::int64_t millis = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+        std::uint8_t random[8];
+        if (randomBytes(random, sizeof random)) {
+            std::int64_t salt = 0;
+            for (const std::uint8_t b : random) salt = (salt << 8) | b;
+            const LastSeenTracker::Update seen = lastSeen_.generateAndApplyUpdate();
+            std::vector<std::pair<std::string, Bytes>> signatures;
+            int index = chatIndex_;
+            bool signedAll = true;
+            for (const SignableArgument& argument : arguments) {  // each message argument is a message of the chain
+                Bytes signature;
+                std::string error;
+                const Bytes payload = chatSignaturePayload(selfId_, chatSessionId_, index, salt, millis / 1000, argument.value, seen.seen);
+                if (!rsaSign(chatKeys_.privateKey, payload, signature, error)) {
+                    std::printf("[falcon] a command could not be signed: %s\n", error.c_str());
+                    signedAll = false;
+                    break;
+                }
+                signatures.emplace_back(argument.name, std::move(signature));
+                ++index;
+            }
+            if (signedAll) {
+                chatIndex_ = index;
+                Writer w;
+                w.string(text);
+                w.i64(millis);
+                w.i64(salt);
+                w.varint(static_cast<std::int32_t>(signatures.size()));
+                for (const auto& [name, signature] : signatures) {
+                    w.string(name);
+                    w.raw(signature);
+                }
+                w.varint(seen.offset);
+                w.u8(static_cast<int>(seen.acknowledged & 0xFF));
+                w.u8(static_cast<int>((seen.acknowledged >> 8) & 0xFF));
+                w.u8(static_cast<int>((seen.acknowledged >> 16) & 0xFF));
+                w.u8(seen.checksum);
+                connection_.send(8, w.data);
+                return;
+            }
+        }
+    }
 void MultiplayerClient::sendUseItem(float yaw, float pitch) {
     if (phase_ != Phase::Play) return;
     Writer w;
