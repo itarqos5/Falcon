@@ -317,6 +317,8 @@ HandRenderer::HeldModel HandRenderer::buildHeldModel(const ItemStack& stack) {
             if (!model.firstLeft.present) model.firstLeft = model.firstRight;  // the game's fallback
             model.ground = info->transform("ground");
             model.thirdRight = info->transform("thirdperson_righthand");
+            model.thirdLeft = info->transform("thirdperson_lefthand");
+            if (!model.thirdLeft.present) model.thirdLeft = model.thirdRight;
             first = false;
         }
         if (info->generated) {
@@ -535,6 +537,29 @@ void HandRenderer::renderGroundItems(WorldRenderer& world, const Matrix4f& viewP
             world.drawHeld(viewProj * pose.toFloat(), vertices);
         }
     }
+}
+
+void HandRenderer::renderItemInHand(WorldRenderer& world, const Matrix4f& viewProj, const ItemStack& stack, const std::array<double, 16>& arm, bool left, int sky, int block) {
+    if (stack.isEmpty()) return;
+    const HeldModel& model = modelFor(stack);
+    if (model.empty) return;
+    gl::Enable(gl::DEPTH_TEST);
+    gl::Enable(gl::CULL_FACE);
+    gl::CullFace(gl::BACK);
+    gl::FrontFace(gl::CCW);
+    gl::Disable(gl::BLEND);
+    M4 armPlace;
+    armPlace.m = arm;
+    const DisplayTransform& display = left ? model.thirdLeft : model.thirdRight;
+    // ItemInHandLayer.renderArmWithItem: on the arm, X -90, Y 180, to the hand (a sixteenth sideways, an eighth down, ten sixteenths forward); then the item's own display transform
+    // and its 0..1 model centred.
+    const M4 pose = armPlace * rotX(-90.0) * rotY(180.0) * translate(left ? -1.0 / 16.0 : 1.0 / 16.0, 0.125, -0.625) * applyTransform(display, left) * translate(-0.5, -0.5, -0.5);
+    std::vector<MeshVertex> vertices = model.vertices;
+    for (MeshVertex& v : vertices) {
+        v.sky = static_cast<std::uint8_t>(sky * 17);
+        v.block = static_cast<std::uint8_t>(block * 17);
+    }
+    world.drawHeld(viewProj * pose.toFloat(), vertices);
 }
 
 void HandRenderer::renderBlockEntities(WorldRenderer& world, const Matrix4f& viewProj, const std::vector<FallingBlock>& falling, const std::vector<PrimedTnt>& tnt,

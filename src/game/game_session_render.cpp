@@ -94,7 +94,14 @@ void GameSession::renderWorld(int framebufferWidth, int framebufferHeight) {
             int sky = 15, block = 0;
             renderer_.lightAtWithCarried(static_cast<int>(std::floor(pose.position[0])), static_cast<int>(std::floor(pose.position[1] + 1.0)), static_cast<int>(std::floor(pose.position[2])), sky, block);
             pose.light = entityLightColor(sky, block, static_cast<float>(services_.options.gamma));
-            body_->render(renderer_.viewProjection(), camPos, pose);
+            pose.rightArmItem = !inventory_.selectedItem().isEmpty();
+            pose.leftArmItem = !inventory_.offhand().isEmpty();
+            BodyHands hands;
+            body_->render(renderer_.viewProjection(), camPos, pose, &hands);
+            if (hands.valid) {
+                hand_.renderItemInHand(renderer_, renderer_.viewProjection(), inventory_.selectedItem(), hands.right, false, sky, block);
+                hand_.renderItemInHand(renderer_, renderer_.viewProjection(), inventory_.offhand(), hands.left, true, sky, block);
+            }
         }
     }
     if (ready_ && perspective_ == 0 && !hudHidden_ && info_.gameType != 3) {  // the hand (F1 hides it, and spectators have none)

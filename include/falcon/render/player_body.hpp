@@ -41,6 +41,16 @@ struct BodyPose {
     bool inWater = false;
     // What is worn, as item names ("iron_helmet"): head, chest, legs, feet; empty for nothing.
     std::array<std::string, 4> armor;
+    // Something is held in the right and the left hand: the arm is then raised a little (HumanoidModel.ArmPose.ITEM).
+    bool rightArmItem = false;
+    bool leftArmItem = false;
+};
+
+// Where the hands are after a body was drawn: each arm's place in the camera-relative world as a 4x4 matrix (column-major), the start of what ItemInHandLayer puts an item on.
+struct BodyHands {
+    std::array<double, 16> right{};
+    std::array<double, 16> left{};
+    bool valid = false;
 };
 
 // The player seen from outside (F5): the game's real player model (entity-models.json) in the default skin, in the world, animated the way the
@@ -54,7 +64,7 @@ public:
     PlayerBodyRenderer& operator=(const PlayerBodyRenderer&) = delete;
 
     // Draws the body into the frame that was just drawn; `viewProj` is that frame's view and projection, `cam` where its camera is.
-    void render(const Matrix4f& viewProj, const std::array<double, 3>& cam, const BodyPose& pose);
+    void render(const Matrix4f& viewProj, const std::array<double, 3>& cam, const BodyPose& pose, BodyHands* hands = nullptr);
 
 private:
     PlayerBodyRenderer() = default;

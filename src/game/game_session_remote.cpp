@@ -872,7 +872,7 @@ void GameSession::renderRemotePlayers(const std::array<double, 3>& camPos) {
         }
         BodyPose pose;
         pose.position = {p.xo + (p.x - p.xo) * partialTick_, p.yo + (p.y - p.yo) * partialTick_, p.zo + (p.z - p.zo) * partialTick_};
-        const float bodyYaw = p.yawO + wrap(p.yaw - p.yawO) * t;
+        const float bodyYaw = p.bodyYawO + wrap(p.bodyYaw - p.bodyYawO) * t;  // (the body follows the walk; the head turns on it)
         pose.bodyYaw = bodyYaw;
         pose.headYaw = wrap((p.headYawO + wrap(p.headYaw - p.headYawO) * t) - bodyYaw);
         pose.headPitch = p.pitchO + (p.pitch - p.pitchO) * t;
@@ -891,7 +891,18 @@ void GameSession::renderRemotePlayers(const std::array<double, 3>& camPos) {
         int sky = 15, block = 0;
         renderer_.lightAtWithCarried(static_cast<int>(std::floor(pose.position[0])), static_cast<int>(std::floor(pose.position[1] + 1.0)), static_cast<int>(std::floor(pose.position[2])), sky, block);
         pose.light = entityLightColor(sky, block, static_cast<float>(services_.options.gamma));
-        body_->render(renderer_.viewProjection(), camPos, pose);
+        for (std::size_t i = 0; i < 4; ++i) {  // head, chest, legs, feet: the equipment slots 5, 4, 3 and 2
+            const ItemStack& worn = p.equipment[5 - i];
+            if (!worn.isEmpty() && worn.type().armorSlot != EquipSlot::None) pose.armor[i] = worn.type().name;
+        }
+        pose.rightArmItem = !p.equipment[0].isEmpty();
+        pose.leftArmItem = !p.equipment[1].isEmpty();
+        BodyHands hands;
+        body_->render(renderer_.viewProjection(), camPos, pose, &hands);
+        if (hands.valid) {  // what is held, in the main hand (the right one) and the off hand
+            hand_.renderItemInHand(renderer_, renderer_.viewProjection(), p.equipment[0], hands.right, false, sky, block);
+            hand_.renderItemInHand(renderer_, renderer_.viewProjection(), p.equipment[1], hands.left, true, sky, block);
+        }
     }
 }
 

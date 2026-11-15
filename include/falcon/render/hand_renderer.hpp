@@ -61,6 +61,10 @@ public:
     // frame's view and projection (the world is drawn relative to the camera, which is at `cam`).
     void renderGroundItems(WorldRenderer& world, const Matrix4f& viewProj, const std::array<double, 3>& cam, const std::vector<ItemEntity>& items, double partialTick);
 
+    // Draws an item in the hand of a player seen from outside (ItemInHandLayer): `arm` is the arm's place in the camera-relative world (PlayerBodyRenderer's BodyHands); the item is
+    // turned a quarter and a half over, moved to the palm and then placed as its own model says for the third-person view.
+    void renderItemInHand(WorldRenderer& world, const Matrix4f& viewProj, const ItemStack& stack, const std::array<double, 16>& arm, bool left, int sky, int block);
+
     // Draws the blocks that fall and the TNT that burns (FallingBlockRenderer, TntRenderer): a whole block, the TNT swelling and flashing white at the end.
     void renderBlockEntities(WorldRenderer& world, const Matrix4f& viewProj, const std::vector<FallingBlock>& falling, const std::vector<PrimedTnt>& tnt, const std::array<double, 3>& cam,
                              double partialTick);
@@ -75,6 +79,7 @@ private:
         DisplayTransform firstRight, firstLeft;
         DisplayTransform ground;      // lying in the world
         DisplayTransform thirdRight;  // in the right hand of the player seen from outside
+        DisplayTransform thirdLeft;   // and in the left
         bool empty = true;
     };
     const HeldModel& modelFor(const ItemStack& stack);

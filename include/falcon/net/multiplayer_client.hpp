@@ -63,6 +63,13 @@ struct RemotePlayer {
     double xo = 0, yo = 0, zo = 0;
     float yaw = 0, pitch = 0, headYaw = 0;
     float yawO = 0, pitchO = 0, headYawO = 0;
+    // Where the server last put it (what its next relative move adds to) and how many ticks are left to ease there: what the game's InterpolationHandler does, three steps a move.
+    double sx = 0, sy = 0, sz = 0;
+    float syaw = 0, spitch = 0, sheadYaw = 0;
+    int lerpSteps = 0, headSteps = 0;
+    float bodyYaw = 0, bodyYawO = 0;  // where a player's body faces (LivingEntity.yBodyRot): it follows the way they walk, the head turns on it
+    // What is held and worn, by EquipmentSlot (the game's order): main hand, off hand, feet, legs, chest, head.
+    std::array<ItemStack, 6> equipment;
     bool onGround = true;
     bool sneaking = false;
     float swing = 0.0f;       // 0..1 through an arm swing, 0 = none

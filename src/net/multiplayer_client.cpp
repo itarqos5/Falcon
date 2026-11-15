@@ -436,10 +436,43 @@ void MultiplayerClient::tickPlayers() {
         p.yawO = p.yaw;
         p.pitchO = p.pitch;
         p.headYawO = p.headYaw;
-        const double dx = p.x - p.xo, dz = p.z - p.zo;
+        p.bodyYawO = p.bodyYaw;
         p.xo = p.x;
         p.yo = p.y;
         p.zo = p.z;
+        const auto wrap = [](float degrees) {
+            float d = std::fmod(degrees, 360.0f);
+            if (d >= 180.0f) d -= 360.0f;
+            if (d < -180.0f) d += 360.0f;
+            return d;
+        };
+        if (p.lerpSteps > 0 && projectilePhysics_.count(p.type) == 0) {  // InterpolationHandler.interpolate: a step of what is left of the way to where the server has it
+            const double part = 1.0 / static_cast<double>(p.lerpSteps);
+            p.x += (p.sx - p.x) * part;
+            p.y += (p.sy - p.y) * part;
+            p.z += (p.sz - p.z) * part;
+            p.yaw += wrap(p.syaw - p.yaw) * static_cast<float>(part);
+            p.pitch += (p.spitch - p.pitch) * static_cast<float>(part);
+            --p.lerpSteps;
+        }
+        if (p.headSteps > 0) {
+            p.headYaw += wrap(p.sheadYaw - p.headYaw) / static_cast<float>(p.headSteps);
+            --p.headSteps;
+        }
+        const double dx = p.x - p.xo, dz = p.z - p.zo;
+        if (isPlayerEntity(p)) {  // LivingEntity.tick and tickHeadTurn: the body turns toward the way it walks (backwards when the walk is more against the look than with it),
+                                  // at three tenths of the way a tick, and never more than 50 degrees from where they look; an arm swing turns it to the look
+            float target = p.bodyYaw;
+            if (static_cast<float>(dx * dx + dz * dz) > 0.0025000002f) {
+                const float walk = static_cast<float>(std::atan2(dz, dx)) * 57.295776f - 90.0f;
+                const float apart = std::abs(wrap(p.yaw) - walk);
+                target = 95.0f < apart && apart < 265.0f ? walk - 180.0f : walk;
+            }
+            if (p.swing > 0.0f) target = p.yaw;
+            p.bodyYaw += wrap(target - p.bodyYaw) * 0.3f;
+            const float off = wrap(p.yaw - p.bodyYaw);
+            if (std::abs(off) > 50.0f) p.bodyYaw += off - (off > 0.0f ? 1.0f : off < 0.0f ? -1.0f : 0.0f) * 50.0f;
+        }
         p.walkSpeedO = p.walkSpeed;
         p.walkSpeed += (std::min(static_cast<float>(std::sqrt(dx * dx + dz * dz)) * 4.0f, 1.0f) - p.walkSpeed) * 0.4f;
         p.walkPosition += p.walkSpeed;
@@ -864,6 +897,13 @@ void MultiplayerClient::handlePlay(const Packet& p, RemoteHandler& h) {
             pl.headYaw = pl.headYawO = angleOf(r.i8());
             pl.data = r.varint();
             pl.type = type;
+            pl.sx = pl.x;
+            pl.sy = pl.y;
+            pl.sz = pl.z;
+            pl.syaw = pl.yaw;
+            pl.spitch = pl.pitch;
+            pl.sheadYaw = pl.headYaw;
+            pl.bodyYaw = pl.bodyYawO = pl.headYaw;  // (handleAddEntity: the body starts facing the way the head does)
             if (r.ok && type == playerType_ && id != selfEntity_) players_[id] = pl;
             else if (r.ok && mobTypes_.count(type) != 0) players_[id] = pl;  // a mob that can be drawn: followed the same way
             if (r.ok && type == itemType_) {
@@ -928,12 +968,19 @@ void MultiplayerClient::handlePlay(const Packet& p, RemoteHandler& h) {
             const int id = r.varint();
             const auto it = id == controlledEntity_ ? players_.end() : players_.find(id);  // (the one this machine drives is not moved by the server)
             const auto item = items_.find(id);
+            const bool flying = it != players_.end() && projectilePhysics_.count(it->second.type) != 0;  // (what flies is moved by its own velocity: the server's word is taken at once)
             if (p.id != 57) {
                 const double dx = r.i16() / 4096.0, dy = r.i16() / 4096.0, dz = r.i16() / 4096.0;
                 if (it != players_.end() && r.ok) {
-                    it->second.x += dx;
-                    it->second.y += dy;
-                    it->second.z += dz;
+                    it->second.sx += dx;  // (relative to where the server had it, not to where it is drawn)
+                    it->second.sy += dy;
+                    it->second.sz += dz;
+                    it->second.lerpSteps = 3;
+                    if (flying) {
+                        it->second.x = it->second.sx;
+                        it->second.y = it->second.sy;
+                        it->second.z = it->second.sz;
+                    }
                 }
                 if (item != items_.end() && r.ok) {
                     item->second.x += dx;
@@ -944,8 +991,13 @@ void MultiplayerClient::handlePlay(const Packet& p, RemoteHandler& h) {
             if (p.id != 54) {
                 const float yaw = angleOf(r.i8()), pitch = angleOf(r.i8());
                 if (it != players_.end() && r.ok) {
-                    it->second.yaw = yaw;
-                    it->second.pitch = pitch;
+                    it->second.syaw = yaw;
+                    it->second.spitch = pitch;
+                    it->second.lerpSteps = 3;
+                    if (flying) {
+                        it->second.yaw = yaw;
+                        it->second.pitch = pitch;
+                    }
                 }
             }
             const bool onGround = r.boolean();
@@ -958,11 +1010,19 @@ void MultiplayerClient::handlePlay(const Packet& p, RemoteHandler& h) {
             const PositionMoveRotation m = readPositionMoveRotation(r);
             const auto it = id == controlledEntity_ ? players_.end() : players_.find(id);
             if (it != players_.end() && r.ok) {
-                it->second.x = m.x;
-                it->second.y = m.y;
-                it->second.z = m.z;
-                it->second.yaw = m.yaw;
-                it->second.pitch = m.pitch;
+                it->second.sx = m.x;
+                it->second.sy = m.y;
+                it->second.sz = m.z;
+                it->second.syaw = m.yaw;
+                it->second.spitch = m.pitch;
+                it->second.lerpSteps = 3;
+                if (projectilePhysics_.count(it->second.type) != 0) {
+                    it->second.x = m.x;
+                    it->second.y = m.y;
+                    it->second.z = m.z;
+                    it->second.yaw = m.yaw;
+                    it->second.pitch = m.pitch;
+                }
             }
             if (const auto item = items_.find(id); item != items_.end() && r.ok) {
                 item->second.x = m.x;
@@ -975,7 +1035,24 @@ void MultiplayerClient::handlePlay(const Packet& p, RemoteHandler& h) {
             const int id = r.varint();
             const auto it = players_.find(id);
             const float yaw = angleOf(r.i8());
-            if (it != players_.end() && r.ok) it->second.headYaw = yaw;
+            if (it != players_.end() && r.ok) {
+                it->second.sheadYaw = yaw;
+                it->second.headSteps = 3;
+            }
+            break;
+        }
+        case 104: {  // set_equipment: what an entity holds and wears (slots in the game's order; the top bit says another follows)
+            const int id = r.varint();
+            const auto it = players_.find(id);
+            for (int more = 1; more != 0 && r.ok;) {
+                const int slotByte = r.u8();
+                more = slotByte & 0x80;
+                const int slot = slotByte & 0x7F;
+                bool known = true;
+                const ItemStack stack = readItemStack(r, componentIds_, known);
+                if (!known) break;  // (a component that cannot be read: nothing more of the packet can be told apart)
+                if (it != players_.end() && r.ok && slot >= 0 && slot < 6) it->second.equipment[static_cast<std::size_t>(slot)] = stack;
+            }
             break;
         }
         case 2: {  // animate: an arm swing

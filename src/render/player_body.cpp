@@ -125,7 +125,7 @@ const Texture2D* PlayerBodyRenderer::armorTexture(const std::string& layer, cons
     return it->second.get();
 }
 
-void PlayerBodyRenderer::render(const Matrix4f& viewProj, const std::array<double, 3>& cam, const BodyPose& pose) {
+void PlayerBodyRenderer::render(const Matrix4f& viewProj, const std::array<double, 3>& cam, const BodyPose& pose, BodyHands* hands) {
     // HumanoidModel.setupAnim on a copy of the model.
     const bool slim = haveSlim_ && (pose.customSkin != nullptr ? pose.customSlim : (pose.skin >= 0 && pose.skin < 9));
     EntityPart model = slim ? slimModel_ : model_;
@@ -151,6 +151,15 @@ void PlayerBodyRenderer::render(const Matrix4f& viewProj, const std::array<doubl
         rightLeg->rotation[1] = leftLeg->rotation[1] = 0.0f;
         rightLeg->rotation[2] = leftLeg->rotation[2] = 0.0f;
         body->rotation[0] = body->rotation[1] = body->rotation[2] = 0.0f;
+        // HumanoidModel.poseRightArm / poseLeftArm with an item in the hand: the arm swings half as far and is held a little forward.
+        if (pose.rightArmItem) {
+            rightArm->rotation[0] = rightArm->rotation[0] * 0.5f - 0.31415927f;
+            rightArm->rotation[1] = 0.0f;
+        }
+        if (pose.leftArmItem) {
+            leftArm->rotation[0] = leftArm->rotation[0] * 0.5f - 0.31415927f;
+            leftArm->rotation[1] = 0.0f;
+        }
         // setupAttackAnim: the body turns a little and the right arm swings across.
         const float t = pose.attackProgress;
         if (t > 0.0f) {
@@ -238,6 +247,22 @@ void PlayerBodyRenderer::render(const Matrix4f& viewProj, const std::array<doubl
     }
     entity = mul(rotY((180.0 - static_cast<double>(pose.bodyYaw)) * static_cast<double>(kDegrees)), entity);
     entity = mul(translation({pose.position[0] - cam[0], pose.position[1] - cam[1] + crouchDrop, pose.position[2] - cam[2]}), entity);
+    if (hands != nullptr && rightArm != nullptr && leftArm != nullptr) {  // the arms as they are posed: what an item in the hand is placed from
+        const auto column = [](const Xf& f, std::array<double, 16>& out) {
+            for (int c = 0; c < 3; ++c) {
+                for (int r = 0; r < 3; ++r) out[static_cast<std::size_t>(c * 4 + r)] = f.m[r][c];
+                out[static_cast<std::size_t>(c * 4 + 3)] = 0.0;
+            }
+            out[12] = f.t.x;
+            out[13] = f.t.y;
+            out[14] = f.t.z;
+            out[15] = 1.0;
+        };
+        const Xf root = mul(entity, partTransform(model));
+        column(mul(root, partTransform(*rightArm)), hands->right);
+        column(mul(root, partTransform(*leftArm)), hands->left);
+        hands->valid = true;
+    }
     std::vector<Vertex> vertices;
     vertices.reserve(2048);
     collect(model, Xf{}, entity, pose.parts, vertices);
