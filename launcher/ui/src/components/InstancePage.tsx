@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { call } from '../bridge';
 import { buyUrl, dashedUuid, formatBytes, profileUrl } from '../format';
-import { Check, Copy, Cpu, Download, External, Folder, Info, Play, Refresh, ShieldAlert, Spinner, Terminal } from '../icons';
+import { Check, Copy, Cpu, Download, External, Folder, Play, Refresh, ShieldAlert, Spinner, Terminal } from '../icons';
 import { falconLogo } from '../logo';
 import type { LauncherState } from '../types';
 import { Avatar } from './Avatar';
@@ -74,20 +74,6 @@ function Overview({ state }: { state: LauncherState }) {
     <div className="columns">
       <div className="stack">
         {working && <InstallCard state={state} />}
-        {!game.data && !working && (
-          <div className="admonition warn" role="status">
-            <span className="admonition-icon">
-              <Info size={20} />
-            </span>
-            <div className="admonition-body">
-              <div className="admonition-title">Singleplayer data not found</div>
-              <p>
-                Falcon&rsquo;s worlds read the game&rsquo;s data tables (blocks, items, shapes). They come from a Minecraft install exported by horizon-launcher, and none was found on this PC.
-                Menus and options work, but opening a world will show an error until the data is available.
-              </p>
-            </div>
-          </div>
-        )}
         {game.error && <ErrorCard error={game.error} onRetry={() => void call('launch')} retryLabel="Try again" />}
 
         <section className="card">

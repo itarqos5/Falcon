@@ -17,8 +17,6 @@ namespace launcher {
 //   client\<ver>\   the bundled game client, extracted        game\<ver>\   the game's files, downloaded from Mojang
 //   webview\        the web view's own profile                logs\         launcher.log
 [[nodiscard]] std::filesystem::path dataRoot();
-// %APPDATA% (where horizon-launcher keeps its installs); FALCON_LAUNCHER_ROAMING overrides it (tests).
-[[nodiscard]] std::filesystem::path roamingRoot();
 
 // A line in logs\launcher.log (also to stderr when FALCON_LAUNCHER_LOG_STDERR is set). Safe from any thread.
 void logLine(std::string_view text);

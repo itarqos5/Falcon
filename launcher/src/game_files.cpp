@@ -1,6 +1,7 @@
 #include "game_files.hpp"
 
 #include "falcon/assets/zip_archive.hpp"
+#include "data_tables.hpp"
 #include "sha1.hpp"
 #include "util.hpp"
 
@@ -56,33 +57,96 @@ private:
 
 }  // namespace
 
+DataTablesSource builtinDataTables() { return {kDataTablesUrl, kDataTablesSha256, kDataTablesSize}; }
+
+const std::vector<std::string>& GameFiles::dataTableFiles() {
+    // Every file the client reads from its data folder besides the game's own data/ (the loaders of the block, item, shape, model, behaviour, command, movement and creative tables, and
+    // the biome list of the world generator).
+    static const std::vector<std::string> kFiles = {"registries.json", "model-states.json", "gameplay-facts.json", "facts.json", "items.json", "block-behaviours.json", "cached-collision.nbt",
+                                                    "creative-inventory.json", "entity-models.json", "movement-properties.nbt", "commands.json", "biome-parameters/overworld.json"};
+    return kFiles;
+}
+
 bool GameFiles::isGameDataDir(const fs::path& dir) {
-    // The files the game's block, item, shape and recipe loaders read first, and the data folder of Mojang's own tables.
-    static const char* const kFiles[] = {"registries.json", "model-states.json", "gameplay-facts.json", "facts.json", "items.json", "block-behaviours.json", "cached-collision.nbt",
-                                         "creative-inventory.json"};
     std::error_code ec;
-    for (const char* name : kFiles) {
+    for (const std::string& name : dataTableFiles()) {
         if (!fs::is_regular_file(dir / name, ec)) return false;
     }
     return fs::is_directory(dir / "data" / "minecraft", ec);
 }
 
-std::optional<fs::path> GameFiles::findGameData(const std::string& version, const fs::path& roaming) const {
+bool GameFiles::hasTables(const std::string& version) const {
+    std::string text;
+    if (!readFile(versionDir(version) / "tables.json", text) || stringOf(parseJson(text), "sha256") != tables_.sha256) return false;
+    return isGameDataDir(versionDir(version));
+}
+
+std::optional<fs::path> GameFiles::findGameData(const std::string& version) const {
     if (isGameDataDir(versionDir(version))) return versionDir(version);
+    return std::nullopt;
+}
+
+// Falcon's data tables: one zip from Falcon's own release. It is downloaded whole, checked against the SHA-256 the launcher carries, and only then are the files in it (a fixed
+// list of names, nothing else) written, each beside its final place first and then moved there, so that an interruption never leaves half a table.
+Result<bool> GameFiles::installTables(const std::string& version, const ProgressFn& progress, const std::atomic<bool>& cancel) {
+    using R = Result<bool>;
+    Throttle throttle(progress);
+    const fs::path dir = versionDir(version);
     std::error_code ec;
-    std::optional<fs::path> best;
-    fs::file_time_type bestTime{};
-    for (fs::directory_iterator it(roaming / "horizon-launcher" / "versions", ec), end; !ec && it != end; it.increment(ec)) {
-        const fs::path candidate = it->path() / ".local" / "horizon-client" / version;
-        if (!isGameDataDir(candidate)) continue;
-        std::error_code timeEc;
-        const auto time = fs::last_write_time(candidate / "registries.json", timeEc);
-        if (!best || (!timeEc && time > bestTime)) {
-            best = candidate;
-            if (!timeEc) bestTime = time;
+    fs::create_directories(dir, ec);
+    if (ec) return R::fail("disk", "Cannot create " + narrow(dir.wstring()) + ".");
+    if (tables_.url.rfind("https://", 0) != 0 || tables_.sha256.size() != 64) return R::fail("no_tables", "This launcher has no address for Falcon's data tables.");
+    const fs::path zipFile = dir / "data-tables.zip";
+    if (sha256FileHex(zipFile) != tables_.sha256) {
+        throttle.report({"tables", "Downloading Falcon's data tables", 0, tables_.size}, true);
+        HttpResponse r;
+        for (int attempt = 0; attempt < kAttempts; ++attempt) {
+            r = http_.download(
+                tables_.url, zipFile, [&](std::uint64_t done, std::uint64_t total) { throttle.report({"tables", "Downloading Falcon's data tables", done, total ? total : tables_.size}); }, &cancel);
+            if (r.ok() || cancel.load()) break;
+            std::this_thread::sleep_for(std::chrono::milliseconds(400 * (attempt + 1)));
+        }
+        if (cancel.load()) return R::fail("cancelled", "Cancelled.");
+        if (!r.ok()) return R::fail(r.status == 0 ? "network" : "service", "Falcon's data tables could not be downloaded: " + (r.error.empty() ? "status " + std::to_string(r.status) : r.error) + ".");
+        if (sha256FileHex(zipFile) != tables_.sha256) {
+            fs::remove(zipFile, ec);
+            return R::fail("corrupt", "The downloaded data tables did not match their checksum. Try again.");
         }
     }
-    return best;
+    std::vector<std::pair<std::string, std::vector<unsigned char>>> files;
+    {  // (the zip is closed again before it is deleted)
+        const auto zip = falcon::ZipArchive::open(zipFile);
+        if (!zip) {
+            fs::remove(zipFile, ec);
+            return R::fail("corrupt", "The downloaded data tables could not be opened.");
+        }
+        for (const std::string& name : dataTableFiles()) {
+            throttle.report({"tables", "Unpacking Falcon's data tables", files.size(), dataTableFiles().size()});
+            const auto bytes = zip->read(name);
+            if (!bytes) return R::fail("corrupt", "The data tables download is missing " + name + ".");
+            files.emplace_back(name, *bytes);
+        }
+    }
+    for (const auto& [name, bytes] : files) {
+        const fs::path out = dir / fs::path(widen(name));
+        const fs::path temp = dir / fs::path(widen(name + ".part"));
+        fs::create_directories(out.parent_path(), ec);
+        {
+            std::ofstream file(temp, std::ios::binary | std::ios::trunc);
+            file.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+            if (!file) return R::fail("disk", "Cannot write " + narrow(temp.wstring()) + " (is the disk full?).");
+        }
+        fs::rename(temp, out, ec);
+        if (ec) {
+            fs::remove(out, ec);
+            fs::rename(temp, out, ec);
+            if (ec) return R::fail("disk", "Cannot write " + narrow(out.wstring()) + ".");
+        }
+    }
+    writeFileAtomic(dir / "tables.json", json{{"sha256", tables_.sha256}, {"files", files.size()}}.dump());
+    fs::remove(zipFile, ec);
+    throttle.report({"tables", "Falcon's data tables are ready", 1, 1}, true);
+    return R::success(true);
 }
 
 bool GameFiles::isSafeRelativePath(std::string_view path) {
@@ -160,7 +224,7 @@ bool GameFiles::isInstalled(const std::string& version) const {
     std::string text;
     if (!readFile(versionDir(version) / "installed.json", text)) return false;
     const json j = parseJson(text);
-    return j.is_object() && stringOf(j, "id") == version && fs::exists(assetsDir(version) / "minecraft" / "sounds.json") && fs::exists(versionDir(version) / "data" / "minecraft");
+    return j.is_object() && stringOf(j, "id") == version && fs::exists(assetsDir(version) / "minecraft" / "sounds.json") && fs::exists(versionDir(version) / "data" / "minecraft") && hasTables(version);
 }
 
 Result<VersionInfo> GameFiles::resolveVersion(const std::string& version) {
@@ -294,6 +358,12 @@ Result<bool> GameFiles::install(const std::string& version, const ProgressFn& pr
     if (cancelled()) return R::fail("cancelled", "Cancelled.");
     if (failures.load() > 0) return R::fail("network", std::to_string(failures.load()) + " sound or language files could not be downloaded (" + firstError + "). Try again.");
     throttle.report({"assets", "Downloading sounds and languages", totalBytes, totalBytes}, true);
+
+    // ---- Falcon's data tables ----
+    if (!hasTables(version)) {
+        const auto tables = installTables(version, progress, cancel);
+        if (!tables) return tables;
+    }
 
     writeFileAtomic(dir / "installed.json", json{{"id", version}, {"clientSha1", info->clientSha1}, {"assetIndexSha1", info->assetIndexSha1}, {"assets", objects->size()}}.dump());
     fs::remove(dir / "client.jar", ec);  // unpacked: the 40 MB jar is not needed again

@@ -4,6 +4,7 @@
 // Options (all for development):  --mock [state]         pretend flows with no network or disk; with a state the UI is frozen in it
 //                                  --screenshot <file.png> [--wait <ms>]   draw the UI off-screen, save it, write <file>.txt with the timings, exit
 //                                  --selftest-signin      open the Microsoft sign-in window invisibly, check that it hands back the redirect and that it can be cancelled (no network), exit code 0 when it does
+//                                  --selftest-tables <dir>   download Falcon's data tables into <dir>/26.3 like the installation does (real network), check them, write <dir>/selftest-tables.txt, exit code 0 when they are good
 //                                  --devtools             F12 and the page's context menu
 #include "app.hpp"
 #include "http.hpp"
@@ -29,6 +30,7 @@ struct Args {
     int waitMs = 1500;
     bool devtools = false;
     bool selfTestSignIn = false;
+    std::wstring selfTestTables;  // --selftest-tables <dir>
     std::string page;  // --page settings|logs: open the page there (for screenshots)
 };
 
@@ -47,6 +49,8 @@ Args parseArgs() {
             args.waitMs = _wtoi(argv[++i]);
         } else if (a == L"--page" && i + 1 < argc) {
             args.page = narrow(argv[++i]);
+        } else if (a == L"--selftest-tables" && i + 1 < argc) {
+            args.selfTestTables = argv[++i];
         } else if (a == L"--selftest-signin") {
             args.selfTestSignIn = true;
         } else if (a == L"--devtools") {
@@ -70,12 +74,26 @@ std::string clientIdFromSettings() {
     return kDefaultMinecraftClientId;
 }
 
+// --selftest-tables: the installation's download of the data tables, with the real network and the real address and checksum this launcher carries, into a folder of its own.
+int selfTestTables(const std::wstring& dir) {
+    const std::unique_ptr<HttpClient> http = makeWinHttpClient(std::string("FalconLauncher/") + FALCON_LAUNCHER_VERSION);
+    GameFiles files(*http, std::filesystem::path(dir));
+    const std::atomic<bool> cancel{false};
+    std::string said;
+    const auto result = files.installTables("26.3", [&](const InstallProgress& p) { said = p.label; }, cancel);
+    const bool good = result.ok() && files.hasTables("26.3");
+    std::string text = good ? std::string("ok: ") + said : std::string("failed: ") + (result.ok() ? std::string("the tables are not complete") : result.error.message);
+    writeFileAtomic(std::filesystem::path(dir) / "selftest-tables.txt", text);
+    return good ? 0 : 1;
+}
+
 }  // namespace
 
 int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int) {
     const Args args = parseArgs();
     const bool testRun = args.mock || args.selfTestSignIn || !args.screenshot.empty();
     logLine(std::string("Falcon Launcher ") + FALCON_LAUNCHER_VERSION + " starting");
+    if (!args.selfTestTables.empty()) return selfTestTables(args.selfTestTables);
 
     // One launcher at a time: a second start just brings the first to the front.
     HANDLE single = CreateMutexW(nullptr, TRUE, L"Local\\FalconLauncherSingleInstance");

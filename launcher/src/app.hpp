@@ -17,6 +17,7 @@ namespace launcher {
 
 struct AppOptions {
     std::string gameVersion = "26.3";  // the Minecraft version the bundled client is made for
+    DataTablesSource tables = builtinDataTables();  // where Falcon's data tables are downloaded from (tests point it at a fake)
     std::string clientId;              // the Microsoft application (client) id; defaults to the Minecraft launcher's public one; empty: sign-in is off
     // Development and tests. `mock`: no network and no disk, the flows are acted out with delays. `mockState` (implies mock): the UI is put
     // in one frozen state, for screenshots and for working on the UI: setup, signin, waiting (device is the same), home, missing, notowned, noprofile, installing,

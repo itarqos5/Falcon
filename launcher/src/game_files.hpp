@@ -37,16 +37,25 @@ struct InstallProgress {
 };
 using ProgressFn = std::function<void(const InstallProgress&)>;
 
+// Where Falcon's data tables are downloaded from: a zip on the GitHub release of this launcher (see data_tables.hpp), and the SHA-256 it must have.
+struct DataTablesSource {
+    std::string url, sha256;
+    std::uint64_t size = 0;
+};
+[[nodiscard]] DataTablesSource builtinDataTables();
+
 // The files the client needs from a Minecraft version, downloaded from Mojang's own servers (the same ones the official launcher
 // uses) for an account that owns the game, into <root>/<version>/:
 //   assets/   the client jar's `assets` folder (textures, models, block states, fonts, shaders, ...) plus every sound and language file
 //             from the version's asset index, unpacked where `Falcon.exe --assets` looks for them
 //   data/     the client jar's `data` folder (the data pack: tags, recipes, loot tables, world generation)
 //   asset-index.json   the version's asset index
-// Nothing of it is shipped with Falcon or kept anywhere but on the player's own PC.
+//   <tables>   Falcon's data tables (registries.json, gameplay-facts.json, ... the blocks, items, shapes and facts the singleplayer world reads), one zip downloaded from
+//              Falcon's own release and checked against a SHA-256 the launcher carries
+// The game's files are not shipped with Falcon and are kept nowhere but on the player's own PC.
 class GameFiles {
 public:
-    GameFiles(HttpClient& http, std::filesystem::path root) : http_(http), root_(std::move(root)) {}
+    GameFiles(HttpClient& http, std::filesystem::path root, DataTablesSource tables = builtinDataTables()) : http_(http), root_(std::move(root)), tables_(std::move(tables)) {}
 
     [[nodiscard]] std::filesystem::path versionDir(const std::string& version) const { return root_ / version; }
     [[nodiscard]] std::filesystem::path assetsDir(const std::string& version) const { return versionDir(version) / "assets"; }
@@ -65,16 +74,21 @@ public:
     // A path inside the install folder: relative, '/'-separated, no "..", no drive letter, no empty parts.
     [[nodiscard]] static bool isSafeRelativePath(std::string_view path);
 
-    // The game's exported data: the tables Falcon's singleplayer reads (registries.json, gameplay-facts.json, ...). Mojang's downloads do not contain
-    // them; they are produced from a Minecraft install by horizon-launcher. True when `dir` holds the whole set.
+    // Falcon's data tables: the files the singleplayer world reads next to the game's data folder. Mojang's downloads do not contain them.
+    [[nodiscard]] static const std::vector<std::string>& dataTableFiles();
+    // True when `dir` holds the whole set and the game's data folder.
     [[nodiscard]] static bool isGameDataDir(const std::filesystem::path& dir);
-    // The folder to give the game as --data for `version`: this launcher's own game folder when it has the set, else the newest complete export
-    // in horizon-launcher's installs under `roaming` (%APPDATA%horizon-launcherersions*.localhorizon-client<version>). Empty when there is none.
-    [[nodiscard]] std::optional<std::filesystem::path> findGameData(const std::string& version, const std::filesystem::path& roaming) const;
+    // The tables of the version were downloaded (and are the ones this launcher names).
+    [[nodiscard]] bool hasTables(const std::string& version) const;
+    // The folder to give the game as --data for `version`: this launcher's own game folder when it holds the set; none when it does not.
+    [[nodiscard]] std::optional<std::filesystem::path> findGameData(const std::string& version) const;
+    // Downloads the tables into <root>/<version>/ (the zip is checked against its SHA-256 before anything is unpacked from it).
+    [[nodiscard]] Result<bool> installTables(const std::string& version, const ProgressFn& progress, const std::atomic<bool>& cancel);
 
 private:
     HttpClient& http_;
     std::filesystem::path root_;
+    DataTablesSource tables_;
 };
 
 }  // namespace launcher

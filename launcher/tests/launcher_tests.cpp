@@ -428,6 +428,8 @@ void test_minecraft_account() {
 
 // The pieces of Mojang's answers, and a whole install against a fake Mojang.
 struct FakeMojang {
+    std::string tablesZip;
+    DataTablesSource tables;
     std::string jar;
     std::string jarSha, indexText, indexSha;
     std::map<std::string, std::string> objects;  // hash -> bytes
@@ -465,6 +467,14 @@ FakeMojang buildMojang(FakeHttp& http, const std::string& version) {
     manifestDoc["versions"].push_back({{"id", "1.0"}, {"url", "https://piston-meta.mojang.com/v1/packages/old.json"}});
     manifestDoc["versions"].push_back({{"id", version}, {"url", "https://piston-meta.mojang.com/v1/packages/version.json"}});
     m.manifest = manifestDoc.dump();
+    {  // Falcon's data tables: a zip of every table (and a file that is not one, which must not be unpacked)
+        std::vector<std::pair<std::string, std::string>> tables;
+        for (const std::string& name : GameFiles::dataTableFiles()) tables.emplace_back(name, "{\"table\":\"" + name + "\"}");
+        tables.emplace_back("evil.txt", "x");
+        m.tablesZip = makeZip(tables);
+        m.tables = {"https://tables.test/falcon-data-26.3.zip", sha256Hex(m.tablesZip), m.tablesZip.size()};
+        http.on("GET", m.tables.url, {FakeHttp::reply(200, m.tablesZip)});
+    }
     http.on("GET", "https://launchermeta.mojang.com/mc/game/version_manifest_v2.json", {FakeHttp::reply(200, m.manifest)});
     http.on("GET", "https://piston-meta.mojang.com/v1/packages/version.json", {FakeHttp::reply(200, m.versionJson)});
     http.on("GET", "https://piston-data.mojang.com/v1/objects/client.jar", {FakeHttp::reply(200, m.jar)});
@@ -492,7 +502,7 @@ void test_game_file_install() {
     FakeHttp http;
     const FakeMojang m = buildMojang(http, "26.3");
     const fs::path root = freshFolder("install");
-    GameFiles files(http, root);
+    GameFiles files(http, root, m.tables);
     std::atomic<bool> cancel{false};
     std::vector<std::string> phases;
     std::mutex phasesMutex;
@@ -516,6 +526,13 @@ void test_game_file_install() {
     CHECK(!phases.empty() && phases.front() == "version" && phases.back() == "done");
     // (progress reports are throttled, so a fast fake network may skip the in-between ones; the first, the list of sounds and the last are always sent)
     CHECK(std::find(phases.begin(), phases.end(), "assets") != phases.end());
+    // Falcon's data tables came down with it: each table, nothing that is not one, the marker, and no zip left behind
+    CHECK(readFile(dir / "registries.json", text) && text == "{\"table\":\"registries.json\"}" && readFile(dir / "cached-collision.nbt", text) && fs::exists(dir / "commands.json"));
+    CHECK(!fs::exists(dir / "evil.txt") && !fs::exists(dir / "data-tables.zip"));
+    CHECK(fs::exists(dir / "tables.json"));
+    CHECK(files.hasTables("26.3"));
+    CHECK(GameFiles::isGameDataDir(dir));
+    CHECK(std::find(phases.begin(), phases.end(), "tables") != phases.end() && files.findGameData("26.3") == std::optional<fs::path>(dir));
     // isInstalled wants the sounds.json the client reads first; this fake jar has none: the marker alone is not enough
     CHECK(!files.isInstalled("26.3"));
     writeFileAtomic(dir / "assets/minecraft/sounds.json", "{}");
@@ -526,18 +543,54 @@ void test_game_file_install() {
     CHECK(files.install("26.3", progress, cancel).ok());
     CHECK(http.count("DOWNLOAD", "https://piston-data.mojang.com/v1/objects/client.jar") == jarsBefore);
     CHECK(http.count("DOWNLOAD", GameFiles::assetObjectUrl(sha1Hex("OGGSOUND"))) == 1);
+    CHECK(http.count("DOWNLOAD", m.tables.url) == 1);  // (and the tables are not fetched again)
+
+    // tables that are not the ones this launcher names are fetched again (a launcher of a newer release names newer ones)
+    {
+        DataTablesSource newer = m.tables;
+        newer.sha256 = std::string(64, 'a');
+        GameFiles other(http, root, newer);
+        CHECK(!other.hasTables("26.3") && !other.isInstalled("26.3"));
+    }
+    // a table zip that does not match its checksum is refused, and nothing of it is unpacked
+    {
+        FakeHttp tampered;
+        const FakeMojang t = buildMojang(tampered, "26.3");
+        tampered.on("GET", t.tables.url, {FakeHttp::reply(200, t.tablesZip + "tampered")});
+        GameFiles refused(tampered, freshFolder("tampered"), t.tables);
+        const auto r = refused.install("26.3", nullptr, cancel);
+        CHECK(!r.ok() && r.error.code == "corrupt" && !fs::exists(refused.versionDir("26.3") / "registries.json") && !fs::exists(refused.versionDir("26.3") / "installed.json"));
+        // a zip that is the right one but lacks a table is refused too
+        std::vector<std::pair<std::string, std::string>> partial;
+        for (const std::string& name : GameFiles::dataTableFiles()) {
+            if (name != "items.json") partial.emplace_back(name, "{}");
+        }
+        const std::string zip = makeZip(partial);
+        FakeHttp shortHttp;
+        const FakeMojang u = buildMojang(shortHttp, "26.3");
+        const DataTablesSource shortTables{u.tables.url, sha256Hex(zip), zip.size()};
+        shortHttp.on("GET", u.tables.url, {FakeHttp::reply(200, zip)});
+        GameFiles lacking(shortHttp, freshFolder("lacking"), shortTables);
+        CHECK(lacking.install("26.3", nullptr, cancel).error.code == "corrupt" && !lacking.hasTables("26.3"));
+        // no network for them: the install says so and can be run again
+        FakeHttp noTables;
+        const FakeMojang n = buildMojang(noTables, "26.3");
+        noTables.on("GET", n.tables.url, {FakeHttp::unreachable()});
+        GameFiles offlineTables(noTables, freshFolder("notables"), n.tables);
+        CHECK(offlineTables.install("26.3", nullptr, cancel).error.code == "network" && !offlineTables.isInstalled("26.3"));
+    }
 
     // a damaged download is refused
     FakeHttp bad;
     const FakeMojang b = buildMojang(bad, "26.3");
     bad.on("GET", "https://piston-data.mojang.com/v1/objects/client.jar", {FakeHttp::reply(200, b.jar + "tampered")});
-    GameFiles damaged(bad, freshFolder("damaged"));
+    GameFiles damaged(bad, freshFolder("damaged"), b.tables);
     CHECK(damaged.install("26.3", nullptr, cancel).error.code == "corrupt");
     // a sound that does not match its hash fails the install after retries instead of leaving a bad file
     FakeHttp badSound;
     const FakeMojang s = buildMojang(badSound, "26.3");
     badSound.on("GET", GameFiles::assetObjectUrl(sha1Hex("OGGSOUND")), {FakeHttp::reply(200, "WRONG")});
-    GameFiles unlucky(badSound, freshFolder("badsound"));
+    GameFiles unlucky(badSound, freshFolder("badsound"), s.tables);
     const auto failed = unlucky.install("26.3", nullptr, cancel);
     CHECK(!failed.ok() && !fs::exists(unlucky.versionDir("26.3") / "assets/minecraft/sounds/mob/cow/say1.ogg") && !fs::exists(unlucky.versionDir("26.3") / "installed.json"));
     // no network
@@ -548,41 +601,34 @@ void test_game_file_install() {
     // cancelled before it starts
     std::atomic<bool> stop{true};
     FakeHttp quick;
-    buildMojang(quick, "26.3");
-    GameFiles stopped(quick, freshFolder("cancelled"));
+    const FakeMojang q = buildMojang(quick, "26.3");
+    GameFiles stopped(quick, freshFolder("cancelled"), q.tables);
     CHECK(stopped.install("26.3", nullptr, stop).error.code == "cancelled");
 }
 
-// Where the game's exported data tables are looked for.
+// Where the game's data tables are looked for: only in the launcher's own game folder (nothing of another launcher's is used).
 void test_game_data_dir() {
-    const fs::path roaming = freshFolder("roaming");
     const fs::path root = freshFolder("gamedata_root");
     FakeHttp http;
     GameFiles files(http, root / "game");
     const auto makeSet = [](const fs::path& dir, bool complete) {
         std::error_code ec;
         fs::create_directories(dir / "data" / "minecraft", ec);
-        for (const char* name : {"registries.json", "model-states.json", "gameplay-facts.json", "facts.json", "items.json", "block-behaviours.json", "cached-collision.nbt", "creative-inventory.json"}) {
-            if (complete || std::string(name) != "facts.json") writeFileAtomic(dir / name, "{}");
+        for (const std::string& name : GameFiles::dataTableFiles()) {
+            if (complete || name != "facts.json") writeFileAtomic(dir / name, "{}");
         }
     };
-    CHECK(!files.findGameData("26.3", roaming).has_value());  // nothing anywhere
-
-    const fs::path horizon = roaming / "horizon-launcher" / "versions";
-    makeSet(horizon / "old" / ".local" / "horizon-client" / "26.3", true);
-    makeSet(horizon / "broken" / ".local" / "horizon-client" / "26.3", false);  // a file missing: not used
-    CHECK(GameFiles::isGameDataDir(horizon / "old" / ".local" / "horizon-client" / "26.3") && !GameFiles::isGameDataDir(horizon / "broken" / ".local" / "horizon-client" / "26.3"));
-    CHECK(files.findGameData("26.3", roaming) == std::optional<fs::path>(horizon / "old" / ".local" / "horizon-client" / "26.3"));
-    CHECK(!files.findGameData("27.0", roaming).has_value());  // another game version is another folder
-
-    // the newest complete export wins
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    makeSet(horizon / "new" / ".local" / "horizon-client" / "26.3", true);
-    CHECK(files.findGameData("26.3", roaming) == std::optional<fs::path>(horizon / "new" / ".local" / "horizon-client" / "26.3"));
-
-    // the launcher's own game folder, when it holds the set, comes first (nothing then has to be passed to the game)
+    CHECK(!files.findGameData("26.3").has_value());  // nothing yet
+    makeSet(files.versionDir("26.3"), false);        // a table missing: not enough
+    CHECK(!GameFiles::isGameDataDir(files.versionDir("26.3")) && !files.findGameData("26.3").has_value());
     makeSet(files.versionDir("26.3"), true);
-    CHECK(files.findGameData("26.3", roaming) == std::optional<fs::path>(files.versionDir("26.3")));
+    CHECK(GameFiles::isGameDataDir(files.versionDir("26.3")) && files.findGameData("26.3") == std::optional<fs::path>(files.versionDir("26.3")));
+    CHECK(!files.findGameData("27.0").has_value());  // another game version is another folder
+    // a set somewhere else (horizon-launcher's, say) is not looked for any more
+    makeSet(root / "elsewhere" / "horizon-launcher" / "versions" / "x" / ".local" / "horizon-client" / "27.0", true);
+    CHECK(!files.findGameData("27.0").has_value());
+    // SHA-256, as the tables are checked with it
+    CHECK(sha256Hex("abc") == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad" && sha256Hex("").size() == 64);
 }
 
 void test_bundled_client() {
@@ -841,10 +887,10 @@ void test_real_flow() {
     http.on("GET", "https://textures.minecraft.net/texture/abc123", {FakeHttp::reply(200, flatSkinPng())});
     serveXboxChain(http, true, true);
     const FakeMojang mojang = buildMojang(http, "26.3");
-    (void)mojang;
     const std::string exe = "not a program";
     Events events;
     AppOptions options;
+    options.tables = mojang.tables;
     options.clientId = kDefaultMinecraftClientId;
     App app(http, options, hooksFor(events), Blob{reinterpret_cast<const unsigned char*>(exe.data()), exe.size()});
     (void)app.handleMessage(R"({"id":1,"method":"uiReady"})");
@@ -930,7 +976,6 @@ void test_not_configured_and_errors() {
 int main() {
     _putenv_s("FALCON_LAUNCHER_NO_BROWSER", "1");
     std::printf("launcher tests\n");
-    _putenv_s("FALCON_LAUNCHER_ROAMING", freshFolder("roaming_default").string().c_str());  // (never the real %APPDATA%)
     test_hash_and_encoding();
     test_safe_paths_and_urls();
     test_secure_store();

@@ -38,13 +38,6 @@ fs::path dataRoot() {
     return base / "Falcon";
 }
 
-fs::path roamingRoot() {
-    if (const char* over = std::getenv("FALCON_LAUNCHER_ROAMING"); over != nullptr && *over != '\0') return fs::path(widen(over));
-    wchar_t buffer[MAX_PATH * 2];
-    const DWORD n = GetEnvironmentVariableW(L"APPDATA", buffer, static_cast<DWORD>(std::size(buffer)));
-    return n > 0 && n < std::size(buffer) ? fs::path(buffer) : fs::path();
-}
-
 namespace {
 const auto g_start = std::chrono::steady_clock::now();
 std::mutex g_logMutex;

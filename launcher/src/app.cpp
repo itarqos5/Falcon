@@ -71,14 +71,14 @@ std::wstring quoteArg(const std::wstring& arg) {
 }  // namespace
 
 App::App(HttpClient& http, AppOptions options, AppHooks hooks, Blob bundledClient)
-    : http_(http), options_(std::move(options)), hooks_(std::move(hooks)), client_(bundledClient), auth_(http, options_.clientId), files_(http, dataRoot() / "game") {
+    : http_(http), options_(std::move(options)), hooks_(std::move(hooks)), client_(bundledClient), auth_(http, options_.clientId), files_(http, dataRoot() / "game", options_.tables) {
     const bool mock = options_.mock || !options_.mockState.empty();
     state_ = json{{"phase", "boot"},
                   {"app", {{"version", FALCON_LAUNCHER_VERSION}, {"mock", mock}, {"gameVersion", options_.gameVersion}, {"clientBundled", !client_.empty()}, {"gameDir", narrow(files_.versionDir(options_.gameVersion).wstring())}}},
                   {"setup", {{"steps", json::array()}, {"error", nullptr}}},
                   {"auth", {{"configured", auth_.configured() || mock}, {"status", "signedOut"}, {"message", ""}, {"error", nullptr}}},
                   {"account", nullptr},
-                  {"game", {{"status", "unknown"}, {"phase", ""}, {"label", ""}, {"done", 0}, {"total", 0}, {"error", nullptr}, {"version", options_.gameVersion}, {"data", mock || files_.findGameData(options_.gameVersion, roamingRoot()).has_value()}}},
+                  {"game", {{"status", "unknown"}, {"phase", ""}, {"label", ""}, {"done", 0}, {"total", 0}, {"error", nullptr}, {"version", options_.gameVersion}, {"data", mock || files_.findGameData(options_.gameVersion).has_value()}}},
                   {"settings", {{"keepOpen", true}}}};
 }
 
@@ -524,7 +524,7 @@ void App::finishSignIn(const MicrosoftTokens& tokens) {
     if (!account) return setAuthError(account.error);
     logLine(std::string("signed in; owns Java Edition: ") + (account->ownsGame ? "yes" : "no") + "; profile: " + (account->hasProfile ? "yes" : "no"));
     const std::string avatar = account->hasProfile ? fetchAvatar(account->skinUrl) : std::string();
-    const bool dataFound = files_.findGameData(options_.gameVersion, roamingRoot()).has_value();
+    const bool dataFound = files_.findGameData(options_.gameVersion).has_value();
     const std::string idle = gameIdleStatus();
     mutate([&](json& s) {
         avatar_ = avatar;
@@ -598,8 +598,8 @@ void App::launchJob() {
 
     // 4. start it
     setGameProgress("working", {"start", "Starting Falcon", 0, 0});
-    // (The exported data tables are not in Mojang's downloads: they are taken from where horizon-launcher keeps them on this PC, when it has them.)
-    const std::optional<fs::path> exportedData = files_.findGameData(options_.gameVersion, roamingRoot());
+    // (Falcon's data tables were downloaded into the game folder with the game's files, which is where the client looks.)
+    const std::optional<fs::path> exportedData = files_.findGameData(options_.gameVersion);
     std::wstring command = quoteArg(exe->wstring()) + L" --assets " + quoteArg(files_.assetsDir(options_.gameVersion).wstring()) + L" --username " + quoteArg(widen(account->name)) + L" --uuid " +
                            quoteArg(widen(account->uuid));
     if (exportedData && *exportedData != files_.versionDir(options_.gameVersion)) command += L" --data " + quoteArg(exportedData->wstring());
