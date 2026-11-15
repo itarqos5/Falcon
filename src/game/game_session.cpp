@@ -233,6 +233,9 @@ GameSession::GameSession(ScreenServices& services, const ResourceManager& resour
         std::string bodyError;
         body_ = PlayerBodyRenderer::create(resources, resources.dataRoot(), bodyError);
         if (!body_) std::printf("[falcon] player model: %s (F5 will not show the player)\n", bodyError.c_str());
+        std::string mobError;
+        mobs_ = MobRenderer::create(resources, resources.dataRoot(), mobError);
+        if (!mobs_) std::printf("[falcon] mobs: %s (they will not be drawn)\n", mobError.c_str());
     }
     const auto spawn = renderer_.findSpawn();
     std::printf("[falcon] spawn found: %.1f %.1f %.1f (%s)\n", spawn.x, spawn.y, spawn.z, overworld_ ? "game generator" : "simple terrain");

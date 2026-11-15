@@ -10,6 +10,7 @@
 #include "falcon/net/multiplayer_client.hpp"
 #include "falcon/game/world_sounds.hpp"
 #include "falcon/platform/system_info.hpp"
+#include "falcon/render/mob_renderer.hpp"
 #include "falcon/render/player_body.hpp"
 #include "falcon/world/item_entity.hpp"
 #include "falcon/platform/window.hpp"
@@ -252,6 +253,7 @@ private:
     void pumpRemote();
     void sendRemoteTick(const PlayerInput& input);
     void renderRemotePlayers(const std::array<double, 3>& camPos);
+    void renderTestMobs(const std::array<double, 3>& camPos);
     void drawNameTags(GuiGraphics& g, int guiWidth, int guiHeight, const Camera& cam);
     void drawPlayerList(GuiGraphics& g, int guiWidth);
     // A flint and steel or a fire charge used on a block (TNT goes off, a campfire or candle lights, else a fire starts next to it). True if it did something.
@@ -318,6 +320,7 @@ private:
     // F5 and the body seen from outside.
     int perspective_ = 0;
     std::unique_ptr<PlayerBodyRenderer> body_;
+    std::unique_ptr<MobRenderer> mobs_;  // the mobs of a server (and, with FALCON_TEST_MOBS, a row of them for a look)
     float walkPosition_ = 0.0f, walkSpeed_ = 0.0f, walkSpeedOld_ = 0.0f;  // WalkAnimationState
     float swimAmount_ = 0.0f, swimAmountOld_ = 0.0f;                        // Player.swimAmount: how far into the swimming pose (0 to 1)
     float bodyYaw_ = 0.0f, bodyYawOld_ = 0.0f;

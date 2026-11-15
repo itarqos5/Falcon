@@ -7,6 +7,7 @@
 #include "falcon/net/multiplayer_client.hpp"
 #include "falcon/net/session_auth.hpp"
 #include "falcon/net/skin_fetcher.hpp"
+#include "falcon/render/mob_renderer.hpp"
 #include "falcon/net/protocol_data.hpp"
 
 #include <chrono>
@@ -471,6 +472,17 @@ void test_skins() {
     CHECK(prepareSkin(odd).empty());  // (only the two sizes are known)
 }
 
+// The mobs that can be drawn (the table is checked against the game's files by the run that made it; here only what it says).
+void test_mob_table() {
+    CHECK(MobRenderer::supports("zombie") && MobRenderer::supports("pig") && MobRenderer::supports("sheep") && MobRenderer::supports("spider"));
+    CHECK(!MobRenderer::supports("arrow") && !MobRenderer::supports("player") && !MobRenderer::supports(""));
+    const std::vector<std::string> types = MobRenderer::supportedTypes();
+    CHECK(types.size() > 40);
+    for (std::size_t i = 0; i < types.size(); ++i) {
+        for (std::size_t j = i + 1; j < types.size(); ++j) CHECK(types[i] != types[j]);  // (each type once)
+    }
+}
+
 }  // namespace
 
 int main() {
@@ -485,6 +497,7 @@ int main() {
     test_account_texts();
     test_last_seen();
     test_skins();
+    test_mob_table();
 #ifdef _WIN32
     test_encrypted_connection();
 #endif

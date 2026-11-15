@@ -55,6 +55,7 @@ void GameSession::renderWorld(int framebufferWidth, int framebufferHeight) {
         const std::array<double, 3> camPos = {cam.x, cam.y, cam.z};
         hand_.renderGroundItems(renderer_, renderer_.viewProjection(), camPos, itemEntities_.items(), partialTick_);
         renderRemotePlayers(camPos);
+        renderTestMobs(camPos);
         if (physics_) hand_.renderBlockEntities(renderer_, renderer_.viewProjection(), physics_->fallingBlocks(), physics_->primedTnt(), camPos, partialTick_);
         if (perspective_ != 0 && body_ && info_.gameType != 3) {  // F5: the player seen from outside
             const float t = static_cast<float>(partialTick_);

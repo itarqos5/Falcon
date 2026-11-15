@@ -766,7 +766,9 @@ void MultiplayerClient::handlePlay(const Packet& p, RemoteHandler& h) {
             pl.pitch = pl.pitchO = angleOf(r.i8());
             pl.yaw = pl.yawO = angleOf(r.i8());
             pl.headYaw = pl.headYawO = angleOf(r.i8());
+            pl.type = type;
             if (r.ok && type == playerType_ && id != selfEntity_) players_[id] = pl;
+            else if (r.ok && mobTypes_.count(type) != 0) players_[id] = pl;  // a mob that can be drawn: followed the same way
             if (r.ok && type == itemType_) {
                 RemoteItem item;
                 item.entityId = id;

@@ -3,6 +3,7 @@
 #include "game_session_internal.hpp"
 
 #include "falcon/game/item_names.hpp"
+#include "falcon/render/mob_renderer.hpp"
 #include "falcon/render/player_body.hpp"
 #include "falcon/util/text_util.hpp"
 
@@ -73,6 +74,24 @@ int entityTypeNumber(const std::filesystem::path& dataRoot, const char* name) {
     const auto entry = entries->find(name);
     if (entry == entries->end()) return -1;
     return entry->value("protocol_id", -1);
+}
+
+// The entity types that can be drawn as mobs, by their number in the registry (registries.json), with their names.
+std::map<int, std::string> mobTypeNumbers(const std::filesystem::path& dataRoot) {
+    std::map<int, std::string> types;
+    std::ifstream in(dataRoot / "registries.json", std::ios::binary);
+    if (!in) return types;
+    const nlohmann::json doc = nlohmann::json::parse(in, nullptr, false);
+    if (!doc.is_object()) return types;
+    const auto registry = doc.find("minecraft:entity_type");
+    if (registry == doc.end()) return types;
+    const auto entries = registry->find("entries");
+    if (entries == registry->end()) return types;
+    for (const std::string& name : MobRenderer::supportedTypes()) {
+        const auto e = entries->find("minecraft:" + name);
+        if (e != entries->end()) types[e->value("protocol_id", -1)] = name;
+    }
+    return types;
 }
 
 // The names of the sound events by their number (registries.json), without the namespace.
@@ -164,6 +183,7 @@ bool GameSession::connectRemote(const std::string& host, int port, const std::st
     }
     remote_->setPlayerEntityType(entityTypeNumber(dataRoot_, "minecraft:player"));
     remote_->setItemEntityType(entityTypeNumber(dataRoot_, "minecraft:item"));
+    if (mobs_) remote_->setMobTypes(mobTypeNumbers(dataRoot_));
     remote_->setComponentIds(componentIds(dataRoot_));
     remote_->setSoundNames(soundEventNames(dataRoot_));
     physics_.reset();  // the server runs the world: no falling blocks, fire, redstone or random ticks of ours on its chunks
@@ -271,6 +291,35 @@ bool GameSession::connectRemote(const std::string& host, int port, const std::st
 }
 
 // Skins that finished downloading are put on the graphics card (here, where there is a context), and the account's own skin goes on the hand too.
+// FALCON_TEST_MOBS=zombie,pig,sheep: a row of those mobs five blocks in front of the player, walking on the spot, for a look at the models and pictures (a test aid).
+void GameSession::renderTestMobs(const std::array<double, 3>& camPos) {
+    static const char* const list = std::getenv("FALCON_TEST_MOBS");
+    if (list == nullptr || !mobs_ || !ready_) return;
+    std::string names = list;
+    double x = 0.0;
+    const double yaw = static_cast<double>(player_.yaw) * 3.14159265358979 / 180.0;
+    const double forwardX = -std::sin(yaw), forwardZ = std::cos(yaw), rightX = std::cos(yaw), rightZ = std::sin(yaw);
+    std::size_t at = 0;
+    int count = 0;
+    for (const char c : names) count += c == ',' ? 1 : 0;
+    x = -1.6 * count / 2.0;
+    while (at <= names.size()) {
+        std::size_t end = names.find(',', at);
+        if (end == std::string::npos) end = names.size();
+        const std::string type = names.substr(at, end - at);
+        at = end + 1;
+        if (type.empty()) continue;
+        MobPose mob;
+        mob.position = {player_.x + forwardX * 4.5 + rightX * x, player_.y, player_.z + forwardZ * 4.5 + rightZ * x};
+        mob.bodyYaw = player_.yaw + 180.0f - 25.0f;  // (facing the player, turned a little)
+        mob.walkPosition = static_cast<float>(playerAgeTicks_ + partialTick_) * 0.6f;
+        mob.walkSpeed = 0.8f;
+        mob.ageTicks = playerAgeTicks_ + partialTick_;
+        mobs_->render(renderer_.viewProjection(), camPos, type, mob);
+        x += 1.6;
+    }
+}
+
 void GameSession::pumpSkins() {
     std::vector<net::SkinFetcher::Done> done;
     if (remote_) done = remote_->takeSkins();
@@ -354,6 +403,7 @@ void GameSession::sendRemoteTick(const PlayerInput& input) {
 
 void GameSession::renderRemotePlayers(const std::array<double, 3>& camPos) {
     if (!remote_ || !body_) return;
+    const float partial = static_cast<float>(partialTick_);
     const float t = static_cast<float>(partialTick_);
     const auto wrap = [](float degrees) {
         float d = std::fmod(degrees, 360.0f);
@@ -362,6 +412,24 @@ void GameSession::renderRemotePlayers(const std::array<double, 3>& camPos) {
         return d;
     };
     for (const auto& [id, p] : remote_->players()) {
+        if (!remote_->isPlayerEntity(p)) {  // a mob: its model and picture by its type
+            const std::string* type = remote_->mobName(p.type);
+            if (type == nullptr || !mobs_) continue;
+            MobPose mob;
+            mob.position = {p.xo + (p.x - p.xo) * partialTick_, p.yo + (p.y - p.yo) * partialTick_, p.zo + (p.z - p.zo) * partialTick_};
+            const float mobYaw = p.yawO + wrap(p.yaw - p.yawO) * partial;
+            mob.bodyYaw = mobYaw;
+            mob.headYaw = wrap((p.headYawO + wrap(p.headYaw - p.headYawO) * partial) - mobYaw);
+            mob.headPitch = p.pitchO + (p.pitch - p.pitchO) * partial;
+            mob.walkPosition = p.walkPosition - p.walkSpeed * (1.0f - partial);
+            mob.walkSpeed = std::min(1.0f, p.walkSpeedO + (p.walkSpeed - p.walkSpeedO) * partial);
+            mob.ageTicks = playerAgeTicks_ + partialTick_;
+            int mobSky = 15, mobBlock = 0;
+            renderer_.lightAtWithCarried(static_cast<int>(std::floor(mob.position[0])), static_cast<int>(std::floor(mob.position[1] + 1.0)), static_cast<int>(std::floor(mob.position[2])), mobSky, mobBlock);
+            mob.light = entityLightColor(mobSky, mobBlock, static_cast<float>(services_.options.gamma));
+            mobs_->render(renderer_.viewProjection(), camPos, *type, mob);
+            continue;
+        }
         BodyPose pose;
         pose.position = {p.xo + (p.x - p.xo) * partialTick_, p.yo + (p.y - p.yo) * partialTick_, p.zo + (p.z - p.zo) * partialTick_};
         const float bodyYaw = p.yawO + wrap(p.yaw - p.yawO) * t;
@@ -403,7 +471,7 @@ void GameSession::drawNameTags(GuiGraphics& g, int guiWidth, int guiHeight, cons
     };
     const float t = static_cast<float>(partialTick_);
     for (const auto& [id, p] : remote_->players()) {
-        if (!remote_->nameTagVisible(p.id)) continue;
+        if (!remote_->isPlayerEntity(p) || !remote_->nameTagVisible(p.id)) continue;
         const double px = p.xo + (p.x - p.xo) * partialTick_, py = p.yo + (p.y - p.yo) * partialTick_, pz = p.zo + (p.z - p.zo) * partialTick_;
         const double dx = px - cam.x, dy = py - cam.y, dz = pz - cam.z;
         if (dx * dx + dy * dy + dz * dz > 64.0 * 64.0) continue;

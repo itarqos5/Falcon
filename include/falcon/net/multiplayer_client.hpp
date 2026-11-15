@@ -49,6 +49,7 @@ struct TabEntry {
 // Another player that the server tells us about.
 struct RemotePlayer {
     int entityId = 0;
+    int type = -1;  // the entity type: a player's (isPlayerEntity), or a mob's that was asked to be followed (setMobTypes)
     Uuid id{};
     double x = 0, y = 0, z = 0;
     double xo = 0, yo = 0, zo = 0;
@@ -126,6 +127,13 @@ public:
 
     void setPlayerEntityType(int type) { playerType_ = type; }  // the number of minecraft:player in the entity type registry
     void setItemEntityType(int type) { itemType_ = type; }      // and of minecraft:item
+    // The entity types that are followed besides players and items, by their number in the registry, with their names ("zombie"): mobs that can be drawn.
+    void setMobTypes(std::map<int, std::string> types) { mobTypes_ = std::move(types); }
+    [[nodiscard]] bool isPlayerEntity(const RemotePlayer& e) const { return e.type == playerType_; }
+    [[nodiscard]] const std::string* mobName(int type) const {
+        const auto it = mobTypes_.find(type);
+        return it == mobTypes_.end() ? nullptr : &it->second;
+    }
     void setComponentIds(const ComponentIds& ids) { componentIds_ = ids; }
     void setAccount(const Account& account) { account_ = account; }  // before start()
     [[nodiscard]] bool encrypted() const { return connection_.encrypted(); }
@@ -194,6 +202,7 @@ private:
     int selfEntity_ = -1;
     int playerType_ = -1;  // the entity type number of a player
     int itemType_ = -1;    // and of an item
+    std::map<int, std::string> mobTypes_;
     std::map<int, RemoteItem> items_;
     ComponentIds componentIds_;
     SkinFetcher skins_;
