@@ -6,6 +6,7 @@
 #include "falcon/net/last_seen.hpp"
 #include "falcon/net/multiplayer_client.hpp"
 #include "falcon/net/session_auth.hpp"
+#include "falcon/net/skin_fetcher.hpp"
 #include "falcon/net/protocol_data.hpp"
 
 #include <chrono>
@@ -416,6 +417,60 @@ void test_last_seen() {
     CHECK(window.seen[0][0] == 11 && window.seen[19][0] == 30);  // (the message 10 is gone)
 }
 
+// The skin a profile names (only a picture on the game's own texture server is followed), and an old 64x32 skin made into a 64x64 one the way the game does it.
+void test_skins() {
+    const auto slim = parseTexturesProperty("eyJ0aW1lc3RhbXAiOjEsInByb2ZpbGVJZCI6IngiLCJwcm9maWxlTmFtZSI6InkiLCJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHA6Ly90ZXh0dXJlcy5taW5lY3JhZnQubmV0L3RleHR1cmUvYWJjMTIzZGVmNDU2IiwibWV0YWRhdGEiOnsibW9kZWwiOiJzbGltIn19fX0=");
+    CHECK(slim && slim->hash == "abc123def456" && slim->slim);
+    const auto wide = parseTexturesProperty("eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHBzOi8vdGV4dHVyZXMubWluZWNyYWZ0Lm5ldC90ZXh0dXJlLzAxMjM0NTY3ODlhYmNkZWYifX19");
+    CHECK(wide && wide->hash == "0123456789abcdef" && !wide->slim);  // (no metadata: the wide model)
+    CHECK(!parseTexturesProperty("eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHA6Ly9ldmlsLmV4YW1wbGUvdGV4dHVyZS9hYmMxMjMifX19"));  // another host
+    CHECK(!parseTexturesProperty("eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHA6Ly90ZXh0dXJlcy5taW5lY3JhZnQubmV0L3RleHR1cmUvLi4vLi4veCJ9fX0="));  // not a hash
+    CHECK(!parseTexturesProperty("eyJ0ZXh0dXJlcyI6eyJDQVBFIjp7InVybCI6Imh0dHA6Ly90ZXh0dXJlcy5taW5lY3JhZnQubmV0L3RleHR1cmUvYWJjMTIzIn19fQ=="));  // a cape, not a skin
+    CHECK(!parseTexturesProperty("not base64 at all"));
+
+    // 64x32: every pixel is (x, y, 7) and half transparent, so that what happens to the pixels shows
+    Image old;
+    old.width = 64;
+    old.height = 32;
+    old.rgba.resize(64u * 32u * 4u);
+    for (int y = 0; y < 32; ++y) {
+        for (int x = 0; x < 64; ++x) {
+            unsigned char* p = &old.rgba[(static_cast<std::size_t>(y) * 64u + static_cast<std::size_t>(x)) * 4u];
+            p[0] = static_cast<unsigned char>(x);
+            p[1] = static_cast<unsigned char>(y);
+            p[2] = 7;
+            p[3] = 200;
+        }
+    }
+    const auto at = [](const Image& image, int x, int y) { return &image.rgba[(static_cast<std::size_t>(y) * static_cast<std::size_t>(image.width) + static_cast<std::size_t>(x)) * 4u]; };
+    const Image made = prepareSkin(old);
+    CHECK(made.width == 64 && made.height == 64);
+    // the right leg's top (4,16) 4x4 goes to (20,48) mirrored: its left edge ends up on the right
+    CHECK(at(made, 23, 48)[0] == 4 && at(made, 23, 48)[1] == 16);
+    CHECK(at(made, 20, 51)[0] == 7 && at(made, 20, 51)[1] == 19);
+    // the right arm's front (44,20) 4x12 goes to (36,52) (offset -8, 32) mirrored
+    CHECK(at(made, 39, 52)[0] == 44 && at(made, 39, 52)[1] == 20);
+    // the base layers are opaque, the copies too; the hat area (all of it was opaque enough: 200 is not under 128) is made see-through
+    CHECK(at(made, 10, 5)[3] == 255 && at(made, 30, 20)[3] == 255 && at(made, 23, 48)[3] == 255 && at(made, 40, 5)[3] == 0);
+    // a hat area with a transparent pixel is left alone
+    Image hatted = old;
+    hatted.rgba[(static_cast<std::size_t>(3) * 64u + 40u) * 4u + 3u] = 50;
+    const Image kept = prepareSkin(hatted);
+    CHECK(at(kept, 41, 5)[3] == 200 && at(kept, 40, 3)[3] == 50);
+    // a modern skin keeps its size and gets only the opaque base layers
+    Image modern;
+    modern.width = 64;
+    modern.height = 64;
+    modern.rgba.assign(64u * 64u * 4u, 100);
+    const Image same = prepareSkin(modern);
+    CHECK(same.height == 64 && at(same, 10, 5)[3] == 255 && at(same, 40, 5)[3] == 100 && at(same, 5, 40)[3] == 100);  // (the second layers keep their alpha)
+    Image odd;
+    odd.width = 128;
+    odd.height = 128;
+    odd.rgba.assign(128u * 128u * 4u, 255);
+    CHECK(prepareSkin(odd).empty());  // (only the two sizes are known)
+}
+
 }  // namespace
 
 int main() {
@@ -429,6 +484,7 @@ int main() {
     test_rsa();
     test_account_texts();
     test_last_seen();
+    test_skins();
 #ifdef _WIN32
     test_encrypted_connection();
 #endif

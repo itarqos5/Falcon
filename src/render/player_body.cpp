@@ -264,7 +264,7 @@ const Texture2D* PlayerBodyRenderer::armorTexture(const std::string& layer, cons
 
 void PlayerBodyRenderer::render(const Matrix4f& viewProj, const std::array<double, 3>& cam, const BodyPose& pose) {
     // HumanoidModel.setupAnim on a copy of the model.
-    const bool slim = haveSlim_ && pose.skin >= 0 && pose.skin < 9;
+    const bool slim = haveSlim_ && (pose.customSkin != nullptr ? pose.customSlim : (pose.skin >= 0 && pose.skin < 9));
     EntityPart model = slim ? slimModel_ : model_;
     EntityPart* head = model.find("head");
     EntityPart* body = model.find("body");
@@ -396,7 +396,7 @@ void PlayerBodyRenderer::render(const Matrix4f& viewProj, const std::array<doubl
         gl::BufferData(gl::ARRAY_BUFFER, static_cast<gl::GLsizeiptr>(list.size() * sizeof(Vertex)), list.data(), gl::STREAM_DRAW);
         gl::DrawArrays(gl::TRIANGLES, 0, static_cast<gl::GLsizei>(list.size()));
     };
-    draw(vertices, skinTexture(pose.skin), 1.0f, 1.0f, 1.0f);
+    draw(vertices, pose.customSkin != nullptr ? *pose.customSkin : skinTexture(pose.skin), 1.0f, 1.0f, 1.0f);
     // The armor worn: each layer of the model in the posed body's pose, with its own picture (leather is brown unless dyed, with a plain overlay on top).
     for (std::size_t slot = 0; slot < 4; ++slot) {
         const std::string& item = pose.armor[slot];

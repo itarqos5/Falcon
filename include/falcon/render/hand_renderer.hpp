@@ -85,6 +85,10 @@ private:
     ItemIcons& icons_;
     bool slim_ = false;
     Texture2D skin_;
+public:
+    // The arm in a skin of the player's own (wide arms: the hand is drawn with the wide arm).
+    void setSkin(const Image& skin) { skin_ = Texture2D(skin, FilterMode::Nearest); }
+private:
     ShaderProgram armShader_;
     gl::GLint uProj_ = -1, uLight_ = -1, uSkin_ = -1;
     gl::GLuint armVao_ = 0, armVbo_ = 0;

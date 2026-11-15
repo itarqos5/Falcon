@@ -28,6 +28,9 @@ struct BodyPose {
     // The skin: -1 is the plain Steve (wide arms); 0-8 are the nine default skins with slim arms and 9-17 the same with wide arms, in the order of the game's own
     // PlayerSkin.DEFAULT_SKINS (alex, ari, efe, kai, makena, noor, steve, sunny, zuri), which is how a player without a skin of their own gets one.
     int skin = -1;
+    // A skin of the player's own (a picture that was downloaded) and whether it is for slim arms; it takes the place of the default skin above.
+    const Texture2D* customSkin = nullptr;
+    bool customSlim = false;
     double ageTicks = 0.0;             // the arms sway a little as they do in the game
     std::array<float, 3> light{1.0f, 1.0f, 1.0f};  // the light colour where the player stands
     // Cape, Jacket, Left Sleeve, Right Sleeve, Left Pant Leg, Right Pant Leg, Hat: the Skin Customization options.

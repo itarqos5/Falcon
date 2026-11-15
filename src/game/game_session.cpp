@@ -132,6 +132,10 @@ GameSession::GameSession(ScreenServices& services, const ResourceManager& resour
       renderer_(models_, info.seed, info.style, workerCount(), overworld_) {
     (void)loadItems(services, resources, *registry_);
     dataRoot_ = resources.dataRoot();
+    if (!services.playerUuid.empty()) {  // the account's own skin (what anyone sees of an account is public)
+        localSkins_ = std::make_unique<net::SkinFetcher>();
+        localSkins_->requestProfile(services.playerUuid);
+    }
     models_.setBiomes(overworld_ ? &overworld_->biomes() : nullptr);  // grass, leaves and water follow the biomes
     inventory_.infiniteMaterials = info.gameType == 1;
     MenuPlayer menuPlayer;
@@ -470,6 +474,7 @@ void GameSession::update(double dt, bool active, int framebufferWidth, int frame
     }
 
     pumpRemote();  // what a server sent since the last frame
+    pumpSkins();
     const int distance = renderDistance();
     renderer_.setBrightness(static_cast<float>(services_.options.gamma));
     renderer_.setGpuTiming(showDebug_ || benchmark_.running);

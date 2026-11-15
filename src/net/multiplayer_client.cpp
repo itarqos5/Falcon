@@ -678,9 +678,15 @@ void MultiplayerClient::handlePlay(const Packet& p, RemoteHandler& h) {
                     e.name = r.string();
                     const int props = r.varint();
                     for (int k = 0; k < props && r.ok; ++k) {
-                        r.string();
-                        r.string();
-                        if (r.boolean()) r.string();
+                        const std::string property = r.string();
+                        const std::string value = r.string();
+                        if (r.boolean()) (void)r.string();  // (the signature)
+                        if (property == "textures" && r.ok) {  // the skin: where it is, and which model it is for
+                            if (const auto skin = parseTexturesProperty(value)) {
+                                skinInfos_[id] = *skin;
+                                skins_.request(*skin);
+                            }
+                        }
                     }
                 }
                 if (actions & 2) {  // chat session

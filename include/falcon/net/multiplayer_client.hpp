@@ -4,6 +4,7 @@
 #include "falcon/net/last_seen.hpp"
 #include "falcon/net/protocol_data.hpp"
 #include "falcon/net/session_auth.hpp"
+#include "falcon/net/skin_fetcher.hpp"
 #include "falcon/text/styled_text.hpp"
 #include "falcon/world/block_registry.hpp"
 #include "falcon/world/chunk.hpp"
@@ -138,6 +139,12 @@ public:
     [[nodiscard]] const Uuid& selfId() const { return selfId_; }
     [[nodiscard]] const std::map<int, RemotePlayer>& players() const { return players_; }
     [[nodiscard]] const std::map<int, RemoteItem>& items() const { return items_; }
+    // The skin a player's profile names (null: none, so the default skin by their id), and the skins that finished downloading since the last call.
+    [[nodiscard]] const SkinInfo* skinOf(const Uuid& id) const {
+        const auto it = skinInfos_.find(id);
+        return it == skinInfos_.end() ? nullptr : &it->second;
+    }
+    [[nodiscard]] std::vector<SkinFetcher::Done> takeSkins() { return skins_.takeFinished(); }
     [[nodiscard]] std::vector<TabEntry> tabList() const;  // listed entries, in the order the game shows them
     [[nodiscard]] const StyledText& tabHeader() const { return tabHeader_; }
     [[nodiscard]] const StyledText& tabFooter() const { return tabFooter_; }
@@ -189,6 +196,8 @@ private:
     int itemType_ = -1;    // and of an item
     std::map<int, RemoteItem> items_;
     ComponentIds componentIds_;
+    SkinFetcher skins_;
+    std::map<Uuid, SkinInfo> skinInfos_;
     Account account_;
     struct KeyExchange {
         Bytes publicKey, challenge;

@@ -270,6 +270,26 @@ bool GameSession::connectRemote(const std::string& host, int port, const std::st
     return true;
 }
 
+// Skins that finished downloading are put on the graphics card (here, where there is a context), and the account's own skin goes on the hand too.
+void GameSession::pumpSkins() {
+    std::vector<net::SkinFetcher::Done> done;
+    if (remote_) done = remote_->takeSkins();
+    if (localSkins_) {
+        std::vector<net::SkinFetcher::Done> mine = localSkins_->takeFinished();
+        for (net::SkinFetcher::Done& d : mine) done.push_back(std::move(d));
+    }
+    for (const net::SkinFetcher::Done& d : done) {
+        skinTextures_[d.hash] = std::make_unique<Texture2D>(d.image, FilterMode::Nearest);
+        skinSlim_[d.hash] = d.slim;
+        if (localSkins_) {
+            if (const auto own = localSkins_->profileSkin(services_.playerUuid); own && own->hash == d.hash) {
+                localSkinHash_ = d.hash;
+                if (!d.slim) hand_.setSkin(d.image);
+            }
+        }
+    }
+}
+
 void GameSession::pumpRemote() {
     if (!remote_) return;
     remote_->pump(remoteHandler_);
@@ -353,6 +373,12 @@ void GameSession::renderRemotePlayers(const std::array<double, 3>& camPos) {
         pose.attackProgress = p.swing;
         pose.crouching = p.sneaking;
         pose.skin = net::defaultSkinOf(p.id);
+        if (const net::SkinInfo* own = remote_->skinOf(p.id)) {  // a skin of their own, once it has come
+            if (const auto texture = skinTextures_.find(own->hash); texture != skinTextures_.end()) {
+                pose.customSkin = texture->second.get();
+                pose.customSlim = own->slim;
+            }
+        }
         pose.ageTicks = playerAgeTicks_ + partialTick_;
         int sky = 15, block = 0;
         renderer_.lightAtWithCarried(static_cast<int>(std::floor(pose.position[0])), static_cast<int>(std::floor(pose.position[1] + 1.0)), static_cast<int>(std::floor(pose.position[2])), sky, block);

@@ -211,6 +211,7 @@ private:
     // the keys move the player; otherwise (a menu is open) the player only carries on with what they were doing.
     void tickPlayer(double seconds, bool steering);
     void tickFovModifier();
+    void pumpSkins();  // skins that finished downloading become textures
     void drawFireOverlay(GuiGraphics& g, int guiWidth, int guiHeight);
     // The 20 ticks a second of the HUD (the fading name of the held item).
     void tickHud(double seconds);
@@ -374,6 +375,10 @@ private:
     net::RemoteHandler remoteHandler_;
     std::string remoteLost_;
     int lastInputFlags_ = 0;
+    std::unique_ptr<net::SkinFetcher> localSkins_;                                   // the signed-in account's own skin, looked up at Mojang
+    std::map<std::string, std::unique_ptr<Texture2D>> skinTextures_;                  // downloaded skins by their hash
+    std::map<std::string, bool> skinSlim_;
+    std::string localSkinHash_;                                                        // the skin of this player (empty: the plain Steve)
     bool selfOnFire_ = false;                  // the server says the player burns
     int lastHeldSent_ = -1;                    // the hotbar slot the server knows is in the hand
     bool usingRemote_ = false;                 // an item is being used (eaten, drawn) on a server: the release must be told
