@@ -66,6 +66,8 @@ struct WorldSave {
     std::vector<ItemEntity> items;
     std::map<std::string, std::string> gameRules;  // the game rules that differ from their defaults (/gamerule)
     int difficulty = -1;                           // -1: not stored
+    NbtTag containers;                             // what the chests, furnaces ... hold (BlockStorages::toNbt); type End: none stored
+    std::vector<std::pair<int, ItemStack>> enderChest;  // (slot, stack) of the player's ender chest
 };
 
 // An item stack as NBT ({id, count, damage, name, components}) and back (an item this game does not know gives an empty stack).

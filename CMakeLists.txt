@@ -244,6 +244,7 @@ add_library(falcon_core
     src/world/boat.cpp
     src/world/item_entity.cpp
     src/world/world_save.cpp
+    src/world/block_containers.cpp
     src/world/collision_shapes.cpp
     src/world/block_outlines.cpp
     src/world/block_support.cpp
@@ -330,6 +331,7 @@ add_library(falcon_core
     src/game/game_session_player.cpp
     src/game/game_session_remote.cpp
     src/game/game_session_blocks.cpp
+    src/game/game_session_containers.cpp
     src/game/game_session_render.cpp
     src/game/item_render.cpp
     src/game/container_screen.cpp

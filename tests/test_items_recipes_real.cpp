@@ -306,6 +306,14 @@ void test_item_registry_and_recipes_real(const std::filesystem::path& dataDir) {
         }
     }
 
+    {  // furnaces: raw iron smelts (200 ticks, 0.7 experience) and blasts, food smokes, and the cache has them too
+        const CookingRecipe* iron = recipes->findCooking(CookingKind::Smelting, S("raw_iron"));
+        CHECK(iron != nullptr && iron->result.item == itemNamed("iron_ingot") && iron->cookingTime == 200 && std::abs(iron->experience - 0.7f) < 1e-4f);
+        CHECK(recipes->findCooking(CookingKind::Blasting, S("raw_iron")) != nullptr && recipes->findCooking(CookingKind::Smoking, S("beef")) != nullptr);
+        CHECK(recipes->findCooking(CookingKind::Smoking, S("raw_iron")) == nullptr && recipes->cooking().size() > 50);
+        CHECK(fuelBurnTicks(S("coal"), StorageKind::Furnace) == 1600 && fuelBurnTicks(S("coal"), StorageKind::BlastFurnace) == 800 && fuelBurnTicks(S("lava_bucket"), StorageKind::Furnace) == 20000 &&
+              fuelBurnTicks(S("stone"), StorageKind::Furnace) == 0);
+    }
     // The inventory menu crafts from the real recipes too.
     installRecipeManager(recipes);
     {

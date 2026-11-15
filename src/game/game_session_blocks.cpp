@@ -270,7 +270,10 @@ void GameSession::interact(double dt, bool active) {
         breakCooldown_ = 0.0;
         stopDigging();
     }
-    if (!use) placeCooldown_ = 0.0;
+    if (!use) {
+        placeCooldown_ = 0.0;
+        unsupportedHint_ = false;
+    }
     if (remote_) {  // using an item (eating, drawing a bow ...) goes to the server once; letting go tells it that the use stopped
         const ItemStack& held = inventory_.selectedItem();
         const std::string& heldName = held.isEmpty() ? std::string() : held.type().name;
@@ -323,6 +326,11 @@ void GameSession::interact(double dt, bool active) {
         if (remote_ && !useItemRemote()) return;  // (the server answers a lever, a chest ...: only a block put down is shown at once)
         // A lever, button, door, trapdoor or fence gate answers to the right click (sneaking with something in the hand puts the item down instead).
         if (redstone_ && !(player_.sneaking && !inventory_.selectedItem().isEmpty()) && redstone_->use(target_->x, target_->y, target_->z)) {
+            swingArm();
+            return;
+        }
+        // A crafting table, chest, furnace ...: its window opens (sneaking with something in the hand puts the item down instead).
+        if (!remote_ && !(player_.sneaking && !inventory_.selectedItem().isEmpty()) && useBlockContainer(target_->x, target_->y, target_->z)) {
             swingArm();
             return;
         }
@@ -380,6 +388,7 @@ void GameSession::interact(double dt, bool active) {
                     renderer_.setBlock(place[0], place[1] + 1, place[2], support_->upperHalf(placed));
                 }
                 setBlock(place[0], place[1], place[2], placed);
+                if (!remote_) connectChest(place[0], place[1], place[2]);  // a chest next to a single chest makes a double one
                 swingArm();
                 {  // the place sound of the new block
                     const std::array<double, 3> where = {place[0] + 0.5, place[1] + 0.5, place[2] + 0.5};

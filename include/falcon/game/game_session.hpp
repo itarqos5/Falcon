@@ -14,6 +14,7 @@
 #include "falcon/render/mob_renderer.hpp"
 #include "falcon/render/player_body.hpp"
 #include "falcon/world/boat.hpp"
+#include "falcon/world/block_containers.hpp"
 #include "falcon/world/item_entity.hpp"
 #include "falcon/platform/window.hpp"
 #include "falcon/render/block_icons.hpp"
@@ -241,6 +242,14 @@ private:
     void loadSave();
     void tickHealth();
     void pickUpItems();
+    // ---- the blocks of a world played here that hold items or open a window (game_session_containers.cpp) ----
+    bool useBlockContainer(int x, int y, int z);  // the right click on a crafting table, chest, furnace ...: opens its window (true if the block was one)
+    void openLocalMenu(RemoteMenuKind kind, int rows, Container* storage, bool local, const std::string& title, StorageKind storageKind, const std::array<int, 3>* at);
+    void tickContainers();
+    void storageBlockReplaced(Block old, Block now, int x, int y, int z);
+    void connectChest(int x, int y, int z);
+    void addExperience(int points);
+    void awardFurnaceExperience(BlockStorage& storage);
     void die();
     void drawHotbar(GuiGraphics& graphics, int guiWidth, int guiHeight);
     // Hud.extractPlayerHealth and the experience bar: the hearts above the left of the hotbar, the food above the right, the experience strip between.
@@ -408,6 +417,11 @@ private:
     std::string localSkinHash_;                                                        // the skin of this player (empty: the plain Steve)
     std::unique_ptr<RemoteMenu> remoteMenu_;  // the container a server opened (kept after it is closed, so that nothing points at a menu that is gone)
     std::string remoteMenuTitle_;
+    BlockStorages storages_;                                // what the chests, furnaces ... of this world hold
+    SimpleContainer enderChest_{27};                        // the player's own ender chest (the same behind every ender chest block)
+    std::unique_ptr<CompoundContainer> openCompound_;       // the two halves of the double chest that is open
+    std::optional<std::array<int, 3>> openStoragePos_;      // the block whose window is open (a furnace's numbers follow it)
+    bool unsupportedHint_ = false;                          // "cannot show this window yet" was said for this click
     std::vector<std::string> menuTypeNames_;  // the names of the menu types by their number in the server's registry
     bool remoteMenuOpen_ = false, containerOpenRequested_ = false, containerCloseRequested_ = false;
     bool selfOnFire_ = false;                  // the server says the player burns

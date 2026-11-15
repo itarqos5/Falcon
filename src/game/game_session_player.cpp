@@ -84,6 +84,7 @@ void GameSession::tickPlayer(double seconds, bool steering) {
         if (!remote_) fluids_.tick(renderer_.level(), [this](int bx, int by, int bz, Block b) { return renderer_.setBlock(bx, by, bz, b); });
         if (ready_ && physics_) physics_->tick();
         if (ready_ && redstone_) redstone_->tick();
+        if (ready_) tickContainers();
     }
     // Out of the world (below the void line) the void hurts a survival player (4 a tick, through any protection) until they die; anyone else
     // starts again at the spawn.

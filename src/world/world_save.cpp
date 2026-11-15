@@ -188,6 +188,16 @@ std::string writeWorldSave(const std::filesystem::path& file, const WorldSave& s
         items.push_back(std::move(t));
     }
     root.put("items", NbtTag::ofList(std::move(items)));
+    if (save.containers.type == NbtTag::Type::List) root.put("containers", save.containers);
+    {
+        std::vector<NbtTag> ender;
+        for (const auto& [slot, stack] : save.enderChest) {
+            NbtTag s = stackToNbt(stack);
+            s.put("slot", integer(slot));
+            ender.push_back(std::move(s));
+        }
+        root.put("enderChest", NbtTag::ofList(std::move(ender)));
+    }
     {
         NbtTag rules = NbtTag::compound();
         for (const auto& [name, value] : save.gameRules) rules.put(name, NbtTag::ofString(value));
@@ -269,6 +279,13 @@ bool readWorldSave(const std::filesystem::path& file, WorldSave& save, WorldEdit
                 e.pickupDelay = static_cast<int>(t.getInt("pickupDelay", 0));
                 e.bobOffset = static_cast<float>(t.getDouble("bob"));
                 loaded.items.push_back(std::move(e));
+            }
+        }
+        if (const NbtTag* c = root->get("containers"); c != nullptr && c->type == NbtTag::Type::List) loaded.containers = *c;
+        if (const NbtTag* ender = root->get("enderChest"); ender != nullptr) {
+            for (const NbtTag& slot : ender->items) {
+                ItemStack stack = stackFromNbt(slot);
+                if (!stack.isEmpty()) loaded.enderChest.emplace_back(static_cast<int>(slot.getInt("slot", 0)), std::move(stack));
             }
         }
         if (const NbtTag* e = root->get("edits"); e != nullptr) {

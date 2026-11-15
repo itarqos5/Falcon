@@ -14,12 +14,16 @@ enum class RemoteMenuKind { Chest, Shulker, Dispenser, Hopper, Furnace, BlastFur
 // The kind (and for a chest the number of rows) of a menu type of the game's registry ("generic_9x3", "furnace", ...); false for a type that is not shown ("brewing_stand").
 [[nodiscard]] bool remoteMenuKindOf(const std::string& typeName, RemoteMenuKind& kind, int& rows);
 
+// (The same windows are used for the blocks of a world played here: then `storage` is the block's own container, and a crafting table or a furnace works things out itself, see below.)
+//
 // A menu whose contents are the server's: the slots of the container then the player's own 27 and the hotbar, numbered as the server numbers them. A click is played out here at
 // once by the menu's own rules (which are the game's) and told to the server (the onClicked hook); what the server says about a slot overwrites it. A result slot (a furnace's, a
 // crafting table's) takes nothing put in.
 class RemoteMenu final : public ContainerMenu {
 public:
-    RemoteMenu(MenuPlayer player, RemoteMenuKind kind, int rows, int containerId);
+    // `storage` (not null): the slots of the container are those of this container (a chest of the world, a double chest as one), not a copy that a server fills.
+    // `local`: no server: a crafting table works out its result itself and gives the grid back when closed.
+    RemoteMenu(MenuPlayer player, RemoteMenuKind kind, int rows, int containerId, Container* storage = nullptr, bool local = false);
 
     [[nodiscard]] int containerId() const { return containerId_; }
     [[nodiscard]] RemoteMenuKind kind() const { return kind_; }
@@ -50,14 +54,31 @@ public:
     int traderLevel = 0, traderXp = 0;
     bool showProgress = false;
 
+    // A furnace that the game runs here: what its fuel slot and shift-click accept (AbstractFurnaceMenu.isFuel / canSmelt), and what happens when something is taken out of the output (the
+    // player is paid the experience of what was made). Unset (a server's furnace): anything goes into the input and the fuel slots.
+    std::function<bool(const ItemStack&)> isFuel;
+    std::function<bool(const ItemStack&)> canSmelt;
+    std::function<void()> onOutputTaken;
+
     ItemStack quickMoveStack(int index) override;
+    void slotsChanged() override;
+    void removed() override;
 
 private:
     RemoteMenuKind kind_;
     int rows_;
     int containerId_;
     int containerSlots_ = 0;
-    SimpleContainer container_;
+    void bindContainer(Container* storage);
+    ItemStack quickMoveLocal(int index);
+    void updateCraftingResult();
+
+    Container* store_ = nullptr;  // the container the first containerSlots_ slots show
+    SimpleContainer owned_;       // what a server's menu fills (store_ points here unless there is a storage)
+    SimpleContainer craftSlots_{9};
+    ResultContainer resultSlots_;
+    bool localCrafting_ = false;
+    bool updating_ = false;
     int data_[kDataSize] = {};
 };
 

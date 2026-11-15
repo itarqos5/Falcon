@@ -284,6 +284,8 @@ void GameSession::loadSave() {
         inventory_.setSelected(p.selectedSlot);
     }
     for (const ItemEntity& e : saved.items) itemEntities_.items().push_back(e);
+    storages_.fromNbt(saved.containers);
+    for (const auto& [slot, stack] : saved.enderChest) enderChest_.item(slot) = stack;
     for (const auto& [rule, value] : saved.gameRules) {  // /gamerule settings come back and take effect again
         gameRules_[rule] = value;
         applyGameRule(rule, value);
@@ -315,6 +317,10 @@ void GameSession::save() {
         if (!inventory_.item(slot).isEmpty()) p.inventory.emplace_back(slot, inventory_.item(slot));
     }
     out.items = itemEntities_.items();
+    out.containers = storages_.toNbt();
+    for (int slot = 0; slot < enderChest_.size(); ++slot) {
+        if (!enderChest_.item(slot).isEmpty()) out.enderChest.emplace_back(slot, enderChest_.item(slot));
+    }
     out.gameRules = gameRules_;
     out.difficulty = difficulty_;
     const std::string error = writeWorldSave(savePath_, out, *edits_, *registry_);
@@ -422,8 +428,10 @@ PlayerInput GameSession::sampleInput() const {
 }
 
 bool GameSession::setBlock(int x, int y, int z, Block block) {
+    const Block old = renderer_.level().block(x, y, z);
     if (!renderer_.setBlock(x, y, z, block)) return false;
-    if (remote_) return true;  // on a server what happens to the neighbours is the server's to say (it sends the changes)
+    if (remote_) return true;
+    storageBlockReplaced(old, block, x, y, z);  // (a chest that goes spills what it held)  // on a server what happens to the neighbours is the server's to say (it sends the changes)
     fluids_.blockChanged(renderer_.level(), x, y, z);  // water next to it looks round again (flows into a hole, or loses its source)
     if (physics_) physics_->blockPlaced(x, y, z);  // sand may fall, fire starts to burn
     if (redstone_) redstone_->blockChanged(x, y, z);  // power runs through what is near

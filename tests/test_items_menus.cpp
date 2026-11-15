@@ -772,3 +772,141 @@ void test_menu_misc() {
 // Recipes
 
 void setOne(std::vector<ItemStack>& grid, int index, const char* name) { grid[static_cast<std::size_t>(index)] = S(name); }
+
+// The blocks of a world played here that hold items: which blocks they are, a furnace (fuel burns, things cook at the speed of its kind, the experience owed, what is saved), a double
+// chest as one container, and the windows working on them: a crafting table that works out its own result and gives its grid back, a furnace window that takes only what a furnace
+// takes, a chest window that shows the block's own container.
+void test_local_containers() {
+    CHECK(storageKindOf("chest") == StorageKind::Chest && storageKindOf("trapped_chest") == StorageKind::Chest && storageKindOf("barrel") == StorageKind::Barrel);
+    CHECK(storageKindOf("red_shulker_box") == StorageKind::Shulker && storageKindOf("dropper") == StorageKind::Dispenser && storageKindOf("ender_chest") == StorageKind::EnderChest);
+    CHECK(storageKindOf("blast_furnace") == StorageKind::BlastFurnace && storageKindOf("smoker") == StorageKind::Smoker && storageKindOf("stone") == StorageKind::None);
+    CHECK(storageSlotCount(StorageKind::Chest) == 27 && storageSlotCount(StorageKind::Hopper) == 5 && storageSlotCount(StorageKind::Furnace) == 3);
+
+    const auto recipes = currentRecipeManager();
+    CHECK(recipes && recipes->findCooking(CookingKind::Smelting, S("cobblestone")) != nullptr && recipes->findCooking(CookingKind::Smoking, S("cobblestone")) == nullptr);
+
+    {  // a furnace: the first tick lights the coal, 200 ticks later a stone is made, and a second one 200 after that
+        BlockStorage furnace(StorageKind::Furnace);
+        furnace.items.item(0) = S("cobblestone", 2);
+        furnace.items.item(1) = S("coal", 1);
+        FurnaceTickResult r = tickFurnace(furnace, recipes.get());
+        CHECK(r.litChanged && r.lit && furnace.furnace.litTimeRemaining == 1600 && furnace.furnace.litTotalTime == 1600 && furnace.items.item(1).isEmpty());
+        for (int i = 1; i < 200; ++i) r = tickFurnace(furnace, recipes.get());
+        CHECK(furnace.items.item(2).count == 1 && furnace.items.item(0).count == 1 && furnace.furnace.cookingProgress == 0);
+        for (int i = 0; i < 200; ++i) tickFurnace(furnace, recipes.get());
+        CHECK(furnace.items.item(2).count == 2 && furnace.items.item(0).isEmpty() && furnace.furnace.recipesUsed.size() == 1 && furnace.furnace.recipesUsed.begin()->second == 2);
+        bool wentOut = false;
+        for (int i = 0; i < 1400; ++i) {
+            r = tickFurnace(furnace, recipes.get());
+            if (r.litChanged && !r.lit) wentOut = true;
+        }
+        CHECK(wentOut && furnace.furnace.litTimeRemaining == 0);
+        // the experience owed: 2 x 0.1 = 0.2, the fraction of it paid with that chance
+        FurnaceState owed = furnace.furnace;
+        CHECK(collectFurnaceExperience(owed, recipes.get(), 0.1f) == 1 && owed.recipesUsed.empty());
+        owed = furnace.furnace;
+        CHECK(collectFurnaceExperience(owed, recipes.get(), 0.5f) == 0);
+    }
+    {  // a blast furnace burns fuel and cooks twice as fast; a smoker has no recipe for stone and so does not light its fuel
+        BlockStorage blast(StorageKind::BlastFurnace);
+        blast.items.item(0) = S("cobblestone", 1);
+        blast.items.item(1) = S("coal", 1);
+        tickFurnace(blast, recipes.get());
+        CHECK(blast.furnace.litTimeRemaining == 800);
+        for (int i = 1; i < 100; ++i) tickFurnace(blast, recipes.get());
+        CHECK(blast.items.item(2).count == 1);
+        BlockStorage smoker(StorageKind::Smoker);
+        smoker.items.item(0) = S("cobblestone", 1);
+        smoker.items.item(1) = S("coal", 1);
+        tickFurnace(smoker, recipes.get());
+        CHECK(smoker.furnace.litTimeRemaining == 0 && smoker.items.item(1).count == 1 && smoker.items.item(2).isEmpty());
+        // a full output stops the cooking: the fuel is not lit
+        BlockStorage full(StorageKind::Furnace);
+        full.items.item(0) = S("cobblestone", 1);
+        full.items.item(1) = S("coal", 1);
+        full.items.item(2) = S("stone", 64);
+        tickFurnace(full, recipes.get());
+        CHECK(full.furnace.litTimeRemaining == 0 && full.items.item(1).count == 1 && full.items.item(0).count == 1);
+    }
+    {  // what a world keeps of them
+        BlockStorages storages;
+        storages.ensure({3, 64, -5}, StorageKind::Chest).items.item(4) = S("stone", 7);
+        BlockStorage& f = storages.ensure({1, 70, 2}, StorageKind::Furnace);
+        f.items.item(0) = S("cobblestone", 3);
+        f.furnace.litTimeRemaining = 123;
+        f.furnace.cookingProgress = 45;
+        f.furnace.cookingTotalTime = 200;
+        f.furnace.recipesUsed["stone_from_cobblestone"] = 2;
+        storages.ensure({9, 9, 9}, StorageKind::Barrel);  // (empty: not kept)
+        BlockStorages back;
+        back.fromNbt(storages.toNbt());
+        CHECK(back.size() == 2 && back.find({3, 64, -5}) != nullptr && back.find({3, 64, -5})->items.item(4).count == 7 && back.find({9, 9, 9}) == nullptr);
+        BlockStorage* g = back.find({1, 70, 2});
+        CHECK(g != nullptr && g->kind == StorageKind::Furnace && g->items.item(0).count == 3 && g->furnace.litTimeRemaining == 123 && g->furnace.cookingProgress == 45 &&
+              g->furnace.cookingTotalTime == 200 && g->furnace.recipesUsed.at("stone_from_cobblestone") == 2);
+    }
+    {  // a double chest: the first half's slots then the second's
+        SimpleContainer a(27), b(27);
+        CompoundContainer both(a, b);
+        both.item(30) = S("stone", 2);
+        both.item(5) = S("dirt", 1);
+        CHECK(both.size() == 54 && b.item(3).count == 2 && a.item(5).count == 1);
+    }
+    Inventory inventory;
+    MenuPlayer player;
+    player.inventory = &inventory;
+    std::vector<ItemStack> dropped;
+    player.dropHook = [&](const ItemStack& s) { dropped.push_back(s); };
+    {  // a crafting table: a log in the grid shows four planks, taking them uses the log; shift-click makes everything
+        RemoteMenu table(player, RemoteMenuKind::Crafting, 0, 1, nullptr, true);
+        CHECK(table.containerSlots() == 10 && table.slotCount() == 10 + 36 && table.slot(0).x == 124 && table.slot(1).x == 30 && table.slot(9).x == 30 + 2 * 18 && table.slot(9).y == 17 + 2 * 18);
+        table.slot(1).set(S("oak_log", 3));
+        CHECK(table.slot(0).getItem().count == 4 && table.slot(0).getItem().item == itemNamed("oak_planks"));
+        table.clicked(0, 0, ClickType::Pickup);
+        CHECK(table.carried().count == 4 && table.slot(1).getItem().count == 2 && table.slot(0).getItem().count == 4);  // (the next result is already there)
+        table.clicked(kOutsideSlot, 0, ClickType::Pickup);  // drop the planks again
+        CHECK(table.carried().isEmpty() && dropped.size() == 1 && dropped[0].count == 4);
+        table.clicked(0, 0, ClickType::QuickMove);  // shift-click: the other two logs become eight planks in the inventory
+        int planks = 0;
+        for (int i = 0; i < Inventory::kSize; ++i) planks += inventory.item(i).item == itemNamed("oak_planks") ? inventory.item(i).count : 0;
+        CHECK(planks == 8 && !table.slot(1).hasItem() && !table.slot(0).hasItem());
+        table.slot(5).set(S("stone", 3));  // closing gives the grid back
+        table.removed();
+        int stones = 0;
+        for (int i = 0; i < Inventory::kSize; ++i) stones += inventory.item(i).item == itemNamed("stone") ? inventory.item(i).count : 0;
+        CHECK(stones == 3 && !table.slot(5).hasItem());
+    }
+    {  // a furnace window on a furnace of the world: the fuel slot takes fuel only, shift-click sends things where they belong, taking the output pays the experience
+        Inventory inv2;
+        player.inventory = &inv2;
+        BlockStorage furnace(StorageKind::Furnace);
+        RemoteMenu menu(player, RemoteMenuKind::Furnace, 0, 1, &furnace.items, true);
+        menu.isFuel = [](const ItemStack& s) { return fuelBurnTicks(s, StorageKind::Furnace) > 0; };
+        menu.canSmelt = [&](const ItemStack& s) { return recipes->findCooking(CookingKind::Smelting, s) != nullptr; };
+        int paid = 0;
+        menu.onOutputTaken = [&] { ++paid; };
+        CHECK(!menu.slot(1).mayPlace(S("stone")) && menu.slot(1).mayPlace(S("coal")) && !menu.slot(2).mayPlace(S("stone")));
+        inv2.item(9) = S("coal", 4);
+        inv2.item(10) = S("cobblestone", 5);
+        inv2.item(11) = S("dirt", 2);
+        menu.clicked(3, 0, ClickType::QuickMove);   // the coal: into the fuel slot
+        menu.clicked(4, 0, ClickType::QuickMove);   // the cobblestone: into the input
+        menu.clicked(5, 0, ClickType::QuickMove);   // the dirt: neither, so it moves along the inventory (to the hotbar)
+        CHECK(furnace.items.item(1).count == 4 && furnace.items.item(0).count == 5 && furnace.items.item(2).isEmpty() && inv2.item(11).isEmpty() && inv2.item(0).count == 2);
+        furnace.items.item(2) = S("stone", 3);
+        menu.clicked(2, 0, ClickType::QuickMove);   // taking the output
+        CHECK(paid >= 1 && furnace.items.item(2).isEmpty());
+    }
+    {  // a chest window shows the block's own container: what is moved shows there, nothing is a copy
+        Inventory inv3;
+        player.inventory = &inv3;
+        SimpleContainer storage(27);
+        RemoteMenu chest(player, RemoteMenuKind::Chest, 3, 1, &storage);
+        inv3.item(9) = S("stone", 5);
+        chest.clicked(27, 0, ClickType::QuickMove);
+        CHECK(storage.item(0).count == 5 && inv3.item(9).isEmpty());
+        chest.clicked(0, 0, ClickType::Pickup);
+        chest.clicked(1, 0, ClickType::Pickup);
+        CHECK(storage.item(1).count == 5 && storage.item(0).isEmpty());
+    }
+}

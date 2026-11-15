@@ -14,6 +14,7 @@
 #include "falcon/game/item_names.hpp"
 #include "falcon/render/item_icons.hpp"
 #include "falcon/render/player_preview.hpp"
+#include "falcon/world/block_containers.hpp"
 #include "falcon/world/block_registry.hpp"
 #include "falcon/world/block_support.hpp"
 #include "falcon/world/inventory.hpp"
@@ -124,6 +125,7 @@ void test_menu_crafting();
 void test_menu_misc();
 void test_menu_click_hook();
 void test_remote_menu();
+void test_local_containers();
 std::string craft(const RecipeManager& recipes, int w, int h, const std::vector<ItemStack>& grid);
 void test_recipes_minimal();
 void test_block_support_real(const std::filesystem::path& dataDir, const BlockRegistry& blocks);
