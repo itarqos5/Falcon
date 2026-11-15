@@ -185,12 +185,21 @@ void GameSession::interact(double dt, bool active) {
     target_ = raycastBlocks(renderer_.level(), eye, look, kReach);
     breakCooldown_ = std::max(0.0, breakCooldown_ - dt);
     placeCooldown_ = std::max(0.0, placeCooldown_ - dt);
-    if (!active) return;
+    if (!active) {  // a screen open lets go of a toggled key
+        attackLatched_ = useLatched_ = attackRawO_ = useRawO_ = false;
+        return;
+    }
     // Adventure and spectator players cannot break or place blocks.
     if (info_.gameType >= 2) return;
 
-    const bool attack = isDown("key.attack");
-    const bool use = isDown("key.use");
+    // ToggleKeyMapping: with the option on a press switches the action on or off instead of holding it.
+    const bool attackRaw = isDown("key.attack"), useRaw = isDown("key.use");
+    if (attackRaw && !attackRawO_) attackLatched_ = !attackLatched_;
+    if (useRaw && !useRawO_) useLatched_ = !useLatched_;
+    attackRawO_ = attackRaw;
+    useRawO_ = useRaw;
+    const bool attack = services_.options.toggleAttack ? attackLatched_ : attackRaw;
+    const bool use = services_.options.toggleUse ? useLatched_ : useRaw;
     if (!attack) {
         breakCooldown_ = 0.0;
         stopDigging();

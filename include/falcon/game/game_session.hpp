@@ -210,6 +210,7 @@ private:
     // Runs the game ticks (20 a second) that `seconds` of real time are worth, at most 10 a frame like the game. `steering`:
     // the keys move the player; otherwise (a menu is open) the player only carries on with what they were doing.
     void tickPlayer(double seconds, bool steering);
+    void tickFovModifier();
     // The 20 ticks a second of the HUD (the fading name of the held item).
     void tickHud(double seconds);
     // ---- world sounds ----
@@ -295,6 +296,9 @@ private:
     StepClock stepClock_;
     bool wasInWater_ = false;
     int invulnerableTime_ = 0;   // ticks left of the protection after a hit (20 at a hit, only a stronger hit counts above 10)
+    double scrollAccumulator_ = 0.0;  // ScrollWheelHandler: the wheel turned so far, in whole notches
+    bool attackRawO_ = false, useRawO_ = false, attackLatched_ = false, useLatched_ = false;  // "Attack/Destroy" and "Use Item" as toggles
+    float fovModifier_ = 1.0f, fovModifierO_ = 1.0f;  // Camera.fovModifier: the field of view widens when sprinting or flying, eased every tick
     int hurtTime_ = 0;           // ticks of the camera's tilt after a hit
     float lastHurt_ = 0.0f;      // the damage of the last hit
     float hurtDirection_ = 0.0f; // which way the view tilts, degrees (0 or 180)

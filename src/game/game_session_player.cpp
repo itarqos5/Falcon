@@ -31,6 +31,19 @@
 
 namespace falcon {
 
+// Camera.tick and AbstractClientPlayer.getFieldOfViewModifier: flying is 10% wider, and the speed against the walking speed (sprinting is +30%) widens it by half of the
+// difference; the option scales it all, and what is shown follows it by half the distance every tick.
+void GameSession::tickFovModifier() {
+    float target = 1.0f;
+    if (player_.flying) target *= 1.1f;
+    const float speed = player_.sprinting ? 1.3f : 1.0f;  // (the movement speed against the walking speed of 0.1)
+    target *= (speed + 1.0f) / 2.0f;
+    const float scale = static_cast<float>(services_.options.fovEffectScale);
+    target = 1.0f + (target - 1.0f) * scale;
+    fovModifierO_ = fovModifier_;
+    fovModifier_ = std::clamp(fovModifier_ + (target - fovModifier_) * 0.5f, 0.1f, 1.5f);
+}
+
 void GameSession::tickPlayer(double seconds, bool steering) {
     tickAccumulator_ += std::max(seconds, 0.0);
     const int due = static_cast<int>(tickAccumulator_ / kTickSeconds);
@@ -48,6 +61,7 @@ void GameSession::tickPlayer(double seconds, bool steering) {
             const double vx = player_.vx, vy = player_.vy, vz = player_.vz;  // (what it was going at, for a splash)
             player_.tick(input, renderer_.level());
             sendRemoteTick(input);
+            tickFovModifier();
             waterVisionTicks_ = nextWaterVisionTicks(waterVisionTicks_, player_.isUnderWater(), info_.gameType == 3);  // the eyes get used to the water
             if (ready_ && !dead_) {
                 footsteps(input.shift);

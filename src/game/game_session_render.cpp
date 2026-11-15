@@ -116,13 +116,17 @@ std::vector<std::string> GameSession::debugLines() const {
     lines.push_back(format("Falcon 0.1.0 (Minecraft 26.3) - %s", info_.name.c_str()));
     lines.push_back(format("%.0f fps (%.1f ms)  cpu %.1f  gpu %.1f", fps_, frameMillis_, cpuMillis_, renderer_.gpuMillis()));
     lines.push_back("");
-    lines.push_back(format("XYZ: %.3f / %.3f / %.3f", player_.x, player_.y, player_.z));
     const int bx = static_cast<int>(std::floor(player_.x));
     const int by = static_cast<int>(std::floor(player_.y));
     const int bz = static_cast<int>(std::floor(player_.z));
-    lines.push_back(format("Block: %d %d %d   Chunk: %d %d in %d %d", bx, by, bz, bx & 15, bz & 15, chunkOf(bx), chunkOf(bz)));
-    lines.push_back(format("Facing: %s (%.1f / %.1f)", facing(player_.yaw), static_cast<double>(player_.yaw), static_cast<double>(player_.pitch)));
-    if (overworld_) {
+    if (services_.options.reducedDebugInfo) {  // "Reduced Debug Info": no position, direction or biome, only where in its chunk the player is
+        lines.push_back(format("Chunk-relative: %d %d %d", bx & 15, by & 15, bz & 15));
+    } else {
+        lines.push_back(format("XYZ: %.3f / %.3f / %.3f", player_.x, player_.y, player_.z));
+        lines.push_back(format("Block: %d %d %d   Chunk: %d %d in %d %d", bx, by, bz, bx & 15, bz & 15, chunkOf(bx), chunkOf(bz)));
+        lines.push_back(format("Facing: %s (%.1f / %.1f)", facing(player_.yaw), static_cast<double>(player_.yaw), static_cast<double>(player_.pitch)));
+    }
+    if (overworld_ && !services_.options.reducedDebugInfo) {
         const std::string_view biome = overworld_->biomeNameAt(static_cast<int>(std::floor(player_.x)), static_cast<int>(std::floor(player_.y)), static_cast<int>(std::floor(player_.z)));
         lines.push_back("Biome: " + std::string(biome));
     }
@@ -170,7 +174,7 @@ std::vector<std::string> GameSession::debugLinesRight() const {
     lines.push_back("OS: " + pc.os);
     lines.push_back("");
     lines.insert(lines.end(), gpuLines_.begin(), gpuLines_.end());
-    if (target_) {
+    if (target_ && !services_.options.reducedDebugInfo) {
         const Block b = renderer_.level().block(target_->x, target_->y, target_->z);
         lines.push_back("");
         lines.push_back(format("Targeted Block: %d, %d, %d", target_->x, target_->y, target_->z));

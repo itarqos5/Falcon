@@ -335,7 +335,7 @@ Camera GameSession::camera() const {
     c.y = eye[1];
     c.z = eye[2];
     c.look = {player_.yaw, player_.pitch};  // the mouse moves the view at once, between ticks too
-    c.fov = static_cast<float>(services_.options.fov);
+    c.fov = static_cast<float>(services_.options.fov) * (fovModifierO_ + (fovModifier_ - fovModifierO_) * static_cast<float>(partialTick_));
     if (services_.options.bobView && !pinnedPose_) {
         const ViewBob bob = player_.viewBob(partialTick_);
         c.bobX = bob.x;
@@ -346,7 +346,7 @@ Camera GameSession::camera() const {
     // GameRenderer.bobHurt: a hit tips the view to one side and back over half a second.
     if (hurtTime_ > 0) {
         const float left = std::max(0.0f, static_cast<float>(hurtTime_) - static_cast<float>(partialTick_)) / 10.0f;
-        const float tilt = std::sin(left * left * left * left * 3.1415927f) * 14.0f;
+        const float tilt = std::sin(left * left * left * left * 3.1415927f) * 14.0f * static_cast<float>(services_.options.damageTiltStrength);
         c.bobRollDegrees += hurtDirection_ == 0.0f ? -tilt : tilt;
     }
     // F5 (Camera.setup): from behind or in front, four blocks away along the view, brought closer where a block would be in the way (the nearest
@@ -396,7 +396,7 @@ void GameSession::applyLook(bool active) {
     // mouse movement, and Player::turn applies the 0.15 degrees: 0.5 ("Sensitivity: 100%") is 0.15 degrees per pixel.
     const double f = services_.options.mouseSensitivity * 0.6000000238418579 + 0.20000000298023224;
     const double f3x8 = f * f * f * 8.0;
-    player_.turn(dx * f3x8, dy * f3x8 * (services_.options.invertYMouse ? -1.0 : 1.0));
+    player_.turn(dx * f3x8 * (services_.options.invertXMouse ? -1.0 : 1.0), dy * f3x8 * (services_.options.invertYMouse ? -1.0 : 1.0));
 }
 
 PlayerInput GameSession::sampleInput() const {
@@ -675,7 +675,14 @@ void GameSession::pickBlock(Block block) {
 
 void GameSession::onScroll(double dy) {
     if (dy == 0.0 || info_.gameType == 3) return;
-    inventory_.setSelected(inventory_.selected - (dy > 0 ? 1 : -1));
+    // ScrollWheelHandler.onMouseScroll: the notches (all of them one, with the discrete wheel) times the sensitivity add up, and a hotbar slot is moved for each whole one.
+    const double step = (services_.options.discreteMouseScroll ? (dy > 0 ? 1.0 : -1.0) : dy) * services_.options.mouseWheelSensitivity;
+    if (scrollAccumulator_ != 0.0 && (step > 0) != (scrollAccumulator_ > 0)) scrollAccumulator_ = 0.0;
+    scrollAccumulator_ += step;
+    const int whole = static_cast<int>(scrollAccumulator_);
+    if (whole == 0) return;
+    scrollAccumulator_ -= whole;
+    inventory_.setSelected(inventory_.selected - (whole > 0 ? 1 : -1));
 }
 
 void GameSession::addChatMessage(const std::string& text) {
