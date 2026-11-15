@@ -330,6 +330,7 @@ private:
     // F5 and the body seen from outside.
     int perspective_ = 0;
     std::unique_ptr<PlayerBodyRenderer> body_;
+    std::map<int, std::unique_ptr<Texture2D>> frameIcons_;  // the pictures of what is in item frames, by item
     std::map<int, Item> thrownItems_;  // the entity types that are drawn as an item (an ender pearl, a snowball ...), by their number in the server's registry
     std::unique_ptr<MobRenderer> mobs_;  // the mobs of a server (and, with FALCON_TEST_MOBS, a row of them for a look)
     float walkPosition_ = 0.0f, walkSpeed_ = 0.0f, walkSpeedOld_ = 0.0f;  // WalkAnimationState

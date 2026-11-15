@@ -5,6 +5,8 @@
 
 #include "entity_draw.hpp"
 
+#include <nlohmann/json.hpp>
+
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -105,6 +107,14 @@ constexpr MobSpec kMobs[] = {
     {"pale_oak_chest_boat", "chest_boat/pale_oak", "chest_boat/pale_oak", 'B', 1.0f, 1.375f, 0.5625f},
     {"bamboo_raft", "boat/bamboo", "boat/bamboo", 'B', 1.0f, 1.375f, 0.5625f},
     {"bamboo_chest_raft", "chest_boat/bamboo", "chest_boat/bamboo", 'B', 1.0f, 1.375f, 0.5625f},
+    {"minecart", "minecart", "minecart/minecart", 'M', 1.0f, 0.98f, 0.7f},
+    {"chest_minecart", "chest_minecart", "minecart/minecart", 'M', 1.0f, 0.98f, 0.7f},
+    {"furnace_minecart", "furnace_minecart", "minecart/minecart", 'M', 1.0f, 0.98f, 0.7f},
+    {"hopper_minecart", "hopper_minecart", "minecart/minecart", 'M', 1.0f, 0.98f, 0.7f},
+    {"tnt_minecart", "tnt_minecart", "minecart/minecart", 'M', 1.0f, 0.98f, 0.7f},
+    {"spawner_minecart", "spawner_minecart", "minecart/minecart", 'M', 1.0f, 0.98f, 0.7f},
+    {"command_block_minecart", "command_block_minecart", "minecart/minecart", 'M', 1.0f, 0.98f, 0.7f},
+    {"armor_stand", "armor_stand", "armorstand/armorstand", 'S', 1.0f, 0.5f, 1.975f},
     {"arrow", "arrow", "projectiles/arrow", 'A', 1.0f, 0.5f, 0.5f},
     {"spectral_arrow", "arrow", "projectiles/arrow_spectral", 'A', 1.0f, 0.5f, 0.5f},
 };
@@ -195,6 +205,10 @@ MobRenderer::Loaded& MobRenderer::load(const std::string& type) {
     entry.texture = std::make_unique<Texture2D>(*image, FilterMode::Nearest);
     entry.kind = spec->kind;
     entry.scale = spec->scale;
+    if (type == "armor_stand") {  // the small stand has a model of its own
+        std::string smallError;
+        if (auto small = loadEntityModel(dataDir_, "minecraft:armor_stand_small#main", smallError)) entry.small = std::move(*small);
+    }
     if (type == "sheep") {  // the fleece: a second model with its own (grey) picture, which is coloured by the sheep's dye (white here)
         std::string woolError;
         const auto woolBytes = resources_->readBytes(ResourceLocation("minecraft", "textures/entity/sheep/sheep_wool.png"));
@@ -211,9 +225,24 @@ MobRenderer::Loaded& MobRenderer::load(const std::string& type) {
 void MobRenderer::render(const Matrix4f& viewProj, const std::array<double, 3>& cam, const std::string& type, const MobPose& pose) {
     Loaded& loaded = load(type);
     if (!loaded.ok) return;
-    EntityPart model = loaded.model;  // posed on a copy
+    EntityPart model = loaded.kind == 'S' && (pose.standFlags & 1) != 0 && loaded.small ? *loaded.small : loaded.model;  // posed on a copy
+    if (loaded.kind == 'S') {  // ArmorStandModel.setupAnim: every part turned as the pose says; the sticks follow the body; arms and the base plate only when the flags say so
+        const auto turn = [&](const char* name, const std::array<float, 3>& degrees) {
+            if (EntityPart* part = model.find(name)) part->rotation = {degrees[0] * kDegrees, degrees[1] * kDegrees, degrees[2] * kDegrees};
+        };
+        turn("head", pose.standPose[0]);
+        turn("body", pose.standPose[1]);
+        turn("left_arm", pose.standPose[2]);
+        turn("right_arm", pose.standPose[3]);
+        turn("left_leg", pose.standPose[4]);
+        turn("right_leg", pose.standPose[5]);
+        for (const char* stick : {"right_body_stick", "left_body_stick", "shoulder_stick"}) turn(stick, pose.standPose[1]);
+        const bool arms = (pose.standFlags & 4) != 0, plate = (pose.standFlags & 8) == 0;
+        model.children.erase(std::remove_if(model.children.begin(), model.children.end(), [&](const EntityPart& c) { return (!arms && (c.name == "left_arm" || c.name == "right_arm")) || (!plate && c.name == "base_plate"); }),
+                             model.children.end());
+    }
     const float p = pose.walkPosition * 0.6662f, s = pose.walkSpeed;
-    if (loaded.kind != 'A' && loaded.kind != 'B') {
+    if (loaded.kind == 'a' || loaded.kind == 'b' || loaded.kind == 'q' || loaded.kind == 's') {
         if (EntityPart* head = model.find("head")) {
             head->rotation[1] = pose.headYaw * kDegrees;
             head->rotation[0] = pose.headPitch * kDegrees;
@@ -253,6 +282,10 @@ void MobRenderer::render(const Matrix4f& viewProj, const std::array<double, 3>& 
         entity = mul(scaling({-1.0, -1.0, 1.0}), rotY(90.0 * static_cast<double>(kDegrees)));
         entity = mul(rotY((180.0 - static_cast<double>(pose.bodyYaw)) * static_cast<double>(kDegrees)), entity);
         entity = mul(translation({0.0, 0.375, 0.0}), entity);
+    } else if (loaded.kind == 'M') {  // AbstractMinecartRenderer: up by 0.375, turned about Y along the rail, tilted on a slope, the model's mirrored space flipped
+        entity = mul(rotZ(-static_cast<double>(pose.headPitch) * static_cast<double>(kDegrees)), scaling({-1.0, -1.0, 1.0}));
+        entity = mul(rotY((180.0 - static_cast<double>(pose.bodyYaw)) * static_cast<double>(kDegrees)), entity);
+        entity = mul(translation({0.0, 0.375, 0.0}), entity);
     } else if (loaded.kind == 'A') {  // ArrowRenderer: turned about Y (the yaw less a quarter turn) and tilted about Z (the pitch, up being positive): its length is along its flight
         entity = mul(rotY((static_cast<double>(pose.bodyYaw) - 90.0) * static_cast<double>(kDegrees)), rotZ(static_cast<double>(pose.headPitch) * static_cast<double>(kDegrees)));
     } else {  // LivingEntityRenderer: turned about Y, the model's y-down mirrored space flipped, dropped by 1.501 (and the size of the type)
@@ -290,6 +323,104 @@ void MobRenderer::render(const Matrix4f& viewProj, const std::array<double, 3>& 
         collect(fleece, Xf{}, entity, all, list);
         draw(list, *loaded.woolTexture, 0.976f, 1.0f, 0.996f);  // (white wool: DyeColor.WHITE's 0xF9FFFE)
     }
+    gl::BindVertexArray(0);
+}
+
+// The model of an item frame (block/template_item_frame: a few boxes) with its two pictures, read the first time one is drawn.
+void MobRenderer::loadFrame(FrameModel& frame, bool glow) {
+    frame.tried = true;
+    const auto text = [&](const std::string& path) { return resources_->readText(ResourceLocation("minecraft", path)); };
+    const auto own = text(std::string("models/block/") + (glow ? "glow_item_frame" : "item_frame") + ".json");
+    const auto shape = text("models/block/template_item_frame.json");
+    if (!own || !shape) return;
+    const nlohmann::json ownJson = nlohmann::json::parse(*own, nullptr, false), shapeJson = nlohmann::json::parse(*shape, nullptr, false);
+    if (!ownJson.is_object() || !shapeJson.is_object() || !ownJson.contains("textures") || !shapeJson.contains("elements")) return;
+    const auto picture = [&](const char* name) -> std::unique_ptr<Texture2D> {
+        if (!ownJson["textures"].contains(name) || !ownJson["textures"][name].is_string()) return nullptr;
+        std::string path = ownJson["textures"][name].get<std::string>();
+        if (path.compare(0, 10, "minecraft:") == 0) path.erase(0, 10);
+        const auto bytes = resources_->readBytes(ResourceLocation("minecraft", "textures/" + path + ".png"));
+        const auto image = bytes ? decodePng(*bytes) : std::nullopt;
+        return image ? std::make_unique<Texture2D>(*image, FilterMode::Nearest) : nullptr;
+    };
+    frame.wood = picture("wood");
+    frame.back = picture("back");
+    if (!frame.wood || !frame.back) return;
+    for (const nlohmann::json& element : shapeJson["elements"]) {
+        const float x0 = element["from"][0].get<float>(), y0 = element["from"][1].get<float>(), z0 = element["from"][2].get<float>();
+        const float x1 = element["to"][0].get<float>(), y1 = element["to"][1].get<float>(), z1 = element["to"][2].get<float>();
+        for (const auto& [name, face] : element["faces"].items()) {
+            FrameFace f;
+            f.back = face.value("texture", std::string()) == "#back";
+            const float u0 = face["uv"][0].get<float>() / 16.0f, v0 = face["uv"][1].get<float>() / 16.0f, u1 = face["uv"][2].get<float>() / 16.0f, v1 = face["uv"][3].get<float>() / 16.0f;
+            // the corners as someone outside the face sees them: top left, top right, bottom right, bottom left
+            std::array<std::array<float, 3>, 4> c{};
+            if (name == "north") c = {{{x1, y1, z0}, {x0, y1, z0}, {x0, y0, z0}, {x1, y0, z0}}};
+            else if (name == "south") c = {{{x0, y1, z1}, {x1, y1, z1}, {x1, y0, z1}, {x0, y0, z1}}};
+            else if (name == "west") c = {{{x0, y1, z0}, {x0, y1, z1}, {x0, y0, z1}, {x0, y0, z0}}};
+            else if (name == "east") c = {{{x1, y1, z1}, {x1, y1, z0}, {x1, y0, z0}, {x1, y0, z1}}};
+            else if (name == "up") c = {{{x0, y1, z0}, {x1, y1, z0}, {x1, y1, z1}, {x0, y1, z1}}};
+            else if (name == "down") c = {{{x0, y0, z1}, {x1, y0, z1}, {x1, y0, z0}, {x0, y0, z0}}};
+            else continue;
+            const float us[4] = {u0, u1, u1, u0}, vs[4] = {v0, v0, v1, v1};
+            for (std::size_t i = 0; i < 4; ++i) f.v[i] = {c[i][0], c[i][1], c[i][2], us[i], vs[i]};
+            frame.faces.push_back(f);
+        }
+    }
+    frame.ok = !frame.faces.empty();
+}
+
+void MobRenderer::renderItemFrame(const Matrix4f& viewProj, const std::array<double, 3>& cam, bool glow, const std::array<double, 3>& position, float yaw, const Texture2D* icon, int rotation,
+                                  const std::array<float, 3>& light) {
+    FrameModel& frame = glow ? glowFrame_ : plainFrame_;
+    if (!frame.tried) loadFrame(frame, glow);
+    if (!frame.ok) return;
+    // ItemFrameRenderer: the model's block is centred 0.46875 in front of the entity (the entity is the middle of the frame's plane, against the wall) and turned by 180 - yaw
+    const double radians = static_cast<double>(yaw) * static_cast<double>(kDegrees);
+    const Xf place = mul(translation({position[0] - cam[0] - std::sin(radians) * 0.46875, position[1] - cam[1], position[2] - cam[2] + std::cos(radians) * 0.46875}),
+                         rotY((180.0 - static_cast<double>(yaw)) * static_cast<double>(kDegrees)));
+    std::vector<Vertex> wood, back;
+    for (const FrameFace& face : frame.faces) {
+        std::vector<Vertex>& list = face.back ? back : wood;
+        Vertex v[4];
+        for (std::size_t i = 0; i < 4; ++i) {
+            const V3 p = apply(place, {(face.v[i][0] - 8.0) / 16.0, (face.v[i][1] - 8.0) / 16.0, (face.v[i][2] - 8.0) / 16.0});
+            v[i] = {static_cast<float>(p.x), static_cast<float>(p.y), static_cast<float>(p.z), face.v[i][3], face.v[i][4], 1.0f};
+        }
+        list.insert(list.end(), {v[0], v[1], v[2], v[0], v[2], v[3]});
+    }
+    std::vector<Vertex> item;
+    if (icon != nullptr) {  // the picture of the item, half a block square, a hair in front of the back panel and turned by the frame's rotation
+        const Xf turn = mul(place, rotZ(static_cast<double>(rotation & 7) * 45.0 * static_cast<double>(kDegrees)));
+        const double z = 0.4475;
+        const double corner[4][2] = {{0.25, 0.25}, {-0.25, 0.25}, {-0.25, -0.25}, {0.25, -0.25}};
+        const float us[4] = {0.0f, 1.0f, 1.0f, 0.0f}, vs[4] = {0.0f, 0.0f, 1.0f, 1.0f};
+        Vertex v[4];
+        for (std::size_t i = 0; i < 4; ++i) {
+            const V3 p = apply(turn, {corner[i][0], corner[i][1], z});
+            v[i] = {static_cast<float>(p.x), static_cast<float>(p.y), static_cast<float>(p.z), us[i], vs[i], 1.0f};
+        }
+        item.insert(item.end(), {v[0], v[1], v[2], v[0], v[2], v[3]});
+    }
+    gl::Enable(gl::DEPTH_TEST);
+    gl::Disable(gl::CULL_FACE);
+    gl::Disable(gl::BLEND);
+    shader_.use();
+    gl::UniformMatrix4fv(uProj_, 1, 0, viewProj.m.data());
+    gl::Uniform3f(uLight_, light[0], light[1], light[2]);
+    gl::Uniform1i(uSkin_, 0);
+    gl::Uniform3f(uTint_, 1.0f, 1.0f, 1.0f);
+    gl::BindVertexArray(vao_);
+    gl::BindBuffer(gl::ARRAY_BUFFER, vbo_);
+    const auto draw = [&](const std::vector<Vertex>& list, const Texture2D& texture) {
+        if (list.empty()) return;
+        texture.bind(0);
+        gl::BufferData(gl::ARRAY_BUFFER, static_cast<gl::GLsizeiptr>(list.size() * sizeof(Vertex)), list.data(), gl::STREAM_DRAW);
+        gl::DrawArrays(gl::TRIANGLES, 0, static_cast<gl::GLsizei>(list.size()));
+    };
+    draw(wood, *frame.wood);
+    draw(back, *frame.back);
+    if (icon != nullptr) draw(item, *icon);
     gl::BindVertexArray(0);
 }
 

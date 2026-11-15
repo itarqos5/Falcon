@@ -54,6 +54,10 @@ struct RemotePlayer {
     double vx = 0, vy = 0, vz = 0;  // its velocity, per tick (a projectile flies by it between the server's words)
     int data = 0;                   // the data of the add packet (a painting's direction)
     int variant = -1;               // a painting's variant: its number in the server's registry
+    ItemStack stack;                // what is in an item frame
+    int frameRotation = 0;          // and how far it is turned (eighths of a turn)
+    int standFlags = 0;             // an armor stand: 1 small, 4 has arms, 8 no base plate
+    std::array<std::array<float, 3>, 6> standPose{{{0, 0, 0}, {0, 0, 0}, {-10, 0, -10}, {-10, 0, 10}, {-1, 0, -1}, {1, 0, 1}}};  // head, body, left arm, right arm, left leg, right leg (degrees)
     Uuid id{};
     double x = 0, y = 0, z = 0;
     double xo = 0, yo = 0, zo = 0;

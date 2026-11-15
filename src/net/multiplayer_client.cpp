@@ -677,6 +677,15 @@ void MultiplayerClient::handlePlay(const Packet& p, RemoteHandler& h) {
                     const int flags = r.u8();
                     if (const auto it = players_.find(entity); it != players_.end() && r.ok) it->second.sneaking = (flags & 2) != 0;
                     if (entity == selfEntity_ && r.ok && h.selfFlags) h.selfFlags(flags);
+                } else if (serializer == 0 && index == 15) {  // an armor stand's flags: small, has arms, no base plate, marker
+                    const int flags = r.u8();
+                    if (const auto it = players_.find(entity); it != players_.end() && r.ok) it->second.standFlags = flags;
+                } else if (serializer == 1 && index == 9) {  // an item frame's rotation
+                    const int rotation = r.varint();
+                    if (const auto it = players_.find(entity); it != players_.end() && r.ok) it->second.frameRotation = rotation;
+                } else if (serializer == 9 && index >= 16 && index <= 21) {  // the pose of a part of an armor stand: three angles in degrees
+                    const float x = r.f32(), y = r.f32(), z = r.f32();
+                    if (const auto it = players_.find(entity); it != players_.end() && r.ok) it->second.standPose[static_cast<std::size_t>(index - 16)] = {x, y, z};
                 } else if (serializer == 34) {  // a painting's variant: a holder of the registry (its number plus one; 0 would be the data written out, which is not read)
                     const int holder = r.varint();
                     if (const auto it = players_.find(entity); it != players_.end() && r.ok && holder > 0) it->second.variant = holder - 1;
@@ -684,6 +693,7 @@ void MultiplayerClient::handlePlay(const Packet& p, RemoteHandler& h) {
                     bool known = true;
                     const ItemStack stack = readItemStack(r, componentIds_, known);
                     if (const auto item = items_.find(entity); item != items_.end() && index == 8 && r.ok) item->second.stack = stack;
+                    if (const auto frame = players_.find(entity); frame != players_.end() && index == 8 && r.ok) frame->second.stack = stack;  // (an item frame's)
                     if (!known) break;
                 } else if (!skipEntityDataValue(serializer, r)) {
                     break;  // a kind of value whose layout is not known here: the rest of the entries cannot be told apart

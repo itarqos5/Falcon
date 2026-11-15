@@ -93,6 +93,8 @@ std::map<int, std::string> mobTypeNumbers(const std::filesystem::path& dataRoot)
     if (entries == registry->end()) return types;
     std::vector<std::string> names = MobRenderer::supportedTypes();
     names.push_back("painting");
+    names.push_back("item_frame");
+    names.push_back("glow_item_frame");
     for (const char* thrown : kThrownTypes) names.emplace_back(thrown);
     for (const std::string& name : names) {
         const auto e = entries->find("minecraft:" + name);
@@ -445,6 +447,23 @@ void GameSession::renderTestMobs(const std::array<double, 3>& camPos) {
         const std::string type = names.substr(at, end - at);
         at = end + 1;
         if (type.empty()) continue;
+        if (type.compare(0, 6, "frame:") == 0) {  // frame:diamond (a frame with that item in it)
+            const auto item = itemRegistry().find(type.substr(6));
+            const std::array<double, 3> middle = {player_.x + forwardX * 4.5 + rightX * x, player_.y + 1.0, player_.z + forwardZ * 4.5 + rightZ * x};
+            const Texture2D* icon = nullptr;
+            if (item) {
+                const int key = static_cast<int>(*item);
+                auto found = frameIcons_.find(key);
+                if (found == frameIcons_.end()) {
+                    const Image picture = itemIcons_.render(ItemStack(*item, 1), 32);
+                    found = frameIcons_.emplace(key, picture.empty() ? nullptr : std::make_unique<Texture2D>(picture, FilterMode::Nearest)).first;
+                }
+                icon = found->second.get();
+            }
+            mobs_->renderItemFrame(renderer_.viewProjection(), camPos, false, middle, player_.yaw + 180.0f, icon, static_cast<int>(playerAgeTicks_ / 20.0) & 7, {1.0f, 1.0f, 1.0f});
+            x += 1.6;
+            continue;
+        }
         if (type.compare(0, 9, "painting:") == 0) {  // painting:kebab:1:1 (the picture, its width and height in blocks)
             const std::size_t c1 = type.find(':', 9), c2 = c1 == std::string::npos ? c1 : type.find(':', c1 + 1);
             if (c2 != std::string::npos) {
@@ -601,6 +620,25 @@ void GameSession::renderRemotePlayers(const std::array<double, 3>& camPos) {
             const std::string* type = remote_->mobName(p.type);
             if (type == nullptr || !mobs_) continue;
             if (thrownItems_.count(p.type) != 0) continue;  // (drawn as an item: see pumpRemote)
+            if (*type == "item_frame" || *type == "glow_item_frame") {  // a frame with what is in it
+                const std::array<double, 3> middle = {p.xo + (p.x - p.xo) * partialTick_, p.yo + (p.y - p.yo) * partialTick_, p.zo + (p.z - p.zo) * partialTick_};
+                const float facing = p.data == 2 ? 180.0f : p.data == 3 ? 0.0f : p.data == 4 ? 90.0f : p.data == 5 ? 270.0f : p.yaw;
+                const Texture2D* icon = nullptr;
+                if (!p.stack.isEmpty()) {  // the picture of the item, made the first time it is seen
+                    const int key = static_cast<int>(p.stack.item);
+                    auto found = frameIcons_.find(key);
+                    if (found == frameIcons_.end()) {
+                        const Image picture = itemIcons_.render(p.stack, 32);
+                        found = frameIcons_.emplace(key, picture.empty() ? nullptr : std::make_unique<Texture2D>(picture, FilterMode::Nearest)).first;
+                    }
+                    icon = found->second.get();
+                }
+                int frameSky = 15, frameBlock = 0;
+                renderer_.lightAtWithCarried(static_cast<int>(std::floor(middle[0])), static_cast<int>(std::floor(middle[1])), static_cast<int>(std::floor(middle[2])), frameSky, frameBlock);
+                mobs_->renderItemFrame(renderer_.viewProjection(), camPos, *type == "glow_item_frame", middle, facing, icon, p.frameRotation,
+                                       entityLightColor(frameSky, frameBlock, static_cast<float>(services_.options.gamma)));
+                continue;
+            }
             if (*type == "painting") {  // a picture on a square, facing the way the game says (the direction in the add packet: north 2, south 3, west 4, east 5)
                 const net::PaintingVariantInfo* variant = remote_->paintingVariant(p.variant);
                 if (variant == nullptr) continue;
@@ -623,6 +661,8 @@ void GameSession::renderRemotePlayers(const std::array<double, 3>& camPos) {
             mob.walkPosition = p.walkPosition - p.walkSpeed * (1.0f - partial);
             mob.walkSpeed = std::min(1.0f, p.walkSpeedO + (p.walkSpeed - p.walkSpeedO) * partial);
             mob.ageTicks = playerAgeTicks_ + partialTick_;
+            mob.standFlags = p.standFlags;
+            mob.standPose = p.standPose;
             int mobSky = 15, mobBlock = 0;
             renderer_.lightAtWithCarried(static_cast<int>(std::floor(mob.position[0])), static_cast<int>(std::floor(mob.position[1] + 1.0)), static_cast<int>(std::floor(mob.position[2])), mobSky, mobBlock);
             mob.light = entityLightColor(mobSky, mobBlock, static_cast<float>(services_.options.gamma));
