@@ -260,6 +260,8 @@ add_library(falcon_core
     src/world/server_list.cpp
     src/worldgen/random.cpp
     src/worldgen/json_tree.cpp
+    src/render/world_renderer_draw.cpp
+    src/render/world_renderer_edit.cpp
     src/worldgen/noise.cpp
     src/worldgen/random_state.cpp
     src/worldgen/density.cpp
