@@ -61,6 +61,10 @@ AssetSearchResult locateAssets(const std::optional<fs::path>& explicitDir) {
         return result;
     }
 
+#ifndef _WIN32
+    result.notes.push_back("no assets folder was given (--assets <folder>, or FALCON_ASSETS_DIR; the Falcon launcher passes it)");
+    return result;
+#else
     // horizon-launcher keeps an unpacked copy of the 26.3 assets per launcher build.
     if (const char* appdata = std::getenv("APPDATA"); appdata != nullptr) {
         const fs::path versions = fs::path(appdata) / "horizon-launcher" / "versions";
@@ -87,6 +91,7 @@ AssetSearchResult locateAssets(const std::optional<fs::path>& explicitDir) {
         result.notes.push_back("%APPDATA% is not set");
     }
     return result;
+#endif
 }
 
 }  // namespace falcon

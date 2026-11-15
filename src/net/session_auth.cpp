@@ -1,5 +1,6 @@
 #include "falcon/net/session_auth.hpp"
 
+#include "falcon/platform/dirs.hpp"
 #include "falcon/platform/http.hpp"
 
 #include <nlohmann/json.hpp>
@@ -209,9 +210,9 @@ namespace {
 std::filesystem::path keyCachePath(const std::string& profileId) {
     std::array<std::uint8_t, 16> id{};
     if (!parseUuid(profileId, id)) return {};
-    const char* local = std::getenv("LOCALAPPDATA");
-    if (local == nullptr || *local == '\0') return {};
-    return std::filesystem::path(local) / "Falcon" / "profilekeys" / (uuidWithoutDashes(id) + ".json");
+    const auto falconDir = falconDataDir();
+    if (!falconDir) return {};
+    return *falconDir / "profilekeys" / (uuidWithoutDashes(id) + ".json");
 }
 
 std::int64_t nowMillis() { return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count(); }

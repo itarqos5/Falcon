@@ -1,5 +1,7 @@
 #include "falcon/assets/asset_index.hpp"
 
+#include "falcon/platform/dirs.hpp"
+
 #include <nlohmann/json.hpp>
 
 #include <cstdlib>
@@ -60,10 +62,12 @@ std::optional<std::vector<unsigned char>> AssetIndex::read(const std::string& na
 
 std::vector<fs::path> candidateAssetIndexDirs() {
     std::vector<fs::path> dirs;
+    if (const auto minecraft = minecraftDir()) dirs.push_back(*minecraft / "assets");
+#ifdef _WIN32
     if (const char* appdata = std::getenv("APPDATA"); appdata != nullptr) {
-        dirs.push_back(fs::path(appdata) / ".minecraft" / "assets");
         dirs.push_back(fs::path(appdata) / "horizon-launcher" / "minecraft" / "assets");
     }
+#endif
     return dirs;
 }
 

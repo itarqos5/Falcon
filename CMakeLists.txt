@@ -172,6 +172,7 @@ add_library(falcon_base
     src/gfx/render_target.cpp
     src/gfx/panorama_renderer.cpp
     src/platform/window.cpp
+    src/platform/dirs.cpp
     src/platform/key_names.cpp
     src/platform/dialog.cpp
     src/platform/clipboard.cpp

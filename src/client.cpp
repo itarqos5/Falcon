@@ -12,6 +12,7 @@
 #include "falcon/gfx/panorama_renderer.hpp"
 #include "falcon/gfx/texture_manager.hpp"
 #include "falcon/platform/dialog.hpp"
+#include "falcon/platform/dirs.hpp"
 #include "falcon/platform/memory.hpp"
 #include "falcon/platform/window.hpp"
 #include "falcon/resource_reloader.hpp"
@@ -159,16 +160,12 @@ int Client::run() {
     if (options_.audioDevices) return runAudioDevices();
     if (options_.audioTest) return runAudioTest(ResourceManager(search.location->root));
     if (options_.auditLighting) {
-        const char* appDataDir = std::getenv("APPDATA");
-        const std::filesystem::path auditGameDir = options_.gameDir ? *options_.gameDir
-                                                   : appDataDir != nullptr ? std::filesystem::path(appDataDir) / ".minecraft" : std::filesystem::path(".minecraft");
+        const std::filesystem::path auditGameDir = options_.gameDir ? *options_.gameDir : minecraftDir().value_or(".minecraft");
         return runLightingAudit(ResourceManager(search.location->root), search.location->root.parent_path(), auditGameDir / "falcon_cache");
     }
 
     if (options_.compareVanilla) {
-        const char* appDataDir = std::getenv("APPDATA");
-        const std::filesystem::path compareGameDir = options_.gameDir ? *options_.gameDir
-                                                     : appDataDir != nullptr ? std::filesystem::path(appDataDir) / ".minecraft" : std::filesystem::path(".minecraft");
+        const std::filesystem::path compareGameDir = options_.gameDir ? *options_.gameDir : minecraftDir().value_or(".minecraft");
         return runVanillaCompare(ResourceManager(search.location->root), search.location->root.parent_path(), compareGameDir / "falcon_cache", *options_.compareVanilla);
     }
     // --mem-report: RAM after each loading step, to see what costs what.
@@ -194,11 +191,7 @@ int Client::run() {
     // Settings go to falcon_options.txt (never the real options.txt) whenever a screen is left and
     // when the game closes; automated captures only save when given their own --game-dir, so
     // they never touch the real folder.
-    const char* appData = std::getenv("APPDATA");
-    const std::filesystem::path gameDir =
-        options_.gameDir ? *options_.gameDir
-        : appData != nullptr ? std::filesystem::path(appData) / ".minecraft"
-                             : std::filesystem::path(".minecraft");
+    const std::filesystem::path gameDir = options_.gameDir ? *options_.gameDir : minecraftDir().value_or(".minecraft");
     const std::filesystem::path optionsPath = gameDir / "falcon_options.txt";
     const bool persistOptions = !options_.capturePath || options_.gameDir.has_value();
     OptionsFile optionsFile = OptionsFile::load(optionsPath);
@@ -364,8 +357,8 @@ int Client::run() {
     // <.minecraft>/resourcepacks.
     // (and in Falcon's own folder, %LOCALAPPDATA%\\Falcon\\resourcepacks, which is made here like the game makes its own at startup so that there is a place to put them)
     std::vector<std::filesystem::path> extraPackFolders;
-    if (const char* local = std::getenv("LOCALAPPDATA"); local != nullptr && *local != '\0' && !options_.gameDir) {
-        extraPackFolders.push_back(std::filesystem::path(local) / "Falcon" / "resourcepacks");
+    if (const auto falconDir = falconDataDir(); falconDir && !options_.gameDir) {
+        extraPackFolders.push_back(*falconDir / "resourcepacks");
         std::error_code ignored;
         std::filesystem::create_directories(extraPackFolders.back(), ignored);
     }
