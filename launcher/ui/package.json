@@ -1,7 +1,7 @@
 {
   "name": "falcon-launcher-ui",
   "private": true,
-  "version": "1.2.0",
+  "version": "1.2.1",
   "type": "module",
   "description": "The Falcon Launcher's window: a React page shown by the system WebView2 runtime, built into ONE html file that the launcher exe carries.",
   "scripts": {
