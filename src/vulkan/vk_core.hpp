@@ -58,6 +58,7 @@ private:
     struct Chunk {
         DeviceBuffer buffer;
         VkDeviceSize used = 0;
+        std::uint32_t idle = 0;  // resets in a row that found it unused
     };
     std::vector<Chunk> chunks_;
     std::size_t current_ = 0;

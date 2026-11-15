@@ -422,13 +422,17 @@ HostSlice HostArena::allocate(VkDeviceSize size, VkDeviceSize alignment) {
 }
 
 void HostArena::reset() {
-    // Big chunks (made for a large upload) are given back; the usual ones are kept.
+    // A chunk is given back only after it has been unused for a good while (about ten seconds of frames). Allocating one is a vkAllocateMemory and a map, a stall of a few
+    // milliseconds, and while chunks of the world stream in the big uploads come back every few frames: giving the chunk back after each one made that stall a regular one.
+    constexpr std::uint32_t kKeepResets = 300;
     for (std::size_t i = 0; i < chunks_.size();) {
-        if (chunks_[i].buffer.size > kChunkSize * 2 || i >= 4) {
-            destroyBuffer(chunks_[i].buffer);
+        Chunk& chunk = chunks_[i];
+        chunk.idle = chunk.used == 0 ? chunk.idle + 1 : 0;
+        if (chunk.idle > kKeepResets) {
+            destroyBuffer(chunk.buffer);
             chunks_.erase(chunks_.begin() + static_cast<std::ptrdiff_t>(i));
         } else {
-            chunks_[i].used = 0;
+            chunk.used = 0;
             ++i;
         }
     }
