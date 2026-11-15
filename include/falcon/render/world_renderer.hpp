@@ -163,6 +163,7 @@ public:
     [[nodiscard]] bool remote() const { return remote_; }
     void receiveChunk(ChunkPos pos, std::shared_ptr<Chunk> chunk);
     void forgetChunk(ChunkPos pos);
+    void forgetAllChunks();  // another world: every chunk of the old one goes (in order with the chunks that come after)
 
     // Changes a block and remeshes the sections it touches at once.
     bool setBlock(int x, int y, int z, Block block);

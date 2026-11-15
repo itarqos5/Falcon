@@ -311,6 +311,12 @@ bool GameSession::connectRemote(const std::string& host, int port, const std::st
         }
         remote_->sendMoveVehicle(boat_->x, boat_->y, boat_->z, boat_->yaw, 0.0f, boat_->onGround);  // (and either way, where it is is told back)
     };
+    h.newWorld = [this]() {  // the server moved the player to another world: the chunks of the old one go, and the player has to be put somewhere and say it is loaded again
+        renderer_.forgetAllChunks();
+        loadedSent_ = false;
+        remoteTeleported_ = false;
+        if (boat_ || ridingEntity_ >= 0) leaveVehicle();
+    };
     h.chat = [this](const StyledText& text, bool overlay) {
         (void)overlay;
         addChatMessage(toLegacy(text));

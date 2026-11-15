@@ -163,6 +163,7 @@ struct RemoteHandler {
     std::function<void(int id)> containerClose;
     std::function<void(const ItemStack&)> cursor;
     std::function<void(double x, double y, double z, float yaw, float pitch)> moveVehicle;  // the server puts the vehicle the player drives somewhere (ClientboundMoveVehiclePacket)
+    std::function<void()> newWorld;  // the server puts the player in another world (a login on a proxy, a respawn to another dimension): what was of the old one is gone
     std::function<void(const TradeOffers&)> merchantOffers;  // a villager's window: what it offers
     std::function<void(int slot)> heldSlot;                          // the server picks the hotbar slot in the hand
     std::function<void(const std::string&)> disconnect;
@@ -333,6 +334,8 @@ private:
     std::map<Uuid, TabEntry> tab_;
     std::map<std::string, TeamInfo> teams_;
     std::unordered_map<int, ParticleData> particleKinds_;
+    std::string dimension_;                      // the dimension the player is in (its name), to tell a respawn that changes the world from one that does not
+    void clearWorld(RemoteHandler& h);           // everything of the old world that was followed
     bool skipDataValue(int serializer, Reader& r);  // skipEntityDataValue and the kinds that need the tables of this connection
     mutable std::unordered_map<std::string, const TeamInfo*> memberIndex_;
     mutable bool memberIndexDirty_ = true;

@@ -795,7 +795,18 @@ void WorldRenderer::update(double playerX, double playerZ, int renderDistance, d
             arrived.swap(remoteChunks_);
             forgotten.swap(remoteForgets_);
         }
-        for (auto& [pos, chunk] : arrived) acceptChunk(pos, std::move(chunk));
+        for (auto& [pos, chunk] : arrived) {
+            if (chunk == nullptr) {  // forgetAllChunks: the old world is gone
+                std::vector<ChunkPos> all;
+                for (const auto& [loaded, held] : level_.chunks()) all.push_back(loaded);
+                for (const ChunkPos& old : all) {
+                    dropSections(old);
+                    level_.removeChunk(old);
+                }
+                continue;
+            }
+            acceptChunk(pos, std::move(chunk));
+        }
         for (const ChunkPos& pos : forgotten) {
             dropSections(pos);
             level_.removeChunk(pos);
@@ -879,6 +890,11 @@ void WorldRenderer::update(double playerX, double playerZ, int renderDistance, d
 void WorldRenderer::receiveChunk(ChunkPos pos, std::shared_ptr<Chunk> chunk) {
     std::lock_guard<std::mutex> lock(remoteMutex_);
     remoteChunks_.emplace_back(pos, std::move(chunk));
+}
+
+void WorldRenderer::forgetAllChunks() {
+    std::lock_guard<std::mutex> lock(remoteMutex_);
+    remoteChunks_.emplace_back(ChunkPos{0, 0}, nullptr);  // (a chunk that is not there: everything before it goes)
 }
 
 void WorldRenderer::forgetChunk(ChunkPos pos) {

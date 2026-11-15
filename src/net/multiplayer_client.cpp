@@ -467,6 +467,15 @@ bool MultiplayerClient::nameTagVisible(const Uuid& id) const {
     return true;
 }
 
+void MultiplayerClient::clearWorld(RemoteHandler& h) {
+    players_.clear();
+    items_.clear();
+    passengers_.clear();
+    vehicle_ = -1;
+    controlledEntity_ = -1;
+    if (h.newWorld) h.newWorld();
+}
+
 void MultiplayerClient::injectPlayPacket(int id, const Bytes& body, RemoteHandler& h) {
     phase_ = Phase::Play;
     Packet p;
@@ -646,12 +655,37 @@ void MultiplayerClient::tickPlayers() {
 void MultiplayerClient::handlePlay(const Packet& p, RemoteHandler& h) {
     Reader r(p.body);
     switch (p.id) {
-        case 50: selfEntity_ = r.i32(); break;  // login: our entity (the rest of it is not needed here)
+        case 50: {  // login: our entity and the world we are in. A login after the first (a proxy that moves the player to another server) is a new world.
+            selfEntity_ = r.i32();
+            r.boolean();  // hardcore
+            const int levels = r.varint();
+            for (int i = 0; i < levels && r.ok && i < 1024; ++i) (void)r.string();
+            r.varint();   // the most players
+            r.varint();   // the chunk radius
+            r.varint();   // the simulation distance
+            r.boolean();
+            r.boolean();
+            r.boolean();
+            r.varint();   // the dimension type
+            const std::string dimension = r.string();
+            if (r.ok) dimension_ = dimension;
+            clearWorld(h);
+            break;
+        }
+        case 84: {  // respawn: into another dimension is another world (the game then makes a new level); in the same one (after a death) it is not
+            r.varint();
+            const std::string dimension = r.string();
+            if (r.ok && dimension != dimension_) {
+                dimension_ = dimension;
+                clearWorld(h);
+            }
+            break;
+        }
         case 32: fail("disconnected: " + plainText(readComponent(r)), &h); break;
         case 120: {  // start_configuration: back to the configuration phase
             connection_.send(16, {});  // configuration_acknowledged
             phase_ = Phase::Configuration;
-            players_.clear();
+            clearWorld(h);
             break;
         }
         case 45: {  // keep_alive
