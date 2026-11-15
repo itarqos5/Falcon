@@ -262,6 +262,8 @@ private:
     void sendRemoteTick(const PlayerInput& input);
     void renderRemotePlayers(const std::array<double, 3>& camPos);
     void renderTestMobs(const std::array<double, 3>& camPos);
+    // The player or mob (or boat) that the line from the eye along the look meets first within `maxDistance`, or -1 (its entity id): what a click hits.
+    [[nodiscard]] int entityUnderCrosshair(const std::array<double, 3>& eye, const std::array<double, 3>& look, double maxDistance) const;
     void drawNameTags(GuiGraphics& g, int guiWidth, int guiHeight, const Camera& cam);
     void drawPlayerList(GuiGraphics& g, int guiWidth);
     // A flint and steel or a fire charge used on a block (TNT goes off, a campfire or candle lights, else a fire starts next to it). True if it did something.
@@ -328,9 +330,9 @@ private:
     // F5 and the body seen from outside.
     int perspective_ = 0;
     std::unique_ptr<PlayerBodyRenderer> body_;
+    std::map<int, Item> thrownItems_;  // the entity types that are drawn as an item (an ender pearl, a snowball ...), by their number in the server's registry
     std::unique_ptr<MobRenderer> mobs_;  // the mobs of a server (and, with FALCON_TEST_MOBS, a row of them for a look)
     float walkPosition_ = 0.0f, walkSpeed_ = 0.0f, walkSpeedOld_ = 0.0f;  // WalkAnimationState
-    std::map<int, Item> thrownItems_;  // the entity types that are drawn as an item (an ender pearl, a snowball ...), by their number in the server's registry
     float swimAmount_ = 0.0f, swimAmountOld_ = 0.0f;                        // Player.swimAmount: how far into the swimming pose (0 to 1)
     float bodyYaw_ = 0.0f, bodyYawOld_ = 0.0f;
     double hudTickAccumulator_ = 0.0;

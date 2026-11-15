@@ -223,8 +223,8 @@ void GameSession::interact(double dt, bool active) {
         attackLatched_ = useLatched_ = attackRawO_ = useRawO_ = false;
         return;
     }
-    // Adventure and spectator players cannot break or place blocks.
-    if (info_.gameType >= 2) return;
+    // Spectators do nothing; adventure players cannot break or place blocks (on a server they can still hit).
+    if (info_.gameType == 3 || (info_.gameType == 2 && !remote_)) return;
 
     // ToggleKeyMapping: with the option on a press switches the action on or off instead of holding it.
     const bool attackRaw = isDown("key.attack"), useRaw = isDown("key.use");
@@ -232,14 +232,28 @@ void GameSession::interact(double dt, bool active) {
     if (useRaw && !useRawO_) useLatched_ = !useLatched_;
     attackRawO_ = attackRaw;
     useRawO_ = useRaw;
-    const bool attack = services_.options.toggleAttack ? attackLatched_ : attackRaw;
+    bool attack = services_.options.toggleAttack ? attackLatched_ : attackRaw;
     const bool use = services_.options.toggleUse ? useLatched_ : useRaw;
+    const bool pressed = attack;
+    const bool freshPress = pressed && !digHeld_;
+    if (remote_ && attack) {  // a player or mob under the crosshair, nearer than what is behind it, is hit (not dug at): the server is told, the arm swings, the attack timer starts over
+        const int entity = entityUnderCrosshair(eye, look, std::min(3.0, target_ ? target_->distance : 3.0));
+        if (entity >= 0) {
+            stopDigging();
+            if (freshPress) {
+                remote_->sendAttack(entity);
+                swingArm();
+                hand_.resetAttackStrength();
+            }
+            attack = false;  // (nothing to dig this frame)
+        }
+    }
+    digHeld_ = pressed;
+    if (info_.gameType >= 2) return;
     if (!attack) {
         breakCooldown_ = 0.0;
         stopDigging();
     }
-    const bool freshPress = attack && !digHeld_;
-    digHeld_ = attack;
     if (!use) placeCooldown_ = 0.0;
     if (remote_) {  // using an item (eating, drawing a bow ...) goes to the server once; letting go tells it that the use stopped
         const ItemStack& held = inventory_.selectedItem();

@@ -385,6 +385,48 @@ bool GameSession::connectRemote(const std::string& host, int port, const std::st
 }
 
 // Skins that finished downloading are put on the graphics card (here, where there is a context), and the account's own skin goes on the hand too.
+// What a click hits (MultiPlayerGameMode.attack, Minecraft.pick): the nearest of the players and mobs whose box the line from the eye meets within reach. A player's box is 0.6 wide
+// and 1.8 high (1.5 sneaking), a mob's is its type's; arrows in the air are not hit.
+int GameSession::entityUnderCrosshair(const std::array<double, 3>& eye, const std::array<double, 3>& look, double maxDistance) const {
+    if (!remote_) return -1;
+    int found = -1;
+    double best = maxDistance;
+    for (const auto& [id, p] : remote_->players()) {
+        double halfWidth = 0.0, height = 0.0;
+        if (remote_->isPlayerEntity(p)) {
+            halfWidth = 0.3;
+            height = p.sneaking ? 1.5 : 1.8;
+        } else {
+            const std::string* type = remote_->mobName(p.type);
+            float w = 0.0f, h = 0.0f;
+            if (type == nullptr || !MobRenderer::attackable(*type) || !MobRenderer::sizeOf(*type, w, h)) continue;
+            halfWidth = static_cast<double>(w) / 2.0;
+            height = static_cast<double>(h);
+        }
+        const double px = p.xo + (p.x - p.xo) * partialTick_, py = p.yo + (p.y - p.yo) * partialTick_, pz = p.zo + (p.z - p.zo) * partialTick_;
+        const double lo[3] = {px - halfWidth, py, pz - halfWidth}, hi[3] = {px + halfWidth, py + height, pz + halfWidth};
+        double tNear = 0.0, tFar = best;
+        bool hit = true;
+        for (int axis = 0; axis < 3 && hit; ++axis) {  // the slabs of the box
+            if (std::abs(look[static_cast<std::size_t>(axis)]) < 1.0e-9) {
+                if (eye[static_cast<std::size_t>(axis)] < lo[axis] || eye[static_cast<std::size_t>(axis)] > hi[axis]) hit = false;
+                continue;
+            }
+            double t0 = (lo[axis] - eye[static_cast<std::size_t>(axis)]) / look[static_cast<std::size_t>(axis)];
+            double t1 = (hi[axis] - eye[static_cast<std::size_t>(axis)]) / look[static_cast<std::size_t>(axis)];
+            if (t0 > t1) std::swap(t0, t1);
+            tNear = std::max(tNear, t0);
+            tFar = std::min(tFar, t1);
+            if (tNear > tFar) hit = false;
+        }
+        if (hit && tNear < best) {
+            best = tNear;
+            found = id;
+        }
+    }
+    return found;
+}
+
 // FALCON_TEST_MOBS=zombie,pig,sheep: a row of those mobs five blocks in front of the player, walking on the spot, for a look at the models and pictures (a test aid).
 void GameSession::renderTestMobs(const std::array<double, 3>& camPos) {
     static const char* const list = std::getenv("FALCON_TEST_MOBS");
@@ -403,6 +445,15 @@ void GameSession::renderTestMobs(const std::array<double, 3>& camPos) {
         const std::string type = names.substr(at, end - at);
         at = end + 1;
         if (type.empty()) continue;
+        if (type.compare(0, 9, "painting:") == 0) {  // painting:kebab:1:1 (the picture, its width and height in blocks)
+            const std::size_t c1 = type.find(':', 9), c2 = c1 == std::string::npos ? c1 : type.find(':', c1 + 1);
+            if (c2 != std::string::npos) {
+                const std::array<double, 3> middle = {player_.x + forwardX * 4.5 + rightX * x, player_.y + 1.0, player_.z + forwardZ * 4.5 + rightZ * x};
+                mobs_->renderPainting(renderer_.viewProjection(), camPos, type.substr(9, c1 - 9), std::atoi(type.c_str() + c1 + 1), std::atoi(type.c_str() + c2 + 1), middle, player_.yaw + 180.0f, {1.0f, 1.0f, 1.0f});
+            }
+            x += 1.6;
+            continue;
+        }
         MobPose mob;
         mob.position = {player_.x + forwardX * 4.5 + rightX * x, player_.y, player_.z + forwardZ * 4.5 + rightZ * x};
         mob.bodyYaw = player_.yaw + 180.0f - 25.0f;  // (facing the player, turned a little)
@@ -445,15 +496,6 @@ void GameSession::pumpSkins() {
         std::vector<net::SkinFetcher::Done> mine = localSkins_->takeFinished();
         for (net::SkinFetcher::Done& d : mine) done.push_back(std::move(d));
     }
-        if (type.compare(0, 9, "painting:") == 0) {  // painting:kebab:1:1 (the picture, its width and height in blocks)
-            const std::size_t c1 = type.find(':', 9), c2 = c1 == std::string::npos ? c1 : type.find(':', c1 + 1);
-            if (c2 != std::string::npos) {
-                const std::array<double, 3> middle = {player_.x + forwardX * 4.5 + rightX * x, player_.y + 1.0, player_.z + forwardZ * 4.5 + rightZ * x};
-                mobs_->renderPainting(renderer_.viewProjection(), camPos, type.substr(9, c1 - 9), std::atoi(type.c_str() + c1 + 1), std::atoi(type.c_str() + c2 + 1), middle, player_.yaw + 180.0f, {1.0f, 1.0f, 1.0f});
-            }
-            x += 1.6;
-            continue;
-        }
     for (const net::SkinFetcher::Done& d : done) {
         skinTextures_[d.hash] = std::make_unique<Texture2D>(d.image, FilterMode::Nearest);
         skinSlim_[d.hash] = d.slim;
@@ -487,6 +529,22 @@ void GameSession::pumpRemote() {
             e.onGround = item.onGround;
             e.pickupDelay = 0;
             e.bobOffset = static_cast<float>(id % 628) * 0.01f;
+            items.push_back(e);
+        }
+        for (const auto& [id, thing] : remote_->players()) {  // an ender pearl, a snowball ... in the air: the item it is
+            const auto item = thrownItems_.find(thing.type);
+            if (item == thrownItems_.end()) continue;
+            ItemEntity e;
+            e.stack = ItemStack(item->second, 1);
+            e.x = thing.x;
+            e.y = thing.y;
+            e.z = thing.z;
+            e.xo = thing.xo;
+            e.yo = thing.yo;
+            e.zo = thing.zo;
+            e.age = 0;
+            e.id = id;
+            e.pickupDelay = 0;
             items.push_back(e);
         }
     }
@@ -531,22 +589,6 @@ void GameSession::sendRemoteTick(const PlayerInput& input) {
 void GameSession::renderRemotePlayers(const std::array<double, 3>& camPos) {
     if (!remote_ || !body_) return;
     const float partial = static_cast<float>(partialTick_);
-        for (const auto& [id, thing] : remote_->players()) {  // an ender pearl, a snowball ... in the air: the item it is
-            const auto item = thrownItems_.find(thing.type);
-            if (item == thrownItems_.end()) continue;
-            ItemEntity e;
-            e.stack = ItemStack(item->second, 1);
-            e.x = thing.x;
-            e.y = thing.y;
-            e.z = thing.z;
-            e.xo = thing.xo;
-            e.yo = thing.yo;
-            e.zo = thing.zo;
-            e.age = 0;
-            e.id = id;
-            e.pickupDelay = 0;
-            items.push_back(e);
-        }
     const float t = static_cast<float>(partialTick_);
     const auto wrap = [](float degrees) {
         float d = std::fmod(degrees, 360.0f);
@@ -558,6 +600,20 @@ void GameSession::renderRemotePlayers(const std::array<double, 3>& camPos) {
         if (!remote_->isPlayerEntity(p)) {  // a mob: its model and picture by its type
             const std::string* type = remote_->mobName(p.type);
             if (type == nullptr || !mobs_) continue;
+            if (thrownItems_.count(p.type) != 0) continue;  // (drawn as an item: see pumpRemote)
+            if (*type == "painting") {  // a picture on a square, facing the way the game says (the direction in the add packet: north 2, south 3, west 4, east 5)
+                const net::PaintingVariantInfo* variant = remote_->paintingVariant(p.variant);
+                if (variant == nullptr) continue;
+                std::string asset = variant->asset;
+                if (asset.compare(0, 10, "minecraft:") == 0) asset.erase(0, 10);
+                const std::array<double, 3> middle = {p.xo + (p.x - p.xo) * partialTick_, p.yo + (p.y - p.yo) * partialTick_, p.zo + (p.z - p.zo) * partialTick_};
+                const float facing = p.data == 2 ? 180.0f : p.data == 3 ? 0.0f : p.data == 4 ? 90.0f : p.data == 5 ? 270.0f : p.yaw;
+                int paintingSky = 15, paintingBlock = 0;
+                renderer_.lightAtWithCarried(static_cast<int>(std::floor(middle[0])), static_cast<int>(std::floor(middle[1])), static_cast<int>(std::floor(middle[2])), paintingSky, paintingBlock);
+                mobs_->renderPainting(renderer_.viewProjection(), camPos, asset, variant->width, variant->height, middle, facing,
+                                      entityLightColor(paintingSky, paintingBlock, static_cast<float>(services_.options.gamma)));
+                continue;
+            }
             MobPose mob;
             mob.position = {p.xo + (p.x - p.xo) * partialTick_, p.yo + (p.y - p.yo) * partialTick_, p.zo + (p.z - p.zo) * partialTick_};
             const float mobYaw = p.yawO + wrap(p.yaw - p.yawO) * partial;
@@ -600,20 +656,6 @@ void GameSession::renderRemotePlayers(const std::array<double, 3>& camPos) {
 
 // EntityRenderer.renderNameTag: the name hangs half a block over the head, always the same size in the world (a quarter of a pixel... 0.025 of a block for every pixel of
 // the font), on a box of the background colour. It is not shown beyond 64 blocks or when the team hides it.
-            if (thrownItems_.count(p.type) != 0) continue;  // (drawn as an item: see pumpRemote)
-            if (*type == "painting") {  // a picture on a square, facing the way the game says (the direction in the add packet: north 2, south 3, west 4, east 5)
-                const net::PaintingVariantInfo* variant = remote_->paintingVariant(p.variant);
-                if (variant == nullptr) continue;
-                std::string asset = variant->asset;
-                if (asset.compare(0, 10, "minecraft:") == 0) asset.erase(0, 10);
-                const std::array<double, 3> middle = {p.xo + (p.x - p.xo) * partialTick_, p.yo + (p.y - p.yo) * partialTick_, p.zo + (p.z - p.zo) * partialTick_};
-                const float facing = p.data == 2 ? 180.0f : p.data == 3 ? 0.0f : p.data == 4 ? 90.0f : p.data == 5 ? 270.0f : p.yaw;
-                int paintingSky = 15, paintingBlock = 0;
-                renderer_.lightAtWithCarried(static_cast<int>(std::floor(middle[0])), static_cast<int>(std::floor(middle[1])), static_cast<int>(std::floor(middle[2])), paintingSky, paintingBlock);
-                mobs_->renderPainting(renderer_.viewProjection(), camPos, asset, variant->width, variant->height, middle, facing,
-                                      entityLightColor(paintingSky, paintingBlock, static_cast<float>(services_.options.gamma)));
-                continue;
-            }
 void GameSession::drawNameTags(GuiGraphics& g, int guiWidth, int guiHeight, const Camera& cam) {
     if (!remote_) return;
     const Matrix4f& m = renderer_.viewProjection();

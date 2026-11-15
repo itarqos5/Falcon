@@ -197,6 +197,7 @@ public:
     void sendHeldSlot(int slot);
     void sendDig(int action, int x, int y, int z, int face);  // 0 start, 1 abort, 2 finish
     void sendUseItemOn(int x, int y, int z, int face, double cx, double cy, double cz);
+    void sendAttack(int entityId);  // the player hits this entity (ServerboundAttackPacket)
     void sendSwing();                                          // the arm swings (ServerboundPunchPacket: the main hand)
     void sendCreativeSlot(int inventorySlot, const ItemStack& stack);  // creative mode: this slot of the inventory now holds this
     void sendContainerClose(int containerId);
@@ -225,9 +226,9 @@ private:
     int playerType_ = -1;  // the entity type number of a player
     int itemType_ = -1;    // and of an item
     std::map<int, std::string> mobTypes_;
-    std::map<int, RemoteItem> items_;
     std::map<int, std::pair<float, float>> projectilePhysics_;
     std::vector<PaintingVariantInfo> paintingVariants_;
+    std::map<int, RemoteItem> items_;
     ComponentIds componentIds_;
     SkinFetcher skins_;
     std::map<Uuid, SkinInfo> skinInfos_;
@@ -247,8 +248,8 @@ private:
     bool haveChatKeys_ = false, chatSessionSent_ = false;
     Uuid chatSessionId_{};
     int chatIndex_ = 0;  // the number of the next signed message in the chain
-    LastSeenTracker lastSeen_;  // the signed messages of others that were seen (every message of ours says which)
     ServerCommands commands_;  // the server's command tree: which arguments of a command are messages that must be signed
+    LastSeenTracker lastSeen_;  // the signed messages of others that were seen (every message of ours says which)
     std::map<int, int> containerStates_;  // the state of each menu as the server last said it (a click must carry it)
     std::vector<std::string> soundNames_;
     int sequence_ = 0;

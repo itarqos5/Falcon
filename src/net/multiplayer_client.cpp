@@ -1141,6 +1141,13 @@ void MultiplayerClient::sendUseItemOn(int x, int y, int z, int face, double cx, 
     connection_.send(66, w.data);
 }
 
+void MultiplayerClient::sendAttack(int entityId) {
+    if (phase_ != Phase::Play) return;
+    Writer w;
+    w.varint(entityId);
+    connection_.send(1, w.data);
+}
+
 void MultiplayerClient::sendSwing() {
     if (phase_ != Phase::Play) return;
     connection_.send(46, {});  // ServerboundPunchPacket has no fields
