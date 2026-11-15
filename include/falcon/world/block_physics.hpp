@@ -88,6 +88,14 @@ public:
     [[nodiscard]] const std::vector<PrimedTnt>& primedTnt() const { return tnt_; }
     [[nodiscard]] bool isGravityBlock(Block b) const { return behaviours_->isFallable(blockRegistry().state(b).block); }
     void spawnFalling(Block block, double x, double y, double z);  // (also for the /summon command)
+    void spawnTnt(double x, double y, double z, int fuse = 80);    // primed TNT anywhere (the /summon command)
+    // Removes the entities the test selects (the /kill command); how many.
+    int killTnt(const std::function<bool(const PrimedTnt&)>& which);
+    int killFalling(const std::function<bool(const FallingBlock&)>& which);
+    // Game rules that change how it behaves: tnt_explodes (off: TNT cannot be lit), fire_spread_radius_around_player (0: no fire spread; blocks beyond it are not ticked).
+    void setTntExplodes(bool on) { tntExplodes_ = on; }
+    void setFireSpreadRadius(int blocks) { fireSpreadRadius_ = blocks; }
+    [[nodiscard]] bool tntExplodes() const { return tntExplodes_; }
     [[nodiscard]] long long gameTime() const { return time_; }
     // The game rule randomTickSpeed (3): how many blocks of each section get a random tick every game tick.
     void setRandomTickSpeed(int speed) { randomTickSpeed_ = std::max(0, speed); }
@@ -130,6 +138,8 @@ private:
     int nextId_ = 1;
     int fireBlock_ = -1, soulFireBlock_ = -1;
     int randomTickSpeed_ = 3;
+    bool tntExplodes_ = true;
+    int fireSpreadRadius_ = 128;
 };
 
 }  // namespace falcon

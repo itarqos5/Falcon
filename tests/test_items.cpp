@@ -935,7 +935,7 @@ void test_block_physics_real(const std::filesystem::path& dataDir, const BlockRe
         return true;
     };
     host.sound = [&](const std::string&, float, float, double, double, double) { ++sounds; };
-    host.player = [] { return PhysicsPlayer{Aabb{100, 100, 100, 101, 102, 101}, 101.6, false}; };
+    host.player = [] { return PhysicsPlayer{Aabb{8, 70, 8, 8.6, 71.8, 8.6}, 71.6, false}; };  // (near the fires: the game rule fire_spread_radius_around_player is 128)
     BlockPhysics physics(level, behaviours, items, host, 1234);
     self = &physics;
 
@@ -998,8 +998,10 @@ void test_block_physics_real(const std::filesystem::path& dataDir, const BlockRe
     const Block sideFire = physics.fireStateAt(3, 70, 2);
     CHECK(physics.canPlaceFireAt(3, 70, 2) && blocks.type(sideFire).name == "fire" && blocks.get(sideFire, "west") == "true" && blocks.get(sideFire, "up") == "false");
     level.setBlock(2, 70, 2, air);
-    host.setBlock(3, 61, 2, physics.fireStateAt(3, 61, 2));
-    for (int i = 0; i < 3000; ++i) physics.tick();  // 2.5 minutes
+    for (int attempt = 0; attempt < 12; ++attempt) {  // (a fire lives about a minute and burns what is next to it by chance: light it again until the wood goes)
+        if (blocks.isAir(level.block(3, 61, 2))) host.setBlock(3, 61, 2, physics.fireStateAt(3, 61, 2));
+        for (int i = 0; i < 400; ++i) physics.tick();
+    }
     int planksLeft = (level.block(2, 61, 2) == planks ? 1 : 0) + (level.block(2, 62, 2) == planks ? 1 : 0);
     CHECK(planksLeft < 2);  // wood next to a fire for minutes does not survive
 

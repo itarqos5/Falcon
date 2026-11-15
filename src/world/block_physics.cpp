@@ -332,6 +332,12 @@ void BlockPhysics::fireTick(int x, int y, int z) {
     const Reader at = [this](int a, int b, int c) { return block(a, b, c); };
     Block state = block(x, y, z);
     schedule(x, y, z, 30 + nextInt(10));
+    if (fireSpreadRadius_ == 0) return;  // the game rule fire_spread_radius_around_player: no fire ticks at all
+    if (fireSpreadRadius_ > 0 && host_.player) {  // ... and none far from the player
+        const PhysicsPlayer player = host_.player();
+        const double dx = x + 0.5 - (player.box.minX + player.box.maxX) * 0.5, dz = z + 0.5 - (player.box.minZ + player.box.maxZ) * 0.5;
+        if (dx * dx + dz * dz > static_cast<double>(fireSpreadRadius_) * fireSpreadRadius_) return;
+    }
     if (!fireCanSurvive(state, x, y, z, at)) {
         host_.setBlock(x, y, z, Block::Air);
         return;
@@ -417,12 +423,39 @@ void BlockPhysics::lavaRandomTick(int x, int y, int z) {
 // ---------------------------------------------------------------------------------------------------------------
 // TNT and explosions
 
-void BlockPhysics::primeTnt(int x, int y, int z, int fuse) {
+void BlockPhysics::primeTnt(int x, int y, int z, int fuse) { spawnTnt(x + 0.5, y, z + 0.5, fuse); }
+
+int BlockPhysics::killTnt(const std::function<bool(const PrimedTnt&)>& which) {
+    int n = 0;
+    for (PrimedTnt& e : tnt_) {
+        if (e.id >= 0 && which(e)) {
+            e.id = -1;
+            ++n;
+        }
+    }
+    tnt_.erase(std::remove_if(tnt_.begin(), tnt_.end(), [](const PrimedTnt& e) { return e.id < 0; }), tnt_.end());
+    return n;
+}
+
+int BlockPhysics::killFalling(const std::function<bool(const FallingBlock&)>& which) {
+    int n = 0;
+    for (FallingBlock& e : falling_) {
+        if (e.id >= 0 && which(e)) {
+            e.id = -1;
+            ++n;
+        }
+    }
+    falling_.erase(std::remove_if(falling_.begin(), falling_.end(), [](const FallingBlock& e) { return e.id < 0; }), falling_.end());
+    return n;
+}
+
+void BlockPhysics::spawnTnt(double x, double y, double z, int fuse) {
+    if (!tntExplodes_) return;
     PrimedTnt e;
     const double angle = static_cast<double>(nextFloat()) * std::numbers::pi * 2.0;
-    e.x = e.xo = x + 0.5;
+    e.x = e.xo = x;
     e.y = e.yo = y;
-    e.z = e.zo = z + 0.5;
+    e.z = e.zo = z;
     e.vx = -std::sin(angle) * 0.02;
     e.vy = 0.2;
     e.vz = -std::cos(angle) * 0.02;
