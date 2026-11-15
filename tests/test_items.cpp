@@ -482,6 +482,7 @@ void run_all(const std::filesystem::path* dataDir) {
     test_menu_double_click();
     test_menu_crafting();
     test_menu_misc();
+    test_menu_click_hook();
     test_recipes_minimal();
     test_hotbar_highlight();
     test_creative_logic();

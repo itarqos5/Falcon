@@ -121,6 +121,7 @@ void test_menu_drag();
 void test_menu_double_click();
 void test_menu_crafting();
 void test_menu_misc();
+void test_menu_click_hook();
 std::string craft(const RecipeManager& recipes, int w, int h, const std::vector<ItemStack>& grid);
 void test_recipes_minimal();
 void test_block_support_real(const std::filesystem::path& dataDir, const BlockRegistry& blocks);

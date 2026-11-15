@@ -6,6 +6,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace falcon {
@@ -105,6 +106,11 @@ public:
     [[nodiscard]] const ItemStack& carried() const { return carried_; }
     void setCarried(ItemStack stack) { carried_ = std::move(stack); }
     [[nodiscard]] MenuPlayer& player() { return player_; }
+
+    // Told after every click what it did: the slot clicked, the button and kind, the slots whose stack is not what it was (with what they hold now) and the stack on the
+    // cursor. A server wants exactly this (ServerboundContainerClickPacket). Unset: nothing is worked out.
+    std::function<void(int slot, int button, ClickType type, const std::vector<std::pair<int, ItemStack>>& changed, const ItemStack& carried)> onClicked;
+    std::function<void()> onRemoved;  // the menu was closed (a server is told so)
 
     // AbstractContainerMenu.clicked: `button` is the mouse button (0 left, 1 right), the key (see ClickType) or, for
     // QuickCraft, getQuickcraftMask(header, type).

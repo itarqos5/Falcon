@@ -109,7 +109,22 @@ int ContainerMenu::getQuickCraftPlaceCount(int slotCount, int type, const ItemSt
 
 void ContainerMenu::clicked(int slotIndex, int button, ClickType type) {
     if (slotIndex != kOutsideSlot && (slotIndex < -1 || slotIndex >= slotCount())) return;
+    if (!onClicked) {
+        doClick(slotIndex, button, type);
+        return;
+    }
+    std::vector<ItemStack> before;
+    before.reserve(slots_.size());
+    for (const auto& s : slots_) before.push_back(s->getItem());
     doClick(slotIndex, button, type);
+    std::vector<std::pair<int, ItemStack>> changed;
+    for (std::size_t i = 0; i < slots_.size(); ++i) {
+        const ItemStack& now = slots_[i]->getItem();
+        const ItemStack& was = before[i];
+        const bool same = now.isEmpty() ? was.isEmpty() : (now.item == was.item && now.count == was.count && now.damage == was.damage);
+        if (!same) changed.emplace_back(static_cast<int>(i), now);
+    }
+    onClicked(slotIndex, button, type, changed, carried_);
 }
 
 bool ContainerMenu::moveItemStackTo(ItemStack& stack, int start, int end, bool reverse) {
@@ -164,6 +179,7 @@ void ContainerMenu::clearContainer(Container& container) {
 }
 
 void ContainerMenu::removed() {
+    if (onRemoved) onRemoved();
     if (!carried_.isEmpty() && player_.inventory != nullptr) {
         player_.inventory->placeItemBack(carried_, [this](const ItemStack& s) { player_.drop(s); });
     }

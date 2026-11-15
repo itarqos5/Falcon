@@ -111,6 +111,35 @@ void test_inventory_add() {
 // ---------------------------------------------------------------------------------------------------------------
 // Menu clicks
 
+// What a server is told of a click: the slot, the slots that changed with what they hold now, and the cursor; and that the menu was closed.
+void test_menu_click_hook() {
+    Rig r;
+    r.put(kHot, S("stone", 20));
+    int calls = 0, slot = -2;
+    std::vector<std::pair<int, ItemStack>> changed;
+    ItemStack carried;
+    r.menu->onClicked = [&](int s, int, ClickType, const std::vector<std::pair<int, ItemStack>>& c, const ItemStack& cursor) {
+        ++calls;
+        slot = s;
+        changed = c;
+        carried = cursor;
+    };
+    r.click(kHot);  // picked up: the slot is empty and the cursor holds the stack
+    CHECK(calls == 1 && slot == kHot);
+    CHECK(changed.size() == 1 && changed[0].first == kHot && changed[0].second.isEmpty());
+    CHECK(carried.count == 20);
+    r.click(10);  // put down in another slot
+    CHECK(calls == 2 && slot == 10);
+    CHECK(changed.size() == 1 && changed[0].first == 10 && changed[0].second.count == 20);
+    CHECK(carried.isEmpty());
+    r.click(10, 1, ClickType::Pickup);
+    CHECK(calls == 3);
+    int closed = 0;
+    r.menu->onRemoved = [&] { ++closed; };
+    r.menu->removed();
+    CHECK(closed == 1);
+}
+
 void test_menu_pickup_and_place() {
     {  // left click picks up the whole stack, left click on an empty slot puts it all down
         Rig r;
