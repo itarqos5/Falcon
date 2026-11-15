@@ -60,3 +60,37 @@ number measured on a window you can see (the measuring here uses hidden windows,
   read from can make the driver wait for all of them; with a deep queue that was one stall per uploaded section while chunks stream in. (`FALCON_DIRECT_UPLOAD=1` is the old way.)
 * **The GPU timer queries only run while F3 or the benchmark shows the number**; they cost the driver something on every frame.
 * `FALCON_NO_PACING=1` skips the 16 ms sleep of a hidden window, to measure it running flat out.
+
+## Making chunks (measured 2026-11-15, 12 logical processors, `--bench 20` at render distance 16)
+
+Where a chunk's worker time goes (`--bench` prints it as "worker time"; `FALCON_PROFILE_WORLDGEN=1` splits the terrain further), before any change:
+terrain 18.7 ms, light 4.6, mesh 5.4 (about ten sections of 0.54), decorate 3.0. Terrain itself: biomes 2.6, density 4.0, aquifer fill 2.4, surface rules 4.5, caves and
+ores 4.2, repacking into sections 0.25.
+
+What was changed, each checked with `falcon_bench_chunks` (a hash of every block, biome and light value of 144 chunks, the same before and after, and the same on 1 and 6
+threads) and the whole-chunk comparison against the real game in `falcon_worldgen_chunk_tests`:
+
+* **The carvers' walks are made once per starting chunk** and shared (`Underground::SourcePlan`). Every chunk replays the carvers of the 17 x 17 chunks round it, and each
+  walk depends on its starting chunk alone; only "does this step reach me" depends on the chunk being made. Caves took about 1.9 ms of the 3.5 ms for caves and ores (worked out from the totals, not timed on their own), and 0.25 ms afterwards (timed).
+* **Ore veins that cannot reach the chunk are dropped after their first two random draws**, and the blob's sine is a table (`std::sin(float)` goes through the long double
+  sine on this runtime, 2.8% of everything).
+* **One thread, a chunk: 15.2 ms to 13.0-13.4 ms.** On 6 threads 3.37 ms to 3.0 ms a chunk (297 to 333 chunks a second).
+* **All but two logical processors make chunks while the world loads**, at below-normal priority, and half of them afterwards (`PriorityPool::setActive`). The spawn area
+  loads in 0.63 s instead of 0.85 s (OpenGL; Vulkan 0.91 s to 0.61 s).
+
+What a profile of the terrain says is left (single thread, share of the time): Perlin noise sampling 28%, density function evaluation 22%, aquifer 12%, the biome
+R-tree 8.5%, surface rules 9%, ore blobs 8%. All of those are the bit-exact port of the game's own arithmetic, so each needs care (and the ground truth test) rather than a
+quick change; a cell test and a division per cell in the ore blobs, which looked like the cost, was not (rewriting it changed nothing, and was not kept).
+
+Finding such things needs a profiler, and this PC has none: `FALCON_SAMPLE=<file>` (src/platform/sampling_profiler.cpp) samples the instruction pointer of the frame
+thread and the workers during `--bench`, and `node tools/resolve_samples.mjs <file> <exe>` names the functions (it needs an exe that was not stripped: configure a second
+build directory with `-DFALCON_STRIP=OFF`, and `-DFALCON_DIST_DIR=<elsewhere>` so that it does not replace dist/). `falcon_bench_chunks --sample gen|light <file>` does the same
+for the generator alone, on one thread or many, with no window.
+
+## Vulkan, compared with OpenGL
+
+The frame thread does about 2 ms of work a frame on both; the Vulkan layer costs about 0.3 ms a frame more than the OpenGL driver. Pipelines are not the cost (six were made in
+a world run, 0.14 to 0.7 ms each: the driver keeps its own cache). What was: the upload arena gave back every chunk bigger than a normal one after each frame, so when meshes
+streamed in each big upload was a `vkAllocateMemory` and a map a few frames later, again and again; p99 CPU per frame was 16 to 39 ms against OpenGL's 4 to 6. Chunks are
+now kept until they have been unused for about ten seconds: p99 5.2 ms. A thread for submitting and presenting was not added: with 2 ms of CPU against 4 ms of GPU per frame there
+is little to overlap, and presenting cannot be measured with a window that is never shown.
