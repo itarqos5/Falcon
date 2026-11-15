@@ -1028,6 +1028,27 @@ void GameSession::interact(double dt, bool active) {
             const std::string& heldName = inventory_.selectedItem().type().name;
             if ((heldName == "flint_and_steel" || heldName == "fire_charge") && useFireStarter(heldName, *target_)) return;
         }
+        // SlabBlock.canBeReplaced: a slab put on the open side of a half slab of the same kind makes the double slab.
+        if (!inventory_.selectedItem().isEmpty() && inventory_.selectedItem().type().blockIndex >= 0) {
+            const Block under = renderer_.level().block(target_->x, target_->y, target_->z);
+            const int heldIndex = inventory_.selectedItem().type().blockIndex;
+            if (registry_->state(under).block == heldIndex && registry_->get(under, "type").size() > 0 && registry_->type(heldIndex).name.size() > 5 &&
+                registry_->type(heldIndex).name.compare(registry_->type(heldIndex).name.size() - 5, 5, "_slab") == 0) {
+                const std::string_view half = registry_->get(under, "type");
+                if ((half == "bottom" && target_->face == kUp) || (half == "top" && target_->face == kDown)) {
+                    setBlock(target_->x, target_->y, target_->z, registry_->with(under, "type", "double"));
+                    const std::array<double, 3> where = {target_->x + 0.5, target_->y + 0.5, target_->z + 0.5};
+                    const BlockType& slab = registry_->type(under);
+                    playBlockSound(under, "place", breakOrPlaceMix(slab.soundVolume, slab.soundPitch), SoundSource::Blocks, &where);
+                    hand_.swing();
+                    if (!creative()) {
+                        inventory_.selectedItem().shrink(1);
+                        if (inventory_.selectedItem().isEmpty()) inventory_.selectedItem() = ItemStack();
+                    }
+                    return;
+                }
+            }
+        }
         // BlockPlaceContext: aiming at a block that can be replaced (grass, ferns, dead bushes, snow, water ...) puts the new block in ITS place; any other
         // block gets the new one next to the face that was hit (a flower, a torch, a slab: beside or on top of it).
         const bool replaceClicked = registry_->state(renderer_.level().block(target_->x, target_->y, target_->z)).has(kStateReplaceable);
@@ -1043,7 +1064,8 @@ void GameSession::interact(double dt, bool active) {
         ItemStack& heldStack = inventory_.selectedItem();
         const int heldBlock = heldStack.isEmpty() ? -1 : heldStack.type().blockIndex;
         if (heldBlock >= 0 && inWorld && registry_->state(there).has(kStateReplaceable) && !insidePlayer) {
-            Block placed = blockStateForPlacement({*registry_, heldBlock, *target_, player_.yaw, player_.pitch, player_.sneaking});
+            const std::array<double, 3> cursor = {eye[0] + look[0] * target_->distance - target_->x, eye[1] + look[1] * target_->distance - target_->y, eye[2] + look[2] * target_->distance - target_->z};
+            Block placed = blockStateForPlacement({*registry_, heldBlock, *target_, player_.yaw, player_.pitch, player_.sneaking, cursor});
             // BlockItem.canPlace: a plant needs its soil, and a tall one (DoubleHighBlockItem) the cell above free as well.
             const BlockSupport::Reader at = [this](int bx, int by, int bz) { return renderer_.level().block(bx, by, bz); };
             // A wall torch with nothing sturdy to hang on (a click on the side of a flower, say) falls back to the standing torch, as StandingAndWallBlockItem does.
