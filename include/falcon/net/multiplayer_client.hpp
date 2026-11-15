@@ -101,6 +101,8 @@ struct RemotePlayer {
     int vehicle = -1;       // the entity it sits on (from set_passengers), -1 for none
     int seatIndex = 0;      // and which place on it
     float walkPosition = 0.0f, walkSpeed = 0.0f, walkSpeedO = 0.0f;
+    bool hasSleepPos = false;  // the bed it sleeps in (entity data 14): the block of the bed
+    int sleepX = 0, sleepY = 0, sleepZ = 0;
     int usingTicks = 0;  // how long it has been using an item (LivingEntity.getTicksUsingItem): the drawing of a crossbow goes by it
     CloakState cloak;  // where its cape hangs from and how it has walked (the cape sways by them)
 };

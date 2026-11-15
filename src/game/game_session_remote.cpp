@@ -960,6 +960,27 @@ void GameSession::renderRemotePlayers(const std::array<double, 3>& camPos) {
         pose.leftHanded = p.mainArmLeft;
         pose.swingOffHand = p.swingOffHand;
         pose.crouching = p.sneaking && !pose.riding;
+        if (p.pose == 2) {  // sleeping: the bed's direction (Entity.getBedOrientation: the bed block's facing, from the block at the sleeping position) decides how it lies
+            pose.sleeping = true;
+            pose.crouching = false;
+            pose.sleepYaw = bodyYaw;
+            if (p.hasSleepPos) {
+                const Block bedBlock = renderer_.level().block(p.sleepX, p.sleepY, p.sleepZ);
+                if (registry_->type(bedBlock).name.find("_bed") != std::string::npos) {
+                    const std::string_view facing = registry_->get(bedBlock, "facing");
+                    // LivingEntityRenderer.sleepDirectionToRotation: south 90, west 0, north 270, east 180
+                    const struct { const char* name; float yaw; int dx, dz; } kBeds[4] = {{"south", 90.0f, 0, 1}, {"west", 0.0f, -1, 0}, {"north", 270.0f, 0, -1}, {"east", 180.0f, 1, 0}};
+                    for (const auto& bed : kBeds) {
+                        if (facing == bed.name) {
+                            pose.sleepYaw = bed.yaw;
+                            pose.hasBed = true;
+                            pose.bedStepX = bed.dx;
+                            pose.bedStepZ = bed.dz;
+                        }
+                    }
+                }
+            }
+        }
         pose.skin = net::defaultSkinOf(p.id);
         const net::SkinInfo* ownSkin = remote_->skinOf(p.id);
         if (ownSkin != nullptr) {  // a skin of their own, once it has come

@@ -1,6 +1,6 @@
 // the scenarios of the fake server (imported by fakeserver.mjs): each sets players up and returns a function that moves them every tick (t counts ticks)
 export function scenarios(h) {
-  const { addPlayer, spawn, equipment, entityData, frame, W, typeId, angle, players, chunkPacket } = h;
+  const { addPlayer, spawn, equipment, entityData, frame, W, typeId, angle, players, chunkPacket, packPos, blockState } = h;
   const table = {};
 
   // the viewer stands at the back, looking at where things happen
@@ -93,6 +93,27 @@ export function scenarios(h) {
     equipment(sock, lefty, [[0, 'crossbow+charged']]);
     entityData(sock, lefty, [[15, 42, 0]]);              // left-handed
     return { view: { x: 0.5, y: 64, z: -1, yaw: 0, pitch: 5 }, tick: () => {} };
+  };
+
+  // two players asleep in beds that face different ways (the body lies along the bed, the head at the pillow)
+  table.sleep = (sock) => {
+    const east = addPlayer({ id: 1, name: 'SleepsEast', x: 3.5, y: 64.6875, z: 6.5, yaw: 90, pitch: 0, head: 90 });
+    const north = addPlayer({ id: 2, name: 'SleepsNorth', x: -2.5, y: 64.6875, z: 6.5, yaw: 180, pitch: 0, head: 180 });
+    for (const p of players) spawn(sock, p);
+    const bed = (x, y, z, facing, part) => sock.write(frame(8, new W().i64(packPos(x, y, z)).varint(blockState('red_bed', { facing, part, occupied: 'true' })).buf()));
+    entityData(sock, east, [[6, 20, 2], [14, 11, packPos(3, 64, 6)]]);
+    entityData(sock, north, [[6, 20, 2], [14, 11, packPos(-3, 64, 6)]]);
+    return {
+      view: { x: 0.5, y: 64, z: -1, yaw: 0, pitch: 12 },
+      tick: (tick) => {
+        if (tick === 40) {  // (the beds go in once the chunks are there)
+          bed(2, 64, 6, 'east', 'foot');  // the foot, and the head one block further east
+          bed(3, 64, 6, 'east', 'head');
+          bed(-3, 64, 7, 'north', 'foot');
+          bed(-3, 64, 6, 'north', 'head');
+        }
+      },
+    };
   };
 
   table.ride = (sock) => {

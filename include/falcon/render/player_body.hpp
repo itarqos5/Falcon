@@ -27,6 +27,12 @@ struct BodyPose {
     float walkPosition = 0.0f;         // the walk cycle (limb swing) and how hard the limbs swing (0..1)
     float walkSpeed = 0.0f;
     float attackProgress = 0.0f;       // 0..1 through the swing of the right arm; 0 = not swinging
+    // Sleeping in a bed (LivingEntityRenderer.submit / setupRotations): the body lies on its back along the bed, turned by sleepYaw degrees (from the way the bed faces), and moved back
+    // along it so that the head is at the pillow (bedStep is the way the bed faces; hasBed false: no bed was found, the body's own yaw is used and nothing is moved).
+    bool sleeping = false;
+    float sleepYaw = 0.0f;
+    bool hasBed = false;
+    int bedStepX = 0, bedStepZ = 0;
     bool crouching = false;
     // The skin: -1 is the plain Steve (wide arms); 0-8 are the nine default skins with slim arms and 9-17 the same with wide arms, in the order of the game's own
     // PlayerSkin.DEFAULT_SKINS (alex, ari, efe, kai, makena, noor, steve, sunny, zuri), which is how a player without a skin of their own gets one.

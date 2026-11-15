@@ -339,7 +339,12 @@ void PlayerBodyRenderer::render(const Matrix4f& viewProj, const std::array<doubl
     // shrunk to 0.9375 and dropped by 1.501.
     const double crouchDrop = pose.crouching ? -2.0 / 16.0 : 0.0;
     Xf entity = mul(scaling({-0.9375, -0.9375, 0.9375}), translation({0.0, -1.501, 0.0}));
-    if (pose.fallFlying) {  // AvatarRenderer.setupRotations: leaning into the flight, and turned toward where it is going
+    if (pose.sleeping) {  // LivingEntityRenderer.setupRotations: turned to the bed, laid down, turned along it (and moved toward the foot of the bed by 1.52, in submit)
+        entity = mul(rotY(270.0 * static_cast<double>(kDegrees)), entity);
+        entity = mul(rotZ(90.0 * static_cast<double>(kDegrees)), entity);
+        entity = mul(rotY(static_cast<double>(pose.sleepYaw) * static_cast<double>(kDegrees)), entity);
+        if (pose.hasBed) entity = mul(translation({-static_cast<double>(pose.bedStepX) * 1.52, 0.0, -static_cast<double>(pose.bedStepZ) * 1.52}), entity);
+    } else if (pose.fallFlying) {  // AvatarRenderer.setupRotations: leaning into the flight, and turned toward where it is going
         entity = mul(mul(rotX(static_cast<double>(pose.glideLean) * static_cast<double>(kDegrees)), rotY(static_cast<double>(pose.glideTurn))), entity);
     } else if (pose.swimAmount > 0.0f) {  // PlayerRenderer.setupRotations: lying down by the pitch of the view (straight down out of the water), and lower and forward
         const float target = pose.inWater ? -90.0f - pose.headPitch : -90.0f;
@@ -349,7 +354,7 @@ void PlayerBodyRenderer::render(const Matrix4f& viewProj, const std::array<doubl
         entity = mul(lay, entity);
     }
     if (pose.deathAngle > 0.0f) entity = mul(rotZ(static_cast<double>(pose.deathAngle) * static_cast<double>(kDegrees)), entity);  // (a dying body falls over on its side)
-    entity = mul(rotY((180.0 - static_cast<double>(pose.bodyYaw)) * static_cast<double>(kDegrees)), entity);
+    if (!pose.sleeping) entity = mul(rotY((180.0 - static_cast<double>(pose.bodyYaw)) * static_cast<double>(kDegrees)), entity);
     entity = mul(translation({pose.position[0] - cam[0], pose.position[1] - cam[1] + crouchDrop, pose.position[2] - cam[2]}), entity);
     if (hands != nullptr && rightArm != nullptr && leftArm != nullptr) {  // the arms as they are posed: what an item in the hand is placed from
         const auto column = [](const Xf& f, std::array<double, 16>& out) {

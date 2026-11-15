@@ -79,6 +79,7 @@ function entityData(sock, p, entries) {
     else if (type === 20 || type === 42) w.varint(value); // pose, main arm
     else if (type === 3) w.f32(value);
     else if (type === 8) w.bool(value);
+    else if (type === 11) { w.bool(true); w.i64(value); }  // an optional block position (already packed)
   }
   w.u8(0xff);
   sock.write(frame(101, w.buf()));
@@ -119,7 +120,15 @@ function moveTick(sock, p) {
 
 // ---- scenarios
 import { scenarios } from './scenarios.mjs';
-const table = scenarios({ addPlayer, spawn, equipment, entityData, frame, W, typeId, angle, players, chunkPacket });
+// BlockPos.asLong: x and z in 26 bits, y in 12
+const packPos = (x, y, z) => ((BigInt(x) & 0x3FFFFFFn) << 38n) | ((BigInt(z) & 0x3FFFFFFn) << 12n) | (BigInt(y) & 0xFFFn);
+// the state number of a block with the properties given ({facing: 'east'}); the default state for the rest
+const blockState = (name, props = {}) => {
+  const b = blocks['minecraft:' + name];
+  const s = b.states.find((x) => Object.entries(props).every(([k, v]) => x.properties[k] === v) && (x.default || Object.keys(props).length)) || b.states.find((x) => Object.entries(props).every(([k, v]) => x.properties[k] === v));
+  return s.id;
+};
+const table = scenarios({ addPlayer, spawn, equipment, entityData, frame, W, typeId, angle, players, chunkPacket, packPos, blockState });
 
 // ---- the connection
 const server = net.createServer((sock) => {

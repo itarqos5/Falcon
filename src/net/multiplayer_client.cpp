@@ -918,6 +918,16 @@ void MultiplayerClient::handlePlay(const Packet& p, RemoteHandler& h) {
                         who->pose = pose;
                         who->sneaking = (who->entityFlags & 2) != 0 || pose == 5;
                     }
+                } else if (serializer == 11 && index == 14) {  // the position of the bed a living thing sleeps in (optional)
+                    const bool present = r.boolean();
+                    int bx = 0, by = 0, bz = 0;
+                    if (present) unpackBlockPos(r.i64(), bx, by, bz);
+                    if (who != nullptr && r.ok) {
+                        who->hasSleepPos = present;
+                        who->sleepX = bx;
+                        who->sleepY = by;
+                        who->sleepZ = bz;
+                    }
                 } else if (serializer == 42) {  // the main arm: 0 is the left
                     const int arm = r.varint();
                     if (who != nullptr && r.ok && index == 15) who->mainArmLeft = arm == 0;
