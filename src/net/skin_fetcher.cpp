@@ -83,9 +83,37 @@ std::optional<SkinInfo> parseTexturesProperty(const std::string& base64Value) {
         if (skin.contains("metadata") && skin["metadata"].is_object() && skin["metadata"].contains("model") && skin["metadata"]["model"].is_string()) {
             info.slim = skin["metadata"]["model"].get<std::string>() == "slim";
         }
+        if (textures.contains("CAPE") && textures["CAPE"].is_object() && textures["CAPE"].contains("url") && textures["CAPE"]["url"].is_string()) {
+            const std::string capeUrl = textures["CAPE"]["url"].get<std::string>();
+            for (const char* capePrefix : {"http://textures.minecraft.net/texture/", "https://textures.minecraft.net/texture/"}) {
+                const std::string cp = capePrefix;
+                if (capeUrl.compare(0, cp.size(), cp) != 0) continue;
+                const std::string capeHash = capeUrl.substr(cp.size());
+                if (isHex(capeHash) && capeHash.size() <= 128) info.capeHash = capeHash;
+                break;
+            }
+        }
         return info;
     }
     return std::nullopt;
+}
+
+// A cape as the game takes it (HttpTexture for a cape): a 64x32 picture (or a larger one of the same shape), or the old 22x17 one put in the corner of a 64x32 picture. Empty for any other.
+static Image prepareCape(Image decoded) {
+    if (decoded.width == 22 && decoded.height == 17) {
+        Image image;
+        image.width = 64;
+        image.height = 32;
+        image.rgba.assign(64u * 32u * 4u, 0);
+        for (int y = 0; y < 17; ++y) {
+            for (int x = 0; x < 22; ++x) {
+                for (int c = 0; c < 4; ++c) image.rgba[static_cast<std::size_t>((y * 64 + x) * 4 + c)] = decoded.rgba[static_cast<std::size_t>((y * 22 + x) * 4 + c)];
+            }
+        }
+        return image;
+    }
+    if (decoded.width >= 64 && decoded.width % 64 == 0 && decoded.height * 2 == decoded.width) return decoded;
+    return {};
 }
 
 Image prepareSkin(Image decoded) {
@@ -157,11 +185,27 @@ SkinFetcher::~SkinFetcher() {
 }
 
 void SkinFetcher::request(const SkinInfo& info) {
+    bool skin = false, cape = false;
     {
         std::lock_guard<std::mutex> lock(state_->mutex);
-        if (!state_->requested.insert(info.hash).second || state_->requested.size() > 512) return;
+        if (state_->requested.size() > 512) return;
+        skin = state_->requested.insert(info.hash).second;
+        cape = !info.capeHash.empty() && state_->requested.insert(info.capeHash).second;
     }
-    state_->post([state = state_, info] { fetchPicture(state, info); });
+    if (skin) state_->post([state = state_, info] { fetchPicture(state, info); });
+    if (cape) state_->post([state = state_, hash = info.capeHash] { fetchCape(state, hash); });
+}
+
+void SkinFetcher::fetchCape(const std::shared_ptr<State>& state, const std::string& hash) {
+    const HttpAnswer answer = httpsRequest("GET", "textures.minecraft.net", "/texture/" + hash);
+    if (answer.status != 200) return;
+    const std::vector<unsigned char> bytes(answer.body.begin(), answer.body.end());
+    auto decoded = decodePng(bytes);
+    if (!decoded) return;
+    Image cape = prepareCape(std::move(*decoded));
+    if (cape.empty()) return;
+    std::lock_guard<std::mutex> lock(state->mutex);
+    state->finished.push_back({hash, false, std::move(cape), true});
 }
 
 void SkinFetcher::fetchPicture(const std::shared_ptr<State>& state, const SkinInfo& info) {
@@ -191,12 +235,15 @@ void SkinFetcher::requestProfile(const std::string& id) {
         for (const nlohmann::json& p : j["properties"]) {
             if (!p.is_object() || !p.contains("name") || !p["name"].is_string() || p["name"].get<std::string>() != "textures" || !p.contains("value") || !p["value"].is_string()) continue;
             if (const auto info = parseTexturesProperty(p["value"].get<std::string>())) {
+                bool skin = false, cape = false;
                 {
                     std::lock_guard<std::mutex> lock(state->mutex);
                     state->profiles[key] = *info;
-                    if (!state->requested.insert(info->hash).second) return;
+                    skin = state->requested.insert(info->hash).second;
+                    cape = !info->capeHash.empty() && state->requested.insert(info->capeHash).second;
                 }
-                fetchPicture(state, *info);
+                if (skin) fetchPicture(state, *info);
+                if (cape) fetchCape(state, info->capeHash);
                 return;
             }
         }

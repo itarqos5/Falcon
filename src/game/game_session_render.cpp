@@ -86,6 +86,14 @@ void GameSession::renderWorld(int framebufferWidth, int framebufferHeight) {
             pose.swimAmount = swimAmountOld_ + (swimAmount_ - swimAmountOld_) * t;
             pose.visuallySwimming = player_.isVisuallySwimming();
             if (player_.fallFlying) poseGliding(pose, static_cast<float>(player_.fallFlyTicks) + t, player_.yaw, player_.pitch, player_.vx, player_.vy, player_.vz);
+            pose.cape = capeFor(localCapeHash_);
+            if (pose.cape != nullptr) {
+                const float flown = static_cast<float>(player_.fallFlyTicks) + t;
+                const CapeAngles angles = capeAngles(cloak_, t, player_.xo, player_.x, player_.yo, player_.y, player_.zo, player_.z, bodyYawOld_, bodyYaw_, player_.fallFlying ? std::clamp(flown * flown / 100.0f, 0.0f, 1.0f) : 0.0f);
+                pose.capeFlap = angles.flap;
+                pose.capeLean = angles.lean;
+                pose.capeLean2 = angles.lean2;
+            }
             pose.elytra = !inventory_.item(Inventory::kChest).isEmpty() && inventory_.item(Inventory::kChest).type().name == "elytra";
             pose.elytraX = elytraXO_ + (elytraX_ - elytraXO_) * t;
             pose.elytraY = elytraYO_ + (elytraY_ - elytraYO_) * t;

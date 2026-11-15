@@ -13,6 +13,7 @@ namespace falcon::net {
 struct SkinInfo {
     std::string hash;  // the picture is textures.minecraft.net/texture/<hash>
     bool slim = false; // arms of three pixels
+    std::string capeHash;  // the cape's picture (textures.minecraft.net/texture/<hash>); empty for no cape
 };
 
 // The skin that a "textures" property (base64 of JSON: {"textures":{"SKIN":{"url":...,"metadata":{"model":"slim"}}}}) names. Only a picture on textures.minecraft.net is
@@ -40,6 +41,7 @@ public:
         std::string hash;
         bool slim = false;
         Image image;
+        bool cape = false;  // the picture is a cape (64x32), not a skin
     };
     // The skins that are ready since the last call.
     [[nodiscard]] std::vector<Done> takeFinished();
@@ -48,7 +50,8 @@ public:
 
 private:
     struct State;
-    static void fetchPicture(const std::shared_ptr<State>& state, const SkinInfo& info);  // (on the worker thread) the picture, decoded and made ready
+    static void fetchPicture(const std::shared_ptr<State>& state, const SkinInfo& info);
+    static void fetchCape(const std::shared_ptr<State>& state, const std::string& hash);  // (on the worker thread) the picture, decoded and made ready
     std::shared_ptr<State> state_;
 };
 

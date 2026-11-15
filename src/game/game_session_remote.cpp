@@ -629,6 +629,21 @@ void GameSession::openTestContainer() {
     containerOpenRequested_ = true;
 }
 
+// The picture of a cape by its hash (downloaded already), or, with FALCON_TEST_CAPE=<a 64x32 png>, that one for every body that has no cape (a test aid, to see the cape).
+const Texture2D* GameSession::capeFor(const std::string& hash) {
+    if (!hash.empty()) {
+        if (const auto texture = skinTextures_.find(hash); texture != skinTextures_.end()) return texture->second.get();
+    }
+    static const char* const path = std::getenv("FALCON_TEST_CAPE");
+    if (path == nullptr) return nullptr;
+    if (!testCape_) {
+        std::ifstream in(path, std::ios::binary);
+        const std::vector<unsigned char> bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        if (const auto image = decodePng(bytes)) testCape_ = std::make_unique<Texture2D>(*image, FilterMode::Nearest);
+    }
+    return testCape_.get();
+}
+
 void GameSession::pumpSkins() {
     std::vector<net::SkinFetcher::Done> done;
     if (remote_) done = remote_->takeSkins();
@@ -640,9 +655,13 @@ void GameSession::pumpSkins() {
         skinTextures_[d.hash] = std::make_unique<Texture2D>(d.image, FilterMode::Nearest);
         skinSlim_[d.hash] = d.slim;
         if (localSkins_) {
-            if (const auto own = localSkins_->profileSkin(services_.playerUuid); own && own->hash == d.hash) {
-                localSkinHash_ = d.hash;
-                if (!d.slim) hand_.setSkin(d.image);
+            if (const auto own = localSkins_->profileSkin(services_.playerUuid)) {
+                if (d.cape && own->capeHash == d.hash) {
+                    localCapeHash_ = d.hash;
+                } else if (!d.cape && own->hash == d.hash) {
+                    localSkinHash_ = d.hash;
+                    if (!d.slim) hand_.setSkin(d.image);
+                }
             }
         }
     }
@@ -942,12 +961,14 @@ void GameSession::renderRemotePlayers(const std::array<double, 3>& camPos) {
         pose.swingOffHand = p.swingOffHand;
         pose.crouching = p.sneaking && !pose.riding;
         pose.skin = net::defaultSkinOf(p.id);
-        if (const net::SkinInfo* own = remote_->skinOf(p.id)) {  // a skin of their own, once it has come
-            if (const auto texture = skinTextures_.find(own->hash); texture != skinTextures_.end()) {
+        const net::SkinInfo* ownSkin = remote_->skinOf(p.id);
+        if (ownSkin != nullptr) {  // a skin of their own, once it has come
+            if (const auto texture = skinTextures_.find(ownSkin->hash); texture != skinTextures_.end()) {
                 pose.customSkin = texture->second.get();
-                pose.customSlim = own->slim;
+                pose.customSlim = ownSkin->slim;
             }
         }
+        pose.cape = capeFor(ownSkin != nullptr ? ownSkin->capeHash : std::string());
         for (std::size_t part = 0; part < pose.parts.size(); ++part) pose.parts[part] = (p.skinParts >> part & 1) != 0;  // the Skin Customization they chose
         pose.ageTicks = playerAgeTicks_ + partialTick_;
         int sky = 15, block = 0;
@@ -973,6 +994,14 @@ void GameSession::renderRemotePlayers(const std::array<double, 3>& camPos) {
         if ((p.entityFlags & 0x80) != 0) {
             const double deltaX = p.deltaXO + (p.deltaX - p.deltaXO) * partialTick_, deltaY = p.deltaYO + (p.deltaY - p.deltaYO) * partialTick_, deltaZ = p.deltaZO + (p.deltaZ - p.deltaZO) * partialTick_;
             poseGliding(pose, static_cast<float>(p.fallFlyingTicks) + t, lookYaw, lookPitch, deltaX, deltaY, deltaZ);
+        }
+        if (pose.cape != nullptr) {  // how the cape hangs and swings (AvatarRenderer.extractCapeState); it lies flat along the body in a glide
+            const float flown = static_cast<float>(p.fallFlyingTicks) + t;
+            const float glide = (p.entityFlags & 0x80) != 0 ? std::clamp(flown * flown / 100.0f, 0.0f, 1.0f) : 0.0f;
+            const CapeAngles angles = capeAngles(p.cloak, t, p.xo, p.x, p.yo, p.y, p.zo, p.z, p.bodyYawO, p.bodyYaw, glide);
+            pose.capeFlap = angles.flap;
+            pose.capeLean = angles.lean;
+            pose.capeLean2 = angles.lean2;
         }
         pose.hurt = p.hurtTime > 0 || p.deathTime > 0 ? 1.0f : 0.0f;
         if (p.deathTime > 0) {

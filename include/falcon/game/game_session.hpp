@@ -370,6 +370,10 @@ private:
     void tickUsingItem();
     void completeUsingItem();
     void emitUseEffects(const ItemType& type);                    // Consumable.emitParticlesAndSounds: the sound of a bite or a sip
+    CloakState cloak_;                          // where the cape of the player's own body hangs from (ClientAvatarState)
+    std::string localCapeHash_;                 // the cape of the signed-in account, once its picture has come
+    std::unique_ptr<Texture2D> testCape_;       // FALCON_TEST_CAPE=<png>: a cape for every body that has none (a test aid)
+    [[nodiscard]] const Texture2D* capeFor(const std::string& hash);  // the picture of a cape (by its hash) or the test cape; null for none
     void tickGlide();                          // what the glide of the player asks of the game (wear on the elytra, a crash, a server told)
     [[nodiscard]] bool gliderUsable();   // elytra are worn and can take one more point of wear (LivingEntity.canGlideUsing)
     float swimAmount_ = 0.0f, swimAmountOld_ = 0.0f;                        // Player.swimAmount: how far into the swimming pose (0 to 1)

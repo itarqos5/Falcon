@@ -527,6 +527,7 @@ void MultiplayerClient::tickPlayers() {
         p.deltaY = dy;
         p.deltaZ = dz;
         const bool player = isPlayerEntity(p);
+        if (player) p.cloak.tick(p.x, p.y, p.z, dx, dz, p.onGround && (p.entityFlags & 0x80) == 0 && p.pose != 3);  // ClientAvatarState.tick: the cape
         // LivingEntity.updateSwingTime: a swing takes six ticks
         p.swingO = p.swing;
         if (p.swinging) {

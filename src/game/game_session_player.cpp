@@ -426,6 +426,7 @@ void GameSession::tickBody() {
         elytraY_ += (targetY - elytraY_) * 0.3f;
         elytraZ_ += (targetZ - elytraZ_) * 0.3f;
     }
+    cloak_.tick(player_.x, player_.y, player_.z, player_.x - player_.xo, player_.z - player_.zo, player_.onGround && !player_.isSwimming() && !player_.fallFlying);  // (the cape)
     swimAmountOld_ = swimAmount_;  // Player.updateSwimAmount
     swimAmount_ = player_.isVisuallySwimming() ? std::min(1.0f, swimAmount_ + 0.09f) : std::max(0.0f, swimAmount_ - 0.09f);
     const double dx = player_.x - player_.xo, dz = player_.z - player_.zo;

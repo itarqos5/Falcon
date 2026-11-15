@@ -9,6 +9,7 @@
 #include "falcon/text/styled_text.hpp"
 #include "falcon/world/block_registry.hpp"
 #include "falcon/world/chunk.hpp"
+#include "falcon/world/cloak.hpp"
 #include "falcon/world/item_stack.hpp"
 
 #include <unordered_map>
@@ -100,6 +101,7 @@ struct RemotePlayer {
     int vehicle = -1;       // the entity it sits on (from set_passengers), -1 for none
     int seatIndex = 0;      // and which place on it
     float walkPosition = 0.0f, walkSpeed = 0.0f, walkSpeedO = 0.0f;
+    CloakState cloak;  // where its cape hangs from and how it has walked (the cape sways by them)
 };
 
 // An item lying in the world (an item entity the server tells about).

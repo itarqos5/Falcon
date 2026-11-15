@@ -69,6 +69,13 @@ std::unique_ptr<PlayerBodyRenderer> PlayerBodyRenderer::create(const ResourceMan
             }
         }
     }
+    {  // the cape
+        std::string capeError;
+        if (auto cape = loadEntityModel(dir, "minecraft:player#cape", capeError)) {
+            out->capeModel_ = std::move(*cape);
+            out->haveCape_ = true;
+        }
+    }
     {  // the wings, when the game has them
         std::string wingError;
         if (auto wings = loadEntityModel(dir, "minecraft:elytra#main", wingError)) {
@@ -380,8 +387,32 @@ void PlayerBodyRenderer::render(const Matrix4f& viewProj, const std::array<doubl
             if (const Texture2D* overlay = armorTexture(slot == 2 ? "humanoid_leggings" : "humanoid", "leather_overlay")) draw(list, *overlay, 1.0f, 1.0f, 1.0f);
         }
     }
+    if (pose.cape != nullptr && pose.parts[0] && !pose.elytra && haveCape_) {  // CapeLayer: not drawn over elytra; a little out from the body under armor; posed by PlayerCapeModel.setupAnim
+        EntityPart cloak = capeModel_;
+        copyPose(cloak, model);
+        if (EntityPart* cloakBody = cloak.find("body")) {
+            if (EntityPart* cape = cloakBody->find("cape")) {
+                // setupAnim: cape.rotateBy(identity.rotateY(-pi).rotateX((6 + lean / 2 + flap) deg).rotateZ(lean2 / 2 deg).rotateY((180 - lean2 / 2) deg)); the part's own turn is a half turn about Y
+                const double toRad = static_cast<double>(kDegrees);
+                const Xf q = mul(mul(mul(rotY(-static_cast<double>(kPi)), rotX((6.0 + static_cast<double>(pose.capeLean) / 2.0 + static_cast<double>(pose.capeFlap)) * toRad)),
+                                     rotZ(static_cast<double>(pose.capeLean2) / 2.0 * toRad)),
+                                 rotY((180.0 - static_cast<double>(pose.capeLean2) / 2.0) * toRad));
+                const Xf total = mul(rotY(static_cast<double>(kPi)), q);  // (the part's turn, then the extra one)
+                // the angles of Rz * Ry * Rx (ModelPart.rotateBy keeps the part's rotation as those)
+                const double sy = -total.m[2][0];
+                const float rx = static_cast<float>(std::atan2(total.m[2][1], total.m[2][2]));
+                const float ry = static_cast<float>(std::asin(std::clamp(sy, -1.0, 1.0)));
+                const float rz = static_cast<float>(std::atan2(total.m[1][0], total.m[0][0]));
+                cape->rotation = {rx, ry, rz};
+                std::vector<Vertex> list;
+                const bool chestArmor = !pose.armor[1].empty();
+                collect(cloak, Xf{}, chestArmor ? mul(entity, translation({0.0, -0.053125, 0.06875})) : entity, pose.parts, list);
+                draw(list, *pose.cape, 1.0f, 1.0f, 1.0f);
+            }
+        }
+    }
     if (pose.elytra && haveElytra_) {  // WingsLayer: the wings, two sixteenths behind the body, held as ElytraAnimationState says (lifted three when crouching)
-        if (const Texture2D* wingTexture = elytraTexture()) {
+        if (const Texture2D* wingTexture = pose.cape != nullptr && pose.parts[0] ? pose.cape : elytraTexture()) {  // (a cape's picture is also what the wings of its owner show)
             EntityPart wings = elytraModel_;
             EntityPart* leftWing = wings.find("left_wing");
             EntityPart* rightWing = wings.find("right_wing");

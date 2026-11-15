@@ -429,6 +429,13 @@ void test_skins() {
     CHECK(!parseTexturesProperty("eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHA6Ly90ZXh0dXJlcy5taW5lY3JhZnQubmV0L3RleHR1cmUvLi4vLi4veCJ9fX0="));  // not a hash
     CHECK(!parseTexturesProperty("eyJ0ZXh0dXJlcyI6eyJDQVBFIjp7InVybCI6Imh0dHA6Ly90ZXh0dXJlcy5taW5lY3JhZnQubmV0L3RleHR1cmUvYWJjMTIzIn19fQ=="));  // a cape, not a skin
     CHECK(!parseTexturesProperty("not base64 at all"));
+    {  // a cape next to the skin: its hash is kept (only from the game's own texture server)
+        const auto caped = parseTexturesProperty("eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHA6Ly90ZXh0dXJlcy5taW5lY3JhZnQubmV0L3RleHR1cmUvYWJjMTIzZGVmNDU2In0sIkNBUEUiOnsidXJsIjoiaHR0cHM6Ly90ZXh0dXJlcy5taW5lY3JhZnQubmV0L3RleHR1cmUvMDEyMzQ1Njc4OWFiY2RlZiJ9fX0=");
+        CHECK(caped && caped->hash == "abc123def456" && caped->capeHash == "0123456789abcdef");
+        const auto foreign = parseTexturesProperty("eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHA6Ly90ZXh0dXJlcy5taW5lY3JhZnQubmV0L3RleHR1cmUvYWJjMTIzZGVmNDU2In0sIkNBUEUiOnsidXJsIjoiaHR0cDovL2V2aWwuZXhhbXBsZS90ZXh0dXJlL2FiYzEyMyJ9fX0=");
+        CHECK(foreign && foreign->capeHash.empty());
+        CHECK(slim && slim->capeHash.empty());
+    }
 
     // 64x32: every pixel is (x, y, 7) and half transparent, so that what happens to the pixels shows
     Image old;

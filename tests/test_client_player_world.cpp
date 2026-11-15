@@ -3,6 +3,7 @@
 
 #include "falcon/net/multiplayer_client.hpp"
 #include "falcon/ui/text_edit.hpp"
+#include "falcon/world/cloak.hpp"
 #include "falcon/world/boat.hpp"
 
 // Special blocks: stairs, slabs, a fence post, with shapes the test makes up (bottom slab, a 0.6 and a 0.625 high block).
@@ -829,11 +830,65 @@ void test_player_gliding() {
     }
 }
 
+// The cape (ClientAvatarState.moveCloak, AvatarRenderer.extractCapeState): it hangs still when the body stands, trails behind a walk (the lean grows to about the walk speed times
+// 300 - clamped to 150), swings sideways with a sideways step, lifts when the body falls, and a jump of more than ten blocks does not drag it across the world.
+void test_cape() {
+    using falcon::CapeAngles;
+    using falcon::CloakState;
+    CloakState still;
+    for (int i = 0; i < 20; ++i) still.tick(5.0, 64.0, 5.0, 0.0, 0.0, true);
+    CapeAngles a = falcon::capeAngles(still, 1.0f, 5.0, 5.0, 64.0, 64.0, 5.0, 5.0, 0.0f, 0.0f, 0.0f);
+    CHECK(closeTo(a.flap, 0.0, 1e-4) && closeTo(a.lean, 0.0, 1e-4) && closeTo(a.lean2, 0.0, 1e-4));
+    {  // walking south (yaw 0 faces +Z) at 0.2 a tick: the point the cape hangs from is three times that behind, so the cape swings back
+        CloakState walking;
+        double z = 5.0, zo = 5.0;
+        for (int i = 0; i < 40; ++i) {
+            zo = z;
+            z += 0.2;
+            walking.tick(5.0, 64.0, z, 0.0, 0.2, true);
+        }
+        a = falcon::capeAngles(walking, 1.0f, 5.0, 5.0, 64.0, 64.0, zo, z, 0.0f, 0.0f, 0.0f);
+        CHECK(a.lean > 40.0f && a.lean < 80.0f && closeTo(a.lean2, 0.0, 0.5));
+        CHECK(falcon::capeAngles(walking, 1.0f, 5.0, 5.0, 64.0, 64.0, zo, z, 0.0f, 0.0f, 1.0f).lean == 0.0f);  // (in a glide it lies flat)
+        // walking backwards (facing the other way) the cape hangs forward: the lean cannot be negative
+        CHECK(falcon::capeAngles(walking, 1.0f, 5.0, 5.0, 64.0, 64.0, zo, z, 180.0f, 180.0f, 0.0f).lean == 0.0f);
+    }
+    {  // a step to the side shows in the sideways swing, and the swing is limited to 20 degrees
+        CloakState side;
+        double x = 5.0, xo = 5.0;
+        for (int i = 0; i < 40; ++i) {
+            xo = x;
+            x += 0.2;
+            side.tick(x, 64.0, 5.0, 0.2, 0.0, true);
+        }
+        a = falcon::capeAngles(side, 1.0f, xo, x, 64.0, 64.0, 5.0, 5.0, 0.0f, 0.0f, 0.0f);
+        CHECK(std::abs(a.lean2) > 5.0f && std::abs(a.lean2) <= 20.0f);
+    }
+    {  // falling: the point is left above the body, lifting the cape (to 32 at most)
+        CloakState fall;
+        double y = 64.0, yo = 64.0;
+        for (int i = 0; i < 20; ++i) {
+            yo = y;
+            y -= 1.0;
+            fall.tick(5.0, y, 5.0, 0.0, 0.0, false);
+        }
+        a = falcon::capeAngles(fall, 1.0f, 5.0, 5.0, yo, y, 5.0, 5.0, 0.0f, 0.0f, 0.0f);
+        CHECK(a.flap > 20.0f && a.flap <= 32.0f);
+    }
+    {  // teleported far: the point comes along (it is not left more than ten blocks away)
+        CloakState jump;
+        jump.tick(0.0, 64.0, 0.0, 0.0, 0.0, true);
+        jump.tick(500.0, 64.0, 0.0, 0.0, 0.0, true);
+        CHECK(std::abs(jump.x - 500.0) < 500.0 * 0.26);
+    }
+}
+
 void test_player_physics() {
     test_player_input_and_walking();
     test_player_jump_and_fall();
     test_player_flying();
     test_player_gliding();
+    test_cape();
     test_player_sneak_edge_and_poses();
     test_player_stepping();
     test_player_fluids();

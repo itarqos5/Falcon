@@ -56,6 +56,9 @@ struct BodyPose {
     float limbScale = 1.0f;
     float hurt = 0.0f;           // 1 while the red flash of a hit shows
     float deathAngle = 0.0f;     // how far a dying body has fallen over, degrees
+    // The cape (the account's, a 64x32 picture): null for none; how it hangs and swings (AvatarRenderState.capeFlap / capeLean / capeLean2, degrees). It is not drawn over elytra.
+    const Texture2D* cape = nullptr;
+    float capeFlap = 0.0f, capeLean = 0.0f, capeLean2 = 0.0f;
     bool elytra = false;         // elytra are worn: the wings are drawn, held as the three angles say (ElytraAnimationState)
     float elytraX = 0.2617994f, elytraY = 0.0f, elytraZ = -0.2617994f;
 };
@@ -89,6 +92,8 @@ private:
     std::array<bool, 4> haveArmorSlim_{};
     std::map<int, std::unique_ptr<Texture2D>> skins_;  // the default skins, loaded when a player wears one; null for one that cannot be read
     const Texture2D& skinTexture(int index);
+    EntityPart capeModel_;          // the cape (minecraft:player#cape)
+    bool haveCape_ = false;
     EntityPart elytraModel_;        // the wings (minecraft:elytra#main)
     bool haveElytra_ = false;
     std::unique_ptr<Texture2D> elytraTexture_;
