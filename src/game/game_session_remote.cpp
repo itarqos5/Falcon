@@ -60,8 +60,8 @@ void drawStyled(GuiGraphics& g, const StyledText& text, float x, float y, std::u
     }
 }
 
-// The number of minecraft:player in the entity type registry (registries.json of the game's data).
-int playerEntityType(const std::filesystem::path& dataRoot) {
+// The number of an entity type in the entity type registry (registries.json of the game's data).
+int entityTypeNumber(const std::filesystem::path& dataRoot, const char* name) {
     std::ifstream in(dataRoot / "registries.json", std::ios::binary);
     if (!in) return -1;
     const nlohmann::json doc = nlohmann::json::parse(in, nullptr, false);
@@ -70,9 +70,9 @@ int playerEntityType(const std::filesystem::path& dataRoot) {
     if (registry == doc.end()) return -1;
     const auto entries = registry->find("entries");
     if (entries == registry->end()) return -1;
-    const auto player = entries->find("minecraft:player");
-    if (player == entries->end()) return -1;
-    return player->value("protocol_id", -1);
+    const auto entry = entries->find(name);
+    if (entry == entries->end()) return -1;
+    return entry->value("protocol_id", -1);
 }
 
 // The names of the sound events by their number (registries.json), without the namespace.
@@ -146,7 +146,8 @@ void GameSession::syncCreativeSlots() {
 
 bool GameSession::connectRemote(const std::string& host, int port, const std::string& username, std::string& error) {
     remote_ = std::make_unique<net::MultiplayerClient>(*registry_);
-    remote_->setPlayerEntityType(playerEntityType(dataRoot_));
+    remote_->setPlayerEntityType(entityTypeNumber(dataRoot_, "minecraft:player"));
+    remote_->setItemEntityType(entityTypeNumber(dataRoot_, "minecraft:item"));
     remote_->setComponentIds(componentIds(dataRoot_));
     remote_->setSoundNames(soundEventNames(dataRoot_));
     physics_.reset();  // the server runs the world: no falling blocks, fire, redstone or random ticks of ours on its chunks
@@ -247,6 +248,27 @@ bool GameSession::connectRemote(const std::string& host, int port, const std::st
 void GameSession::pumpRemote() {
     if (!remote_) return;
     remote_->pump(remoteHandler_);
+    {  // the items lying about, as the server has them, in the place where the world's own items are drawn from
+        std::vector<ItemEntity>& items = itemEntities_.items();
+        items.clear();
+        for (const auto& [id, item] : remote_->items()) {
+            if (item.stack.isEmpty()) continue;
+            ItemEntity e;
+            e.stack = item.stack;
+            e.x = item.x;
+            e.y = item.y;
+            e.z = item.z;
+            e.xo = item.xo;
+            e.yo = item.yo;
+            e.zo = item.zo;
+            e.age = item.age;
+            e.id = id;
+            e.onGround = item.onGround;
+            e.pickupDelay = 0;
+            e.bobOffset = static_cast<float>(id % 628) * 0.01f;
+            items.push_back(e);
+        }
+    }
     if (remote_->closed() && remoteLost_.empty()) remoteLost_ = remote_->closeReason();
     // The world is on the screen: the server may now take the player's movement (ServerboundPlayerLoadedPacket).
     if (ready_ && !loadedSent_ && remote_->inPlay() && remoteTeleported_) {

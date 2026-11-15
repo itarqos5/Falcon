@@ -72,6 +72,30 @@ int inventorySlotOfMenu(int menu) {
 
 }  // namespace
 
+// Steps over a value of entity data by the number of its kind (EntityDataSerializers, in the order they are registered); false for a kind whose layout is not known here.
+bool skipEntityDataValue(int serializer, Reader& r) {
+    switch (serializer) {
+        case 0: r.u8(); return r.ok;                                            // byte
+        case 1: r.varint(); return r.ok;                                        // int
+        case 2: r.varlong(); return r.ok;                                       // long
+        case 3: r.f32(); return r.ok;                                           // float
+        case 4: (void)r.string(); return r.ok;                                  // string
+        case 5: (void)readNetworkNbt(r); return r.ok;                           // component
+        case 6: if (r.boolean()) (void)readNetworkNbt(r); return r.ok;         // optional component
+        case 8: r.u8(); return r.ok;                                            // boolean
+        case 9: r.f32(); r.f32(); r.f32(); return r.ok;                         // rotations
+        case 10: r.i64(); return r.ok;                                          // block position
+        case 11: if (r.boolean()) r.i64(); return r.ok;                         // optional block position
+        case 12: r.varint(); return r.ok;                                       // direction
+        case 13: if (r.boolean()) r.skip(16); return r.ok;                      // optional living entity reference (a UUID)
+        case 14: r.varint(); return r.ok;                                       // block state
+        case 15: r.varint(); return r.ok;                                       // optional block state
+        case 19: r.varint(); return r.ok;                                       // optional unsigned int
+        case 20: r.varint(); return r.ok;                                       // pose
+        default: return false;
+    }
+}
+
 int defaultSkinOf(const Uuid& id) {
     std::uint64_t msb = 0, lsb = 0;
     for (int i = 0; i < 8; ++i) {
@@ -283,6 +307,12 @@ bool MultiplayerClient::nameTagVisible(const Uuid& id) const {
 }
 
 void MultiplayerClient::tickPlayers() {
+    for (auto& [id, item] : items_) {
+        item.xo = item.x;
+        item.yo = item.y;
+        item.zo = item.z;
+        ++item.age;
+    }
     for (auto& [id, p] : players_) {
         p.yawO = p.yaw;
         p.pitchO = p.pitch;
@@ -453,14 +483,24 @@ void MultiplayerClient::handlePlay(const Packet& p, RemoteHandler& h) {
             if (r.ok) sendContainerClose(container);
             break;
         }
-        case 101: {  // set_entity_data: of what comes, the first entry (the flags every entity has) says whether a player sneaks
+        case 101: {  // set_entity_data: entries of (index, kind of value, value) up to 0xFF; what is read here is the flags every entity has (a player sneaks, burns) and the stack of an item
             const int entity = r.varint();
-            const int index = r.u8();
-            const int serializer = r.varint();
-            if (r.ok && index == 0 && serializer == 0) {
-                const int flags = r.u8();
-                if (const auto it = players_.find(entity); it != players_.end() && r.ok) it->second.sneaking = (flags & 2) != 0;
-                if (entity == selfEntity_ && r.ok && h.selfFlags) h.selfFlags(flags);
+            while (r.ok) {
+                const int index = r.u8();
+                if (index == 0xFF || !r.ok) break;
+                const int serializer = r.varint();
+                if (serializer == 0 && index == 0) {
+                    const int flags = r.u8();
+                    if (const auto it = players_.find(entity); it != players_.end() && r.ok) it->second.sneaking = (flags & 2) != 0;
+                    if (entity == selfEntity_ && r.ok && h.selfFlags) h.selfFlags(flags);
+                } else if (serializer == 7) {  // an item stack (the item of an item entity is entry 8)
+                    bool known = true;
+                    const ItemStack stack = readItemStack(r, componentIds_, known);
+                    if (const auto item = items_.find(entity); item != items_.end() && index == 8 && r.ok) item->second.stack = stack;
+                    if (!known) break;
+                } else if (!skipEntityDataValue(serializer, r)) {
+                    break;  // a kind of value whose layout is not known here: the rest of the entries cannot be told apart
+                }
             }
             break;
         }
@@ -607,11 +647,28 @@ void MultiplayerClient::handlePlay(const Packet& p, RemoteHandler& h) {
             pl.yaw = pl.yawO = angleOf(r.i8());
             pl.headYaw = pl.headYawO = angleOf(r.i8());
             if (r.ok && type == playerType_ && id != selfEntity_) players_[id] = pl;
+            if (r.ok && type == itemType_) {
+                RemoteItem item;
+                item.entityId = id;
+                item.x = item.xo = pl.x;
+                item.y = item.yo = pl.y;
+                item.z = item.zo = pl.z;
+                items_[id] = item;
+            }
             break;
         }
         case 78: {  // remove_entities
             const int n = r.varint();
-            for (int i = 0; i < n && r.ok; ++i) players_.erase(r.varint());
+            for (int i = 0; i < n && r.ok; ++i) {
+                const int gone = r.varint();
+                players_.erase(gone);
+                items_.erase(gone);
+            }
+            break;
+        }
+        case 127: {  // take_item_entity: an item was picked up (by anyone): it is gone
+            const int item = r.varint();
+            if (r.ok) items_.erase(item);
             break;
         }
         case 54:
@@ -619,12 +676,18 @@ void MultiplayerClient::handlePlay(const Packet& p, RemoteHandler& h) {
         case 57: {  // move_entity_pos, move_entity_pos_rot, move_entity_rot
             const int id = r.varint();
             const auto it = players_.find(id);
+            const auto item = items_.find(id);
             if (p.id != 57) {
                 const double dx = r.i16() / 4096.0, dy = r.i16() / 4096.0, dz = r.i16() / 4096.0;
                 if (it != players_.end() && r.ok) {
                     it->second.x += dx;
                     it->second.y += dy;
                     it->second.z += dz;
+                }
+                if (item != items_.end() && r.ok) {
+                    item->second.x += dx;
+                    item->second.y += dy;
+                    item->second.z += dz;
                 }
             }
             if (p.id != 54) {
@@ -634,7 +697,9 @@ void MultiplayerClient::handlePlay(const Packet& p, RemoteHandler& h) {
                     it->second.pitch = pitch;
                 }
             }
-            if (it != players_.end()) it->second.onGround = r.boolean();
+            const bool onGround = r.boolean();
+            if (it != players_.end()) it->second.onGround = onGround;
+            if (item != items_.end()) item->second.onGround = onGround;
             break;
         }
         case 128: {  // teleport_entity (entity_position_sync has its own kind of position: not followed)
@@ -647,6 +712,11 @@ void MultiplayerClient::handlePlay(const Packet& p, RemoteHandler& h) {
                 it->second.z = m.z;
                 it->second.yaw = m.yaw;
                 it->second.pitch = m.pitch;
+            }
+            if (const auto item = items_.find(id); item != items_.end() && r.ok) {
+                item->second.x = m.x;
+                item->second.y = m.y;
+                item->second.z = m.z;
             }
             break;
         }

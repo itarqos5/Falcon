@@ -154,6 +154,26 @@ void test_default_skins() {
     CHECK(defaultSkinOf(id) == 16);
 }
 
+// Entity data values of the kinds whose layout is known are stepped over; one of another kind stops the reading.
+void test_entity_data_skipping() {
+    Writer w;
+    w.u8(5);  // a byte (kind 0)
+    w.varint(300);  // an int (kind 1)
+    w.string("abc");  // a string (kind 4)
+    w.boolean(false);  // an optional component that is absent (kind 6)
+    w.boolean(true);  // an optional block position that is there (kind 11)
+    w.i64(123456);
+    w.varint(77);  // the marker after them all
+    Reader r(w.data);
+    CHECK(skipEntityDataValue(0, r));
+    CHECK(skipEntityDataValue(1, r));
+    CHECK(skipEntityDataValue(4, r));
+    CHECK(skipEntityDataValue(6, r));
+    CHECK(skipEntityDataValue(11, r));
+    CHECK(r.varint() == 77);
+    CHECK(!skipEntityDataValue(18, r));  // villager data: not known here
+}
+
 }  // namespace
 
 int main() {
@@ -161,6 +181,7 @@ int main() {
     test_reader_runs_out();
     test_item_stacks();
     test_default_skins();
+    test_entity_data_skipping();
     if (g_failures != 0) {
         std::cerr << g_failures << " check(s) failed\n";
         return 1;

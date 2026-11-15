@@ -21,6 +21,8 @@ using Uuid = std::array<std::uint8_t, 16>;
 
 // The default skin of a player (PlayerSkin.get(UUID): the hash of the UUID, modulo the 18 skins; 0-8 slim, 9-17 wide) as BodyPose::skin counts them.
 [[nodiscard]] int defaultSkinOf(const Uuid& id);
+// Steps over one value of entity data by the number of its kind; false when that kind's layout is not known (the rest of the entries cannot then be read).
+[[nodiscard]] bool skipEntityDataValue(int serializer, Reader& r);
 
 // One line of the player list (Tab).
 struct TabEntry {
@@ -45,6 +47,16 @@ struct RemotePlayer {
     bool sneaking = false;
     float swing = 0.0f;       // 0..1 through an arm swing, 0 = none
     float walkPosition = 0.0f, walkSpeed = 0.0f, walkSpeedO = 0.0f;
+};
+
+// An item lying in the world (an item entity the server tells about).
+struct RemoteItem {
+    int entityId = 0;
+    ItemStack stack;
+    double x = 0, y = 0, z = 0;
+    double xo = 0, yo = 0, zo = 0;
+    int age = 0;  // ticks since it appeared (it bobs and spins by this)
+    bool onGround = false;
 };
 
 // A scoreboard team: its prefix, suffix and colour go round the names of its members (the name tags and the player list).
@@ -102,6 +114,7 @@ public:
     void close();
 
     void setPlayerEntityType(int type) { playerType_ = type; }  // the number of minecraft:player in the entity type registry
+    void setItemEntityType(int type) { itemType_ = type; }      // and of minecraft:item
     void setComponentIds(const ComponentIds& ids) { componentIds_ = ids; }
     void setSoundNames(std::vector<std::string> names) { soundNames_ = std::move(names); }  // by the number the game gives each sound event
     [[nodiscard]] Phase phase() const { return phase_; }
@@ -111,6 +124,7 @@ public:
     [[nodiscard]] int selfEntity() const { return selfEntity_; }
     [[nodiscard]] const Uuid& selfId() const { return selfId_; }
     [[nodiscard]] const std::map<int, RemotePlayer>& players() const { return players_; }
+    [[nodiscard]] const std::map<int, RemoteItem>& items() const { return items_; }
     [[nodiscard]] std::vector<TabEntry> tabList() const;  // listed entries, in the order the game shows them
     [[nodiscard]] const StyledText& tabHeader() const { return tabHeader_; }
     [[nodiscard]] const StyledText& tabFooter() const { return tabFooter_; }
@@ -154,6 +168,8 @@ private:
     Uuid selfId_{};
     int selfEntity_ = -1;
     int playerType_ = -1;  // the entity type number of a player
+    int itemType_ = -1;    // and of an item
+    std::map<int, RemoteItem> items_;
     ComponentIds componentIds_;
     std::vector<std::string> soundNames_;
     int sequence_ = 0;

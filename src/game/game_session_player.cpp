@@ -74,7 +74,7 @@ void GameSession::tickPlayer(double seconds, bool steering) {
         }
         tickHealth();
         tickBurning();
-        if (ready_) itemEntities_.tick(renderer_.level());
+        if (ready_ && !remote_) itemEntities_.tick(renderer_.level());  // (on a server the items are the server's: pumpRemote puts them there)
         // The water that flows: its updates that are due this tick.
         if (!remote_) fluids_.tick(renderer_.level(), [this](int bx, int by, int bz, Block b) { return renderer_.setBlock(bx, by, bz, b); });
         if (ready_ && physics_) physics_->tick();
@@ -348,7 +348,7 @@ void GameSession::tickBurning() {
 
 // Player.aiStep: the items the player's box, grown by a block either side and half a block up and down, touches are taken once their delay is over.
 void GameSession::pickUpItems() {
-    if (info_.gameType == 3 || dead_) return;
+    if (info_.gameType == 3 || dead_ || remote_) return;  // (on a server the server takes the items and says what is in the inventory)
     Aabb reach = player_.boundingBox();
     reach = {reach.minX - 1.0, reach.minY - 0.5, reach.minZ - 1.0, reach.maxX + 1.0, reach.maxY + 0.5, reach.maxZ + 1.0};
     for (ItemEntity& e : itemEntities_.items()) {
