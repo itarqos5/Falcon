@@ -71,6 +71,8 @@ public:
     [[nodiscard]] bool hasPending() const { return pendingFlag_.load(std::memory_order_acquire); }
     // Main thread, with a GL context: makes the texture array hold every picture loaded so far.
     void uploadPending();
+    // Main thread, with a GL context: puts the right frame into every animated picture (fire, water, lava ...) for this moment, `ticks` being game ticks (20 a second).
+    void animate(double ticks);
     void bindTextures(unsigned unit) const;
     [[nodiscard]] std::size_t gpuBytes() const { return array_.gpuBytes(); }
 
@@ -144,6 +146,15 @@ private:
     mutable std::vector<std::vector<Image>> layerMips_;  // per layer: its mip chain made the way the game makes it (level 0 is layers_[i])
     mutable std::vector<RenderType> layerTypes_;
     mutable std::size_t uploaded_ = 0;
+    // A picture that is a strip of frames (the .mcmeta animation): each frame with its mip levels, the order they play in and for how many ticks each.
+    struct Animation {
+        std::uint16_t layer = 0;
+        std::vector<std::vector<Image>> frames;
+        std::vector<int> order, ticks;
+        int total = 0;
+        int shown = -1;
+    };
+    mutable std::vector<Animation> animations_;
     mutable std::atomic<bool> pendingFlag_{false};
     TextureArray2D array_;
     int arrayCapacity_ = 0;

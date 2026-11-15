@@ -1000,6 +1000,7 @@ void WorldRenderer::measureGpu(bool begin) {
 
 void WorldRenderer::render(const Camera& camera, int framebufferWidth, int framebufferHeight, int renderDistance) {
     measureGpu(true);
+    models_.animate(std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count() * 20.0);  // water, lava and fire move
     const float aspect = static_cast<float>(framebufferWidth) / static_cast<float>(std::max(1, framebufferHeight));
     const float farPlane = std::max(256.0f, static_cast<float>(renderDistance + 4) * 16.0f * 1.5f);
     const Matrix4f view = cameraView(camera);

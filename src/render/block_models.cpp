@@ -283,8 +283,12 @@ std::uint16_t BlockModels::layerFor(const std::string& texture) const {
     if (const auto it = layerOf_.find(name); it != layerOf_.end()) return it->second;
     if (layers_.size() >= 4000) return 0;
     Image tile;
+    Image strip;  // the whole picture, when it is a strip of animation frames
     if (const auto bytes = resources_.readBytes(locationOf(name, "textures/", ".png"))) {
-        if (auto image = decodePng(*bytes); image && !image->empty()) tile = resizeNearest(firstFrame(*image), tile_);
+        if (auto image = decodePng(*bytes); image && !image->empty()) {
+            tile = resizeNearest(firstFrame(*image), tile_);
+            if (image->height > image->width && image->width > 0) strip = std::move(*image);
+        }
     }
     const bool missing = tile.empty();
     if (missing) {
@@ -299,16 +303,48 @@ std::uint16_t BlockModels::layerFor(const std::string& texture) const {
     // texels so no black mixes into the edges.
     MipmapStrategy strategy = MipmapStrategy::Auto;
     float alphaBias = 0.0f;
+    json animation;  // the .mcmeta "animation" section, if there is one
     if (!missing) {
         if (const auto meta = resources_.readText(locationOf(name, "textures/", ".png.mcmeta"))) {
             const json doc = json::parse(*meta, nullptr, false, true);
             if (doc.is_object()) {
+                if (const auto a = doc.find("animation"); a != doc.end() && a->is_object()) animation = *a;
                 if (const auto t = doc.find("texture"); t != doc.end() && t->is_object()) {
                     if (const auto s = t->find("mipmap_strategy"); s != t->end() && s->is_string()) strategy = parseMipmapStrategy(s->get<std::string>());
                     if (const auto b = t->find("alpha_cutoff_bias"); b != t->end() && b->is_number()) alphaBias = b->get<float>();
                 }
             }
         }
+    }
+    // A picture that is a strip of frames plays them (water, lava, fire ...): every frame is made ready with its mip levels, animate() swaps them in.
+    if (!missing && !strip.empty() && strip.height >= strip.width * 2) {
+        Animation anim;
+        anim.layer = layer;
+        const int frameCount = strip.height / strip.width;
+        for (int f = 0; f < frameCount; ++f) {
+            Image frame;
+            frame.width = frame.height = strip.width;
+            const std::size_t bytes = static_cast<std::size_t>(strip.width) * static_cast<std::size_t>(strip.width) * 4;
+            frame.rgba.assign(strip.rgba.begin() + static_cast<std::ptrdiff_t>(bytes * static_cast<std::size_t>(f)), strip.rgba.begin() + static_cast<std::ptrdiff_t>(bytes * static_cast<std::size_t>(f + 1)));
+            anim.frames.push_back(generateMipLevels(resizeNearest(frame, tile_), kMipLevels, strategy, alphaBias));
+        }
+        const int defaultTime = std::max(1, animation.is_object() ? animation.value("frametime", 1) : 1);
+        if (animation.is_object() && animation.contains("frames") && animation["frames"].is_array()) {
+            for (const json& entry : animation["frames"]) {
+                const int index = entry.is_number_integer() ? entry.get<int>() : entry.is_object() ? entry.value("index", 0) : 0;
+                if (index < 0 || index >= frameCount) continue;
+                anim.order.push_back(index);
+                anim.ticks.push_back(std::max(1, entry.is_object() ? entry.value("time", defaultTime) : defaultTime));
+            }
+        }
+        if (anim.order.empty()) {
+            for (int f = 0; f < frameCount; ++f) {
+                anim.order.push_back(f);
+                anim.ticks.push_back(defaultTime);
+            }
+        }
+        for (const int t : anim.ticks) anim.total += t;
+        animations_.push_back(std::move(anim));
     }
     std::vector<Image> mips = generateMipLevels(std::move(tile), kMipLevels, strategy, alphaBias);
     layerTypes_.push_back(kind);
@@ -350,6 +386,21 @@ void BlockModels::uploadPending() {
     }
     uploaded_ = layers_.size();
     pendingFlag_.store(false, std::memory_order_release);
+}
+
+void BlockModels::animate(double ticks) {
+    std::lock_guard<std::mutex> lock(textureMutex_);
+    for (Animation& a : animations_) {
+        if (static_cast<std::size_t>(a.layer) >= uploaded_ || a.total <= 0) continue;
+        int t = static_cast<int>(std::fmod(ticks, static_cast<double>(a.total)));
+        std::size_t shown = 0;
+        for (; shown + 1 < a.order.size() && t >= a.ticks[shown]; ++shown) t -= a.ticks[shown];
+        if (static_cast<int>(shown) == a.shown) continue;
+        a.shown = static_cast<int>(shown);
+        const std::vector<Image>& frame = a.frames[static_cast<std::size_t>(a.order[shown])];
+        array_.setLayer(a.layer, frame[0]);
+        array_.setLayerMips(a.layer, frame);
+    }
 }
 
 void BlockModels::bindTextures(unsigned unit) const { array_.bind(unit); }
