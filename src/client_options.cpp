@@ -68,7 +68,7 @@ static std::string nextValue(int& i, int argc, const char* const* argv) {
 std::string usageText() {
     return "Usage: Falcon [options]\n"
            "  --assets <dir>          Unpacked game assets (the folder that contains 'minecraft/').\n"
-           "                          Default: $FALCON_ASSETS_DIR, then the newest horizon-launcher 26.3 assets.\n"
+           "                          Default: $FALCON_ASSETS_DIR, then the newest horizon-launcher 26.3 assets (development).\n"
            "  --size <W>x<H>          Initial window size (default 854x480)\n"
            "  --capture <file.png>    Save one frame as a PNG and exit\n"
            "  --capture-after <s>     Seconds to run before capturing (default 4)\n"
@@ -81,7 +81,7 @@ std::string usageText() {
            "  --audio-devices         List the output devices, switch to each one silently, report, and exit\n"
            "  --language <code>       Start in this language (e.g. de_de, fr_fr, ja_jp)\n"
            "  --borderless            No title bar or frame; the top edge of the window moves it (F11 still toggles fullscreen)\n"
-           "  --data <dir>            The folder with the game's exported data (registries.json, gameplay-facts.json, ...);\n"
+           "  --data <dir>            The folder with Falcon's data tables (registries.json, gameplay-facts.json, ...) and the game's data/;\n"
            "                          by default the folder that holds the assets folder\n"
            "  --username <name>       The player's name (shown in chat); the launcher passes the account's\n"
            "  --uuid <id>             The player's account id\n"

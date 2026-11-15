@@ -46,8 +46,12 @@ night cycle. Vulkan is on the Graphics API button but only OpenGL draws (see `do
 Falcon is an independent project. It is **not** made by or affiliated with Mojang or Microsoft; Minecraft is their trademark.
 This repository contains **no Minecraft assets, code or data**: no textures, sounds, language files, models, jar files, worlds or
 generated game data (the `.gitignore` keeps them out). Falcon reads the files of a copy of the game **you** have installed, at run time
-(see "Game assets"), and never opens the client jar. Without a copy of the game it cannot run, and the tests that need the game's
-data skip themselves.
+(see "Game assets"). Without a copy of the game it cannot run, and the tests that need the game's data skip themselves.
+
+The one thing of the game's that is published is not in the repository but on the **GitHub release**: `falcon-data-26.3.zip`, about 2.4 MB of tables that the singleplayer world reads
+(block and item numbers, block shapes, facts about the game's data; the files are listed in `launcher/src/game_files.cpp`, `GameFiles::dataTableFiles`). They were made from the
+game's data by an exporter, and contain no textures, sounds or code. The launcher downloads them and refuses a zip whose SHA-256 is not the one it carries (`launcher/src/data_tables.hpp`;
+`tools/make_data_tables.ps1` makes the zip and writes the hash). Before 1.2.0 they had to come from another launcher's export on the same PC.
 
 ## Game assets
 
@@ -58,7 +62,7 @@ On startup it looks for assets in this order:
 
 1. `--assets <dir>`
 2. the `FALCON_ASSETS_DIR` environment variable
-3. the newest `26.3\assets` tree under `%APPDATA%\horizon-launcher\versions\*\.local\horizon-client\`
+3. the newest `26.3\assets` tree under `%APPDATA%\horizon-launcher\versions\*\.local\horizon-client\` (a fallback for development; the launcher passes `--assets` itself)
 
 A plain `.minecraft` folder is not enough: the title screen needs the button sprites, logo, font
 sheets and `en_us.json`, which the launcher keeps inside the client jar rather than in
@@ -243,6 +247,12 @@ files, and `splashes.txt`. Loading is built not to be noticed:
 - Measured here: High Contrast (4 files) 4.5 ms in the background and 1 ms on the main thread; a
   pack that replaces the whole panorama plus the language file 43 ms and 11 ms (worst single frame
   3.2 ms). The `[falcon] resource packs applied` log line reports it for every load.
+
+## Against vanilla
+
+On one PC, in the same world at render distance 8, Falcon is in the world after about 5 s (9 s on its first start) where vanilla 26.3 took about 15 s, and uses about 245 MB where vanilla used about 1.5 GB.
+No frame rate comparison was run, and vanilla does more work (structures, mobs, particles). The method, the caveats and the scripts are in `docs/vs-vanilla.md` and `tools/vs_vanilla`; the
+site in `website/` shows the same numbers.
 
 ## Start-up speed
 
@@ -646,4 +656,4 @@ packs is still to do. Only `en_us` exists (no language picker).
 ## License
 
 Falcon is licensed under the [Apache License, Version 2.0](LICENSE). It contains no Minecraft assets or game code: it reads the files of a copy of
-the game that the player owns. Minecraft is a trademark of Mojang AB / Microsoft; Falcon is not affiliated with them.
+the game that the player owns (and the data tables of the release, see above). Minecraft is a trademark of Mojang AB / Microsoft; Falcon is not affiliated with them.

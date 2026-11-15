@@ -8,7 +8,7 @@ A small native Windows launcher for Falcon, written in C++20 with a React interf
 - **Its own title bar.** The window has no system frame: a custom title bar drags the window, with minimise and close buttons, and Windows still draws the shadow and rounded corners.
 - **Sign-in is Microsoft's own page**, opened in a window of the launcher with the Minecraft launcher's public client id (see below). No code to type, no Azure registration. Your password never goes through Falcon.
 - **Checks that you own Minecraft: Java Edition** before it does anything else, and shows your skin's head and your player name.
-- **Pressing Play** downloads the game's assets from Mojang the first time (the client jar's `assets/` and `data/`, plus the sounds and languages, all hash-verified), then starts Falcon with your account's name and a 1280x720 window. (The launcher's own window has no system title bar, it draws its own; the game keeps an ordinary one.)
+- **Pressing Play** downloads the game's assets from Mojang the first time (the client jar's `assets/` and `data/`, plus the sounds and languages, all hash-verified), and Falcon's data tables (one zip of about 2.4 MB from Falcon's own GitHub release, checked against a SHA-256 the launcher carries), then starts Falcon with your account's name and a 1280x720 window. (The launcher's own window has no system title bar, it draws its own; the game keeps an ordinary one.)
 
 The interface follows the layout of launchers such as Modrinth App: an icon sidebar (Home, Settings, and your account at the bottom), a Falcon page with an Overview and a Logs tab, and a Settings page.
 
@@ -46,6 +46,7 @@ The client id is the **Minecraft launcher's own public id, `00000000402b5328`**.
 | --- | --- |
 | `client\<id>\Falcon.exe` | the bundled client, written during setup |
 | `game\<version>\assets`, `data` | the game's files from Mojang |
+| `game\<version>\*.json`, `*.nbt`, `biome-parameters\` | Falcon's data tables, from the zip on Falcon's GitHub release (`tables.json` holds the hash they came from) |
 | `account.bin` | the sign-in token, encrypted with Windows DPAPI for your user |
 | `launcher.json` | settings |
 | `webview\` | the web view's profile |
@@ -72,6 +73,5 @@ Measured on a Ryzen 5 5600G:
 
 ## Known gaps
 
-- **The game's gameplay data.** Falcon's menus and its look come from the game's own `assets/`, which the launcher downloads. Its singleplayer world also reads block, item, shape and recipe tables (`registries.json`, `gameplay-facts.json`, `model-states.json`, …) that are exported from a Minecraft install by horizon-launcher. Mojang's downloads do not contain them, so the launcher **looks for the newest complete export on the PC** (`%APPDATA%\horizon-launcher\versions\*\.local\horizon-client\<version>`, or the launcher's own `game\<version>` folder) and starts the game with `--data` pointing at it. On a PC that has one, worlds open. On a PC without one, the launcher says so on the Falcon page and opening a world shows a "Could not open the world" message until Falcon derives that data itself.
 - The sign-in against the real Microsoft, Xbox and Mojang services is exercised here only against fakes: the first real sign-in on a machine is the real test. If Xbox rejects the way the Microsoft token is presented, the launcher tries the two usual ticket formats before it gives up.
 - Falcon reads `--username` and `--uuid` for the chat name. There is no online play, so the access token is not passed to it.
