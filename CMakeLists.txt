@@ -237,6 +237,7 @@ add_library(falcon_core
     src/world/mesher.cpp
     src/world/level_info.cpp
     src/world/player.cpp
+    src/world/player_movement.cpp
     src/world/item_entity.cpp
     src/world/world_save.cpp
     src/world/collision_shapes.cpp
