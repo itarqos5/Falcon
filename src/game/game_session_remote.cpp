@@ -268,6 +268,24 @@ bool GameSession::connectRemote(const std::string& host, int port, const std::st
         player_.vz = (relative & 128) ? player_.vz + dz : dz;
         remoteTeleported_ = true;
     };
+    h.moveVehicle = [this](double x, double y, double z, float yaw, float pitch) {  // ClientPacketListener.handleMoveVehicle: the server puts the boat that is driven here somewhere
+        (void)pitch;
+        if (!boat_ || remote_->vehicle() != boatEntity_) return;
+        const double dx = x - boat_->x, dy = y - boat_->y, dz = z - boat_->z;
+        if (std::sqrt(dx * dx + dy * dy + dz * dz) > 9.999999747378752E-6) {
+            boat_->x = x;
+            boat_->y = y;
+            boat_->z = z;
+            boat_->yaw = yaw;
+            if (net::RemotePlayer* e = remote_->entity(boatEntity_)) {
+                e->x = e->xo = x;
+                e->y = e->yo = y;
+                e->z = e->zo = z;
+                e->yaw = e->yawO = yaw;
+            }
+        }
+        remote_->sendMoveVehicle(boat_->x, boat_->y, boat_->z, boat_->yaw, 0.0f, boat_->onGround);  // (and either way, where it is is told back)
+    };
     h.chat = [this](const StyledText& text, bool overlay) {
         (void)overlay;
         addChatMessage(toLegacy(text));
@@ -648,7 +666,7 @@ void GameSession::pumpRemote() {
 }
 
 // What LocalPlayer.tick says to the server: the keys when they changed, the sprint, the position, and that the tick is over.
-void GameSession::sendRemoteTick(const PlayerInput& input) {
+void GameSession::sendRemoteTick(const PlayerInput& input, bool riding, const BoatBody* steered) {
     if (!remote_ || !remote_->inPlay() || !remoteTeleported_) return;
     const int flags = (input.forward ? 1 : 0) | (input.backward ? 2 : 0) | (input.left ? 4 : 0) | (input.right ? 8 : 0) | (input.jump ? 16 : 0) | (input.shift ? 32 : 0) | (input.sprint ? 64 : 0);
     if (flags != lastInputFlags_) {
@@ -664,6 +682,13 @@ void GameSession::sendRemoteTick(const PlayerInput& input) {
         lastHeldSent_ = inventory_.selected;
     }
     syncCreativeSlots();
+    if (riding) {  // ClientboundSetPassengers: the rider's position is the vehicle's; the server is told only how it looks round, and the vehicle's place when the rider steers it
+        remote_->sendRotation(player_.yaw, player_.pitch, player_.onGround, player_.horizontalCollision);
+        if (steered != nullptr) remote_->sendMoveVehicle(steered->x, steered->y, steered->z, steered->yaw, 0.0f, steered->onGround);
+        remote_->sendTickEnd();
+        remote_->tickPlayers();
+        return;
+    }
     net::MoveState state;
     state.x = player_.x;
     state.y = player_.y;
@@ -675,6 +700,110 @@ void GameSession::sendRemoteTick(const PlayerInput& input) {
     remote_->sendMovement(state);
     remote_->sendTickEnd();
     remote_->tickPlayers();
+}
+
+bool GameSession::riding() const {
+    return remote_ && remoteTeleported_ && remote_->vehicle() >= 0 && remote_->players().count(remote_->vehicle()) != 0;
+}
+
+// The player gets off (the server said so, or the vehicle is gone): the boat is no longer this machine's to move.
+void GameSession::leaveVehicle() {
+    if (remote_) remote_->setControlledEntity(-1);
+    boat_.reset();
+    boatEntity_ = -1;
+    ridingEntity_ = -1;
+    player_.vx = player_.vy = player_.vz = 0.0;
+}
+
+void GameSession::clampRiderYaw(float boatYaw) {
+    const auto wrap = [](float degrees) {
+        float d = std::fmod(degrees, 360.0f);
+        if (d >= 180.0f) d -= 360.0f;
+        if (d < -180.0f) d += 360.0f;
+        return d;
+    };
+    const float relative = wrap(player_.yaw - boatYaw);
+    const float clamped = std::clamp(relative, -105.0f, 105.0f);
+    player_.yawO += clamped - relative;
+    player_.yaw += clamped - relative;
+}
+
+// Entity.rideTick for the local player, with the order of the game: the boat moves (and its paddles are told), then the rider is put on the seat and turned along with the boat,
+// then the tick's packets go out.
+void GameSession::tickRiding(const PlayerInput& input) {
+    const int id = remote_->vehicle();
+    net::RemotePlayer* vehicle = remote_->entity(id);
+    if (vehicle == nullptr) return;
+    const std::string* type = remote_->mobName(vehicle->type);
+    const auto ends = [type](const char* tail) {
+        const std::string t = tail;
+        return type != nullptr && type->size() >= t.size() && type->compare(type->size() - t.size(), t.size(), t) == 0;
+    };
+    const bool isBoat = ends("_boat") || ends("_raft"), isRaft = ends("_raft");
+    int index = 0, count = 1;
+    if (const std::vector<int>* riders = remote_->passengersOf(id)) {
+        count = static_cast<int>(riders->size());
+        const auto self = std::find(riders->begin(), riders->end(), remote_->selfEntity());
+        index = self == riders->end() ? 0 : static_cast<int>(self - riders->begin());
+    }
+    const bool steering = isBoat && index == 0;  // (the first rider of a boat drives it)
+    if (id != ridingEntity_) {  // ClientPacketListener.handleSetEntityPassengersPacket: boarding a boat turns the player to the way it points
+        ridingEntity_ = id;
+        if (isBoat) player_.yaw = player_.yawO = vehicle->yaw;
+    }
+    player_.xo = player_.x;
+    player_.yo = player_.y;
+    player_.zo = player_.z;
+    player_.yawO = player_.yaw;
+    player_.pitchO = player_.pitch;
+    player_.vx = player_.vy = player_.vz = 0.0;
+    BoatBody seatBody;  // where the vehicle is: the rider's seat is worked out from it
+    if (steering) {
+        if (!boat_ || boatEntity_ != id) {
+            boat_.emplace();
+            boat_->x = vehicle->x;
+            boat_->y = vehicle->y;
+            boat_->z = vehicle->z;
+            boat_->yaw = vehicle->yaw;
+            boatEntity_ = id;
+            remote_->setControlledEntity(id);
+        }
+        BoatInput keys;
+        keys.left = input.left;
+        keys.right = input.right;
+        keys.up = input.forward;
+        keys.down = input.backward;
+        boat_->tick(renderer_.level(), keys);
+        vehicle->xo = vehicle->x;  // (the frames between two ticks draw it from where it was)
+        vehicle->yo = vehicle->y;
+        vehicle->zo = vehicle->z;
+        vehicle->yawO = vehicle->yaw;
+        vehicle->x = boat_->x;
+        vehicle->y = boat_->y;
+        vehicle->z = boat_->z;
+        vehicle->yaw = boat_->yaw;
+        remote_->sendPaddleBoat(boat_->paddleLeft, boat_->paddleRight);
+        seatBody = *boat_;
+    } else {
+        if (boat_) {  // someone else sits first now
+            remote_->setControlledEntity(-1);
+            boat_.reset();
+            boatEntity_ = -1;
+        }
+        seatBody.x = vehicle->x;
+        seatBody.y = vehicle->y;
+        seatBody.z = vehicle->z;
+        seatBody.yaw = vehicle->yaw;
+    }
+    const std::array<double, 3> seat = seatBody.seat(isRaft, index, count);
+    player_.x = seat[0];
+    player_.y = seat[1];
+    player_.z = seat[2];
+    if (isBoat) {
+        if (steering) player_.yaw += boat_->deltaRotation;  // (AbstractBoat.positionRider: the rider turns with the boat)
+        clampRiderYaw(seatBody.yaw);
+    }
+    sendRemoteTick(input, /*riding=*/true, steering ? &*boat_ : nullptr);
 }
 
 void GameSession::renderRemotePlayers(const std::array<double, 3>& camPos) {

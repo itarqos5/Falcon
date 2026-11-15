@@ -13,6 +13,7 @@
 #include "falcon/game/remote_menu.hpp"
 #include "falcon/render/mob_renderer.hpp"
 #include "falcon/render/player_body.hpp"
+#include "falcon/world/boat.hpp"
 #include "falcon/world/item_entity.hpp"
 #include "falcon/platform/window.hpp"
 #include "falcon/render/block_icons.hpp"
@@ -261,7 +262,15 @@ private:
     void applyGameRule(const std::string& rule, const std::string& value);
     void tickBurning();
     void pumpRemote();
-    void sendRemoteTick(const PlayerInput& input);
+    // What LocalPlayer.sendChanges says each tick. A rider (`riding`) sends how it looks round and nothing of its position; one who steers a boat also sends the boat's place.
+    void sendRemoteTick(const PlayerInput& input, bool riding = false, const BoatBody* steered = nullptr);
+    // A tick of a player who sits in something the server tells of (ClientboundSetPassengersPacket): a boat this player is first to sit in is driven here with the game's own motion
+    // (the server checks what is sent of it); anything else is where the server puts it. The rider is put on its seat either way.
+    void tickRiding(const PlayerInput& input);
+    [[nodiscard]] bool riding() const;
+    void leaveVehicle();
+    // Boat.clampRotation: a rider of a boat looks at most 105 degrees to either side of the way it points.
+    void clampRiderYaw(float boatYaw);
     void renderRemotePlayers(const std::array<double, 3>& camPos);
     void renderTestMobs(const std::array<double, 3>& camPos);
     // The player or mob (or boat) that the line from the eye along the look meets first within `maxDistance`, or -1 (its entity id): what a click hits.
@@ -408,6 +417,9 @@ private:
     bool lastSprintSent_ = false;
     bool loadedSent_ = false;
     bool remoteTeleported_ = false;  // the server has put the player somewhere
+    std::optional<BoatBody> boat_;   // the boat the player steers, worked out here
+    int boatEntity_ = -1;            // its entity number
+    int ridingEntity_ = -1;          // what the player sat in last tick (to see the moment of boarding)
     std::unique_ptr<MiningRules> mining_;
     std::unique_ptr<BlockLoot> loot_;
     double placeCooldown_ = 0.0;

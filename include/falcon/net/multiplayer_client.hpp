@@ -129,6 +129,7 @@ struct RemoteHandler {
     std::function<void(int id, int index, int value)> containerData;
     std::function<void(int id)> containerClose;
     std::function<void(const ItemStack&)> cursor;
+    std::function<void(double x, double y, double z, float yaw, float pitch)> moveVehicle;  // the server puts the vehicle the player drives somewhere (ClientboundMoveVehiclePacket)
     std::function<void(const TradeOffers&)> merchantOffers;  // a villager's window: what it offers
     std::function<void(int slot)> heldSlot;                          // the server picks the hotbar slot in the hand
     std::function<void(const std::string&)> disconnect;
@@ -175,6 +176,18 @@ public:
     [[nodiscard]] int selfEntity() const { return selfEntity_; }
     [[nodiscard]] const Uuid& selfId() const { return selfId_; }
     [[nodiscard]] const std::map<int, RemotePlayer>& players() const { return players_; }
+    [[nodiscard]] RemotePlayer* entity(int id) {
+        const auto it = players_.find(id);
+        return it == players_.end() ? nullptr : &it->second;
+    }
+    // What the player sits in: the entity's number, or -1 (ClientboundSetPassengersPacket says who rides what; the first rider of a vehicle is the one who steers it).
+    [[nodiscard]] int vehicle() const { return vehicle_; }
+    [[nodiscard]] const std::vector<int>* passengersOf(int vehicle) const {
+        const auto it = passengers_.find(vehicle);
+        return it == passengers_.end() ? nullptr : &it->second;
+    }
+    // An entity whose place this machine works out itself (the boat the player drives): what the server says of its movement is not followed, and tickPlayers leaves its last place alone.
+    void setControlledEntity(int id) { controlledEntity_ = id; }
     [[nodiscard]] const std::map<int, RemoteItem>& items() const { return items_; }
     // The skin a player's profile names (null: none, so the default skin by their id), and the skins that finished downloading since the last call.
     [[nodiscard]] const SkinInfo* skinOf(const Uuid& id) const {
@@ -212,6 +225,9 @@ public:
     void sendCreativeSlot(int inventorySlot, const ItemStack& stack);  // creative mode: this slot of the inventory now holds this
     void sendContainerClose(int containerId);
     void sendContainerButton(int containerId, int button);  // a button of a menu (an enchanting table's three offers)
+    void sendRotation(float yaw, float pitch, bool onGround, bool horizontalCollision);  // a rider turns (ServerboundMovePlayerPacket.Rot): every tick, nothing else of the player
+    void sendMoveVehicle(double x, double y, double z, float yaw, float pitch, bool onGround);  // where the vehicle the player drives is (ServerboundMoveVehiclePacket)
+    void sendPaddleBoat(bool left, bool right);  // the paddles of the boat the player drives (ServerboundPaddleBoatPacket)
     void sendSelectTrade(int index);                        // the offer of a villager that is chosen
     void sendRenameItem(const std::string& name);           // what is typed into an anvil's name box
     // A click in a menu (container 0 is the player's own): the slot, the button, the kind (ClickType's number), the slots it changed with what they hold now, the stack on the cursor.
@@ -242,6 +258,9 @@ private:
     std::map<int, std::pair<float, float>> projectilePhysics_;
     std::vector<PaintingVariantInfo> paintingVariants_;
     std::vector<std::string> enchantments_;
+    std::map<int, std::vector<int>> passengers_;
+    int vehicle_ = -1;
+    int controlledEntity_ = -1;
     std::map<int, RemoteItem> items_;
     ComponentIds componentIds_;
     SkinFetcher skins_;

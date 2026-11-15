@@ -406,6 +406,7 @@ void GameSession::applyLook(bool active) {
     const double f = services_.options.mouseSensitivity * 0.6000000238418579 + 0.20000000298023224;
     const double f3x8 = f * f * f * 8.0;
     player_.turn(dx * f3x8 * (services_.options.invertXMouse ? -1.0 : 1.0), dy * f3x8 * (services_.options.invertYMouse ? -1.0 : 1.0));
+    if (boat_ && riding()) clampRiderYaw(boat_->yaw);  // (Entity.turn: the vehicle is told, and a boat holds the rider's head within 105 degrees)
 }
 
 PlayerInput GameSession::sampleInput() const {

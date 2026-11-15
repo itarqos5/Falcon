@@ -432,6 +432,7 @@ void MultiplayerClient::tickPlayers() {
         ++item.age;
     }
     for (auto& [id, p] : players_) {
+        if (id == controlledEntity_) continue;  // (its last place is kept by the one who moves it)
         p.yawO = p.yaw;
         p.pitchO = p.pitch;
         p.headYawO = p.headYaw;
@@ -875,12 +876,33 @@ void MultiplayerClient::handlePlay(const Packet& p, RemoteHandler& h) {
             }
             break;
         }
+        case 109: {  // set_passengers: who rides a vehicle (the game ejects all of them and has the listed ones start riding it again)
+            const int vehicle = r.varint();
+            const int n = r.varint();
+            std::vector<int> riders;
+            for (int i = 0; i < n && r.ok && i < 64; ++i) riders.push_back(r.varint());
+            if (!r.ok) break;
+            const bool mine = std::find(riders.begin(), riders.end(), selfEntity_) != riders.end();
+            if (riders.empty()) passengers_.erase(vehicle);
+            else passengers_[vehicle] = riders;
+            if (mine) vehicle_ = vehicle;
+            else if (vehicle_ == vehicle) vehicle_ = -1;
+            break;
+        }
+        case 58: {  // move_vehicle: the server sets the vehicle the player drives
+            const double x = r.f64(), y = r.f64(), z = r.f64();
+            const float yaw = r.f32(), pitch = r.f32();
+            if (r.ok && h.moveVehicle) h.moveVehicle(x, y, z, yaw, pitch);
+            break;
+        }
         case 78: {  // remove_entities
             const int n = r.varint();
             for (int i = 0; i < n && r.ok; ++i) {
                 const int gone = r.varint();
                 players_.erase(gone);
                 items_.erase(gone);
+                passengers_.erase(gone);
+                if (vehicle_ == gone) vehicle_ = -1;
             }
             break;
         }
@@ -904,7 +926,7 @@ void MultiplayerClient::handlePlay(const Packet& p, RemoteHandler& h) {
         case 55:
         case 57: {  // move_entity_pos, move_entity_pos_rot, move_entity_rot
             const int id = r.varint();
-            const auto it = players_.find(id);
+            const auto it = id == controlledEntity_ ? players_.end() : players_.find(id);  // (the one this machine drives is not moved by the server)
             const auto item = items_.find(id);
             if (p.id != 57) {
                 const double dx = r.i16() / 4096.0, dy = r.i16() / 4096.0, dz = r.i16() / 4096.0;
@@ -934,7 +956,7 @@ void MultiplayerClient::handlePlay(const Packet& p, RemoteHandler& h) {
         case 128: {  // teleport_entity (entity_position_sync has its own kind of position: not followed)
             const int id = r.varint();
             const PositionMoveRotation m = readPositionMoveRotation(r);
-            const auto it = players_.find(id);
+            const auto it = id == controlledEntity_ ? players_.end() : players_.find(id);
             if (it != players_.end() && r.ok) {
                 it->second.x = m.x;
                 it->second.y = m.y;
@@ -1007,6 +1029,37 @@ void MultiplayerClient::sendMovement(const MoveState& s) {
     }
     lastOnGround_ = s.onGround;
     lastHorizontal_ = s.horizontalCollision;
+}
+
+void MultiplayerClient::sendRotation(float yaw, float pitch, bool onGround, bool horizontalCollision) {
+    if (phase_ != Phase::Play) return;
+    Writer w;
+    w.f32(yaw);
+    w.f32(pitch);
+    w.u8((onGround ? 1 : 0) | (horizontalCollision ? 2 : 0));
+    connection_.send(32, w.data);
+    last_.yaw = yaw;  // (what a later movement packet compares with)
+    last_.pitch = pitch;
+}
+
+void MultiplayerClient::sendMoveVehicle(double x, double y, double z, float yaw, float pitch, bool onGround) {
+    if (phase_ != Phase::Play) return;
+    Writer w;
+    w.f64(x);
+    w.f64(y);
+    w.f64(z);
+    w.f32(yaw);
+    w.f32(pitch);
+    w.boolean(onGround);
+    connection_.send(34, w.data);
+}
+
+void MultiplayerClient::sendPaddleBoat(bool left, bool right) {
+    if (phase_ != Phase::Play) return;
+    Writer w;
+    w.boolean(left);
+    w.boolean(right);
+    connection_.send(35, w.data);
 }
 
 void MultiplayerClient::sendInput(int flags) {

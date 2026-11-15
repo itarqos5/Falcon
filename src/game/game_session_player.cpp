@@ -59,8 +59,13 @@ void GameSession::tickPlayer(double seconds, bool steering) {
         playerAgeTicks_ += 1.0;
         if (!pinnedPose_) {  // (a pinned camera, for screenshots, freezes the player; the world goes on)
             const double vx = player_.vx, vy = player_.vy, vz = player_.vz;  // (what it was going at, for a splash)
-            player_.tick(input, renderer_.level());
-            sendRemoteTick(input);
+            if (riding()) {
+                tickRiding(input);
+            } else {
+                if (ridingEntity_ >= 0 || boat_) leaveVehicle();
+                player_.tick(input, renderer_.level());
+                sendRemoteTick(input);
+            }
             tickFovModifier();
             waterVisionTicks_ = nextWaterVisionTicks(waterVisionTicks_, player_.isUnderWater(), info_.gameType == 3);  // the eyes get used to the water
             if (ready_ && !dead_) {
