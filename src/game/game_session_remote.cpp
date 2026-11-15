@@ -1013,8 +1013,10 @@ void GameSession::renderRemotePlayers(const std::array<double, 3>& camPos) {
         const bool usingOffHand = (p.livingFlags & 2) != 0;
         const auto armPoseOf = [&](const ItemStack& stack, bool beingUsed) {
             if (stack.isEmpty()) return ArmPose::Empty;
+            if (!p.swinging && stack.charged && stack.type().name == "crossbow") return ArmPose::CrossbowHold;  // a loaded crossbow is held up
             if (beingUsed) {
                 const std::string& name = stack.type().name;
+                if (name == "crossbow") return ArmPose::CrossbowCharge;
                 if (name == "shield") return ArmPose::Block;
                 if (name == "bow") return ArmPose::BowAndArrow;
                 if (name == "trident" || (name.size() > 6 && name.compare(name.size() - 6, 6, "_spear") == 0)) return ArmPose::ThrowTrident;
@@ -1025,6 +1027,7 @@ void GameSession::renderRemotePlayers(const std::array<double, 3>& camPos) {
             return ArmPose::Item;
         };
         const ArmPose mainPose = armPoseOf(p.equipment[0], using_ && !usingOffHand), offPose = armPoseOf(p.equipment[1], using_ && usingOffHand);
+        pose.crossbowTicks = static_cast<float>(p.usingTicks) + t;
         pose.rightArmPose = p.mainArmLeft ? offPose : mainPose;
         pose.leftArmPose = p.mainArmLeft ? mainPose : offPose;
         BodyHands hands;

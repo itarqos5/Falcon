@@ -13,6 +13,7 @@ const lifetime = Number(process.argv[4] || 60);
 const versions = process.env.APPDATA + '/horizon-launcher/versions';
 const dataDir = fs.readdirSync(versions).map((d) => versions + '/' + d + '/.local/horizon-client/26.3').filter((d) => fs.existsSync(d + '/registries.json')).pop();
 const reg = JSON.parse(fs.readFileSync(dataDir + '/registries.json', 'utf8'));
+const componentId = (n) => reg['minecraft:data_component_type'].entries['minecraft:' + n].protocol_id;
 const itemId = (n) => reg['minecraft:item'].entries['minecraft:' + n].protocol_id;
 const typeId = (n) => reg['minecraft:entity_type'].entries['minecraft:' + n].protocol_id;
 const blocks = JSON.parse(fs.readFileSync((process.env.FALCON_REPORTS || process.env.TEMP + '/falcon-gen/out/reports') + '/blocks.json', 'utf8'));
@@ -86,7 +87,9 @@ function equipment(sock, p, slots) {  // [slot, itemName]
   const w = new W().varint(100 + p.id);
   slots.forEach(([slot, name], i) => {
     w.u8(slot | (i < slots.length - 1 ? 0x80 : 0));
-    if (name) w.varint(1).varint(itemId(name)).varint(0).varint(0);
+    const [base, flag] = (name || '').split('+');
+    if (flag === 'charged') w.varint(1).varint(itemId(base)).varint(1).varint(0).varint(componentId('charged_projectiles')).varint(1).varint(itemId('arrow')).varint(1).varint(0).varint(0);  // a loaded crossbow
+    else if (base) w.varint(1).varint(itemId(base)).varint(0).varint(0);
     else w.varint(0);
   });
   sock.write(frame(104, w.buf()));

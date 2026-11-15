@@ -16,7 +16,7 @@ namespace falcon {
 class ResourceManager;
 
 // How an arm is held (HumanoidModel.ArmPose): by what is in the hand and what the player is doing with it.
-enum class ArmPose : std::uint8_t { Empty, Item, Block, BowAndArrow, ThrowTrident, Spyglass, TootHorn, Brush };
+enum class ArmPose : std::uint8_t { Empty, Item, Block, BowAndArrow, ThrowTrident, Spyglass, TootHorn, Brush, CrossbowHold, CrossbowCharge };
 
 // How the player's body stands and moves this frame (what the game's player renderer and PlayerModel.setupAnim work from).
 struct BodyPose {
@@ -47,6 +47,8 @@ struct BodyPose {
     // How the right and the left arm are held (the arm that holds the main hand's item is the main arm: the left one for a left-handed player).
     ArmPose rightArmPose = ArmPose::Empty;
     ArmPose leftArmPose = ArmPose::Empty;
+    float crossbowTicks = 0.0f;  // how long a crossbow has been drawn (CrossbowCharge) and how long it takes (ticks)
+    float crossbowMax = 25.0f;
     bool leftHanded = false;     // the main arm is the left one: it is the one that swings
     bool swingOffHand = false;   // the swing in progress is of the off hand: the other arm
     bool riding = false;         // sitting on a boat, a minecart or a mount: the legs go forward

@@ -226,9 +226,33 @@ void PlayerBodyRenderer::render(const Matrix4f& viewProj, const std::array<doubl
                     arm->rotation[0] = arm->rotation[0] * 0.5f - kPi / 5.0f;
                     arm->rotation[1] = 0.0f;
                     break;
+                case ArmPose::CrossbowHold: {  // AnimationUtils.animateCrossbowHold: the crossbow forward along the look in the main arm, the other arm under it
+                    const bool rightHanded = !left;
+                    EntityPart* holding = rightHanded ? rightArm : leftArm;
+                    EntityPart* supporting = rightHanded ? leftArm : rightArm;
+                    holding->rotation[1] = (rightHanded ? -0.3f : 0.3f) + headY;
+                    supporting->rotation[1] = (rightHanded ? 0.6f : -0.6f) + headY;
+                    holding->rotation[0] = -kPi / 2.0f + headX + 0.1f;
+                    supporting->rotation[0] = -1.5f + headX;
+                    break;
+                }
+                case ArmPose::CrossbowCharge: {  // AnimationUtils.animateCrossbowCharge: the other arm pulls the string back as the drawing goes on
+                    const bool rightHanded = !left;
+                    EntityPart* holding = rightHanded ? rightArm : leftArm;
+                    EntityPart* pulling = rightHanded ? leftArm : rightArm;
+                    holding->rotation[1] = rightHanded ? -0.8f : 0.8f;
+                    holding->rotation[0] = -0.97079635f;
+                    pulling->rotation[0] = holding->rotation[0];
+                    const float drawn = std::clamp(pose.crossbowTicks, 0.0f, pose.crossbowMax);
+                    const float g = pose.crossbowMax > 0.0f ? drawn / pose.crossbowMax : 0.0f;
+                    pulling->rotation[1] = (0.4f + (0.85f - 0.4f) * g) * (rightHanded ? 1.0f : -1.0f);
+                    pulling->rotation[0] = pulling->rotation[0] + (-kPi / 2.0f - pulling->rotation[0]) * g;
+                    break;
+                }
             }
         };
-        if (pose.leftArmPose == ArmPose::BowAndArrow) {  // (the arm that draws the bow is posed last: it sets both)
+        const auto twoHanded = [](ArmPose a) { return a == ArmPose::BowAndArrow || a == ArmPose::CrossbowHold || a == ArmPose::CrossbowCharge; };
+        if (twoHanded(pose.leftArmPose)) {  // (the arm that draws the bow or holds the crossbow is posed last: it sets both)
             poseArm(false);
             poseArm(true);
         } else {

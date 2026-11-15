@@ -81,6 +81,20 @@ export function scenarios(h) {
     };
   };
 
+  // a crossbow drawn (the string hand pulls back), one held loaded, and a loaded one in the left hand
+  table.crossbow = (sock) => {
+    const draw = addPlayer({ id: 1, name: 'Drawing', x: -3, y: 64, z: 6, yaw: 180, pitch: 0, head: 180 });
+    const loaded = addPlayer({ id: 2, name: 'Loaded', x: 0, y: 64, z: 6, yaw: 180, pitch: 0, head: 180 });
+    const lefty = addPlayer({ id: 3, name: 'LeftLoaded', x: 3, y: 64, z: 6, yaw: 180, pitch: 0, head: 180 });
+    for (const p of players) spawn(sock, p);
+    equipment(sock, draw, [[0, 'crossbow']]);
+    entityData(sock, draw, [[8, 0, 0x01]]);              // drawing it
+    equipment(sock, loaded, [[0, 'crossbow+charged']]);
+    equipment(sock, lefty, [[0, 'crossbow+charged']]);
+    entityData(sock, lefty, [[15, 42, 0]]);              // left-handed
+    return { view: { x: 0.5, y: 64, z: -1, yaw: 0, pitch: 5 }, tick: () => {} };
+  };
+
   table.ride = (sock) => {
     const rider = addPlayer({ id: 1, name: 'BoatRider', x: 3, y: 64, z: 6, yaw: 90, pitch: 0, head: 90 });
     const horseman = addPlayer({ id: 2, name: 'Horseman', x: -3, y: 64, z: 6, yaw: 0, pitch: 0, head: 0 });

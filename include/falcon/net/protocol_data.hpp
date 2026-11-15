@@ -53,6 +53,7 @@ enum class ComponentKind : std::uint8_t {
     ConsumeEffects,  // a list of them
     ItemTemplate,    // an item, a count and its components (ItemStackTemplate)
     ItemTemplateList,
+    ChargedProjectiles,  // the same list, but a crossbow with any of it is loaded (ItemStack::charged)
     UseCooldown,
     Tool,
     Weapon,

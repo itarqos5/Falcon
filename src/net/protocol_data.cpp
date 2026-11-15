@@ -338,7 +338,7 @@ ComponentKind componentKindOf(const std::string& rawName) {
         {"repairable", ComponentKind::HolderSet}, {"glider", ComponentKind::Unit}, {"tooltip_style", ComponentKind::Identifier}, {"death_protection", ComponentKind::ConsumeEffects},
         {"piercing_weapon", ComponentKind::PiercingWeapon}, {"attack_animation", ComponentKind::SwingAnimation}, {"interact_animation", ComponentKind::SwingAnimation},
         {"additional_trade_cost", ComponentKind::VarInt}, {"villager_food", ComponentKind::VarInt}, {"stored_enchantments", ComponentKind::Enchantments}, {"dye", ComponentKind::VarInt},
-        {"dyed_color", ComponentKind::DyedColor}, {"map_id", ComponentKind::VarInt}, {"map_post_processing", ComponentKind::VarInt}, {"charged_projectiles", ComponentKind::ItemTemplateList},
+        {"dyed_color", ComponentKind::DyedColor}, {"map_id", ComponentKind::VarInt}, {"map_post_processing", ComponentKind::VarInt}, {"charged_projectiles", ComponentKind::ChargedProjectiles},
         {"bundle_contents", ComponentKind::ItemTemplateList}, {"potion_contents", ComponentKind::PotionContents}, {"potion_duration_scale", ComponentKind::Float},
         {"suspicious_stew_effects", ComponentKind::SuspiciousStew}, {"writable_book_content", ComponentKind::WritableBook}, {"written_book_content", ComponentKind::WrittenBook},
         {"entity_data", ComponentKind::TypedEntity}, {"bucket_entity_data", ComponentKind::Nbt}, {"block_entity_data", ComponentKind::TypedEntity},
@@ -535,6 +535,13 @@ bool readComponentKind(Reader& r, ComponentKind kind, const ComponentIds& ids, I
             }
             return r.ok;
         case ComponentKind::ItemTemplate: return readItemTemplate(r, ids, depth);
+        case ComponentKind::ChargedProjectiles:
+            if (!readCount(r, 256, n)) return false;
+            for (int i = 0; i < n; ++i) {
+                if (!readItemTemplate(r, ids, depth)) return false;
+            }
+            if (stack != nullptr && r.ok) stack->charged = n > 0;
+            return r.ok;
         case ComponentKind::ItemTemplateList:
             if (!readCount(r, 256, n)) return false;
             for (int i = 0; i < n; ++i) {
