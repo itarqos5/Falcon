@@ -198,7 +198,7 @@ and the menu backdrop through the `UiContext` interface the game implements.
 - Logo (256x44 from `minecraft.png`) + edition badge, rotating/pulsing yellow splash text with the
   game's special-day texts, `Minecraft 26.3`, and at the bottom right "not affiliated with Mojang"
   (this client's own line, plain text, in place of the game's copyright notice). Minecraft Realms
-  is shown locked: this client does not talk to Mojang's online services.
+  is shown locked: Realms is not implemented (Falcon talks to Mojang only to check that the account owns the game and to join servers in online mode).
 - Quit Game closes the window.
 - Options... opens the Options screen: the panorama keeps spinning behind a 6-pass box blur
   (the game's default "Menu Background Blur" of 5) and a 25% black tint, a "FOV: Normal" slider
@@ -559,15 +559,23 @@ reordering with the icon's arrows or Shift+Up/Down, and double-click / Enter on 
 
 **It uses the network.** When a server's row is first drawn, the client opens one TCP connection to that
 address (after an SRV lookup when the port is the default one) and sends only the status handshake,
-status request and ping, like the game's own server list, on up to five background threads. It never logs
-in. Opening Multiplayer with your real `.minecraft` contacts the servers saved there (use `--game-dir`
+status request and ping, like the game's own server list, on up to five background threads. The list
+never logs in; only joining a server does. Opening Multiplayer with your real `.minecraft` contacts the servers saved there (use `--game-dir`
 to point it at another folder); reordering, editing, deleting and a changed favicon rewrite your real
 `servers.dat`, as the game does.
 
-**Not built:** joining a server (Join Server and Direct Connection only log a line), LAN world discovery
-(there is no "Scanning for games" row), the game's blocked-server list, the old pre-1.7 ping, and
-international (non-ASCII) host names are not converted to punycode. A ping that fails shows "Can't connect
-to server" with the unreachable icon; the game itself leaves some failures on its animated "pinging" bars.
+**Joining.** Join Server, Direct Connection and `--connect HOST[:PORT]` play on a server of Minecraft 26.3 (protocol 777): the chunks it sends, other
+players with their name tags and the player list (Tab), chat and commands, breaking and placing blocks, the inventory, items on the ground, sounds, damage and respawn. A
+server in **online mode** asks for encryption and for proof of the account, and Falcon answers the way the game does: the shared secret locked with the server's key,
+Mojang's session server told that this account joins, the chat signed with the account's key. It uses the account that the Falcon Launcher signed in with (the launcher
+hands over the access token and the player's id; without it only servers with `online-mode=false` can be joined). A connection that fails or drops shows the game's
+"Failed to connect to the server" / "Connection Lost" screen with the reason. Limits: mobs and other entities are not drawn, containers other than your own inventory are
+closed again at once, players wear the default skins (not their own), signed commands (`/msg`, `/say`, `/me` on a server that enforces secure profiles) go unsigned, and so far
+this has been run only against a Paper test server in offline mode: online mode, blocks and the inventory are written from the game's own packet layouts but have not been
+tried against a server yet.
+
+**Not built:** LAN world discovery (there is no "Scanning for games" row), the game's blocked-server list, the old pre-1.7 ping, and international (non-ASCII) host names
+are not converted to punycode. A ping that fails shows "Can't connect to server" with the unreachable icon; the game itself leaves some failures on its animated "pinging" bars.
 
 ## Options screens
 
