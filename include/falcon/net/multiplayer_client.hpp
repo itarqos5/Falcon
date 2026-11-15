@@ -76,6 +76,8 @@ struct RemoteHandler {
     std::function<void(int gameType)> gameMode;
     std::function<void(bool flying, bool mayFly, bool instabuild, bool invulnerable)> abilities;
     std::function<void(int slot, const ItemStack&)> inventorySlot;  // a slot of the player's own inventory (numbered as Inventory is: 0-8 hotbar, 36-39 boots to helmet, 40 offhand)
+    std::function<void(const std::string& event, int source, double x, double y, double z, float volume, float pitch)> sound;  // a sound event ("block.stone.place") at a place
+    std::function<void(int type, int x, int y, int z, int data)> levelEvent;                                                      // a world event (2001: a block is broken, `data` its state)
     std::function<void(int flags)> selfFlags;  // the flags every entity has, of the player: bit 0 on fire, bit 1 sneaking, bit 3 sprinting, bit 7 gliding
     std::function<void(int slot)> heldSlot;                          // the server picks the hotbar slot in the hand
     std::function<void(const std::string&)> disconnect;
@@ -98,6 +100,7 @@ public:
 
     void setPlayerEntityType(int type) { playerType_ = type; }  // the number of minecraft:player in the entity type registry
     void setComponentIds(const ComponentIds& ids) { componentIds_ = ids; }
+    void setSoundNames(std::vector<std::string> names) { soundNames_ = std::move(names); }  // by the number the game gives each sound event
     [[nodiscard]] Phase phase() const { return phase_; }
     [[nodiscard]] bool inPlay() const { return phase_ == Phase::Play; }
     [[nodiscard]] bool closed() const { return phase_ == Phase::Closed; }
@@ -149,6 +152,7 @@ private:
     int selfEntity_ = -1;
     int playerType_ = -1;  // the entity type number of a player
     ComponentIds componentIds_;
+    std::vector<std::string> soundNames_;
     int sequence_ = 0;
     int positionReminder_ = 0;
     bool haveLast_ = false;

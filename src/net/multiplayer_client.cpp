@@ -411,6 +411,31 @@ void MultiplayerClient::handlePlay(const Packet& p, RemoteHandler& h) {
             if (r.ok && slot >= 0 && slot < 9 && h.heldSlot) h.heldSlot(slot);
             break;
         }
+        case 119: {  // sound: an event at a place (the position is in eighths of a block)
+            const int holder = r.varint();
+            std::string name;
+            if (holder == 0) {  // a sound that is not in the registry: written out
+                name = r.string();
+                if (r.boolean()) r.f32();
+                if (name.compare(0, 10, "minecraft:") == 0) name.erase(0, 10);
+            } else if (static_cast<std::size_t>(holder - 1) < soundNames_.size()) {
+                name = soundNames_[static_cast<std::size_t>(holder - 1)];
+            }
+            const int source = r.varint();
+            const double x = r.i32() / 8.0, y = r.i32() / 8.0, z = r.i32() / 8.0;
+            const float volume = r.f32(), pitch = r.f32();
+            r.i64();  // the seed
+            if (r.ok && !name.empty() && h.sound) h.sound(name, source, x, y, z, volume, pitch);
+            break;
+        }
+        case 47: {  // level_event
+            const int type = r.i32();
+            int x, y, z;
+            unpackBlockPos(r.i64(), x, y, z);
+            const int data = r.i32();
+            if (r.ok && h.levelEvent) h.levelEvent(type, x, y, z, data);
+            break;
+        }
         case 60: {  // open_screen: a chest, a furnace ...: Falcon cannot show it, so it is closed again at once
             const int container = r.varint();
             if (r.ok) sendContainerClose(container);

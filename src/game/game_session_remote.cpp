@@ -75,6 +75,28 @@ int playerEntityType(const std::filesystem::path& dataRoot) {
     return player->value("protocol_id", -1);
 }
 
+// The names of the sound events by their number (registries.json), without the namespace.
+std::vector<std::string> soundEventNames(const std::filesystem::path& dataRoot) {
+    std::vector<std::string> names;
+    std::ifstream in(dataRoot / "registries.json", std::ios::binary);
+    if (!in) return names;
+    const nlohmann::json doc = nlohmann::json::parse(in, nullptr, false);
+    if (!doc.is_object()) return names;
+    const auto registry = doc.find("minecraft:sound_event");
+    if (registry == doc.end()) return names;
+    const auto entries = registry->find("entries");
+    if (entries == registry->end()) return names;
+    for (auto it = entries->begin(); it != entries->end(); ++it) {
+        const int id = it.value().value("protocol_id", -1);
+        if (id < 0 || id > 100000) continue;
+        if (names.size() <= static_cast<std::size_t>(id)) names.resize(static_cast<std::size_t>(id) + 1);
+        std::string name = it.key();
+        if (name.compare(0, 10, "minecraft:") == 0) name.erase(0, 10);
+        names[static_cast<std::size_t>(id)] = std::move(name);
+    }
+    return names;
+}
+
 // The numbers of the item components that can be read (the game's data component type registry).
 net::ComponentIds componentIds(const std::filesystem::path& dataRoot) {
     net::ComponentIds ids;
@@ -126,6 +148,7 @@ bool GameSession::connectRemote(const std::string& host, int port, const std::st
     remote_ = std::make_unique<net::MultiplayerClient>(*registry_);
     remote_->setPlayerEntityType(playerEntityType(dataRoot_));
     remote_->setComponentIds(componentIds(dataRoot_));
+    remote_->setSoundNames(soundEventNames(dataRoot_));
     physics_.reset();  // the server runs the world: no falling blocks, fire, redstone or random ticks of ours on its chunks
     redstone_.reset();
     renderer_.setRemote(true);
@@ -191,6 +214,18 @@ bool GameSession::connectRemote(const std::string& host, int port, const std::st
         remoteSlots_[static_cast<std::size_t>(slot)] = stack;  // (the server knows it: nothing to tell back)
     };
     h.selfFlags = [this](int flags) { selfOnFire_ = (flags & 1) != 0; };
+    h.sound = [this](const std::string& event, int source, double x, double y, double z, float volume, float pitch) {
+        const std::array<double, 3> at = {x, y, z};
+        playWorldSound(event, static_cast<SoundSource>(std::clamp(source, 0, kSoundSourceCount - 1)), volume, pitch, &at);
+    };
+    h.levelEvent = [this](int type, int x, int y, int z, int data) {
+        if (type != 2001) return;  // LevelEvent PARTICLES_DESTROY_BLOCK: the break sound of the block (and its particles, which are not drawn yet)
+        const Block broken = static_cast<Block>(data);
+        if (registry_->isAir(broken)) return;
+        const std::array<double, 3> where = {x + 0.5, y + 0.5, z + 0.5};
+        const BlockType& type_ = registry_->type(broken);
+        playBlockSound(broken, "break", breakOrPlaceMix(type_.soundVolume, type_.soundPitch), SoundSource::Blocks, &where);
+    };
     h.heldSlot = [this](int slot) {
         inventory_.setSelected(slot);
         lastHeldSent_ = inventory_.selected;
