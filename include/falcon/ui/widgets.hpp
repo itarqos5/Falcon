@@ -1,5 +1,6 @@
 #pragma once
 
+#include "falcon/ui/text_edit.hpp"
 #include "falcon/ui/gui_graphics.hpp"
 
 #include <functional>
@@ -179,6 +180,8 @@ public:
     void setText(const std::string& utf8);
 
     bool mouseClicked(double px, double py, int button) override;
+    void mouseDragged(double px, double py) override;  // drags a selection
+    bool mouseReleased(double px, double py, int button) override;
     bool keyPressed(int key, int mods) override;
     void charTyped(unsigned int codePoint) override;
     [[nodiscard]] bool focusable() const override { return true; }
@@ -191,12 +194,14 @@ protected:
 private:
     void changed();
     [[nodiscard]] int prefixWidth(std::size_t chars) const;
+    [[nodiscard]] std::size_t positionAt(double px) const;  // the character boundary nearest to an x
 
     const Font& font_;
     std::string hint_;
     std::size_t maxLength_;
     std::u32string chars_;
-    std::size_t cursor_ = 0;
+    TextSelection selection_;  // the caret and what is selected
+    bool dragging_ = false;
 };
 
 // A tick box with its label to the right (Checkbox): a click toggles it. The 17x17 box is drawn from the

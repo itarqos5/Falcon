@@ -1,6 +1,7 @@
 // Client tests: player, world.
 #include "test_support.hpp"
 
+#include "falcon/ui/text_edit.hpp"
 #include "falcon/world/boat.hpp"
 
 // Special blocks: stairs, slabs, a fence post, with shapes the test makes up (bottom slab, a 0.6 and a 0.625 high block).
@@ -84,6 +85,41 @@ void test_player_stepping() {
         level.setBlock(0, -60, 8, falcon::Block::Air);
     }
     falcon::installCollisionShapes(nullptr);
+}
+
+// The editing keys of a text box (EditBox.keyPressed): select all, copy, cut, paste, words by Ctrl, selecting by Shift, what the box lets in and its length. The clipboard is a stand-in.
+void test_text_edit() {
+    using namespace falcon;
+    std::string clip;
+    setTextClipboard({[&clip] { return clip; }, [&clip](const std::string& s) { clip = s; }});
+    std::u32string text = U"hello big world";
+    TextSelection sel{text.size(), text.size()};
+    bool changed = true;
+    CHECK(editKey(text, sel, 100, 'A', kEditControl, changed) && sel.begin() == 0 && sel.end() == text.size() && !changed);
+    CHECK(editKey(text, sel, 100, 'C', kEditControl, changed) && clip == "hello big world" && !changed);
+    insertText(text, sel, 100, U"x");  // typing replaces what is selected
+    CHECK(text == U"x" && sel.cursor == 1 && !sel.any());
+    CHECK(editKey(text, sel, 100, 'V', kEditControl, changed) && changed && text == U"xhello big world" && sel.cursor == 16);
+    CHECK(editKey(text, sel, 100, 263, kEditControl, changed) && sel.cursor == 11 && !sel.any() && !changed);  // Ctrl+Left: to the start of "world"
+    CHECK(editKey(text, sel, 100, 263, kEditControl | kEditShift, changed) && sel.cursor == 7 && sel.highlight == 11);  // with Shift it selects "big "
+    CHECK(editKey(text, sel, 100, 'X', kEditControl, changed) && changed && clip == "big " && text == U"xhello world" && sel.cursor == 7);
+    CHECK(editKey(text, sel, 100, 259, kEditControl, changed) && changed && text == U"world" && sel.cursor == 0);  // Ctrl+Backspace: the word before
+    CHECK(editKey(text, sel, 100, 261, 0, changed) && changed && text == U"orld");                                  // Delete: a character
+    CHECK(editKey(text, sel, 100, 259, 0, changed) && !changed && text == U"orld");                                 // Backspace at the start: nothing
+    CHECK(editKey(text, sel, 100, 269, kEditShift, changed) && sel.cursor == 4 && sel.highlight == 0);              // Shift+End selects to the end
+    CHECK(editKey(text, sel, 100, 259, 0, changed) && changed && text.empty());                                    // and Backspace removes the selection
+    CHECK(!editKey(text, sel, 100, 'Q', 0, changed) && !editKey(text, sel, 100, 257, 0, changed));                   // other keys are not for the box
+    std::u32string fitted = U"ab";
+    TextSelection fit{2, 2};
+    insertText(fitted, fit, 5, U"cdefg");  // only what fits
+    CHECK(fitted == U"abcde" && fit.cursor == 5);
+    std::u32string clean;
+    TextSelection plain{0, 0};
+    insertText(clean, plain, 10, std::u32string(U"a\nb") + char32_t(127) + char32_t(167) + U"c");  // no line breaks, DEL or section signs
+    CHECK(clean == U"abc");
+    std::u32string spaced = U"one  two three";
+    CHECK(wordPosition(spaced, 0, 1) == 5 && wordPosition(spaced, 5, 1) == 9 && wordPosition(spaced, 14, -1) == 9 && wordPosition(spaced, 9, -1) == 5);
+    setTextClipboard({});
 }
 
 // A boat the way the game moves it (AbstractBoat): it floats with 0.65 of its height under the surface (where the lift of the water, 0.04 / 0.65 a unit of depth, balances gravity),
@@ -565,6 +601,7 @@ void test_player_physics() {
     test_player_stepping();
     test_player_fluids();
     test_boat();
+    test_text_edit();
     test_player_current();
     test_player_real_blocks();
 }

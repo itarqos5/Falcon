@@ -164,7 +164,7 @@ void EditBox::setText(const std::string& utf8) {
     for (const char32_t cp : decodeUtf8(utf8)) {
         if (chars_.size() < maxLength_) chars_.push_back(cp);
     }
-    cursor_ = chars_.size();
+    selection_.collapseTo(chars_.size());
 }
 
 void EditBox::changed() {
@@ -175,10 +175,9 @@ int EditBox::prefixWidth(std::size_t count) const {
     return font_.width(encodeUtf8(chars_.substr(0, count)));
 }
 
-bool EditBox::mouseClicked(double px, double py, int button) {
-    if (!visible || !active || button != 0 || !contains(px, py)) return false;
-    // Put the caret at the character boundary nearest to the click.
-    const double relative = px - (x + 4);
+std::size_t EditBox::positionAt(double px) const {
+    // The character boundary nearest to the point.
+    const double relative = px - (bordered ? x + 4 : x);
     std::size_t best = 0;
     double bestDistance = relative < 0 ? -relative : relative;
     for (std::size_t i = 1; i <= chars_.size(); ++i) {
@@ -188,52 +187,35 @@ bool EditBox::mouseClicked(double px, double py, int button) {
             best = i;
         }
     }
-    cursor_ = best;
+    return best;
+}
+
+bool EditBox::mouseClicked(double px, double py, int button) {
+    if (!visible || !active || button != 0 || !contains(px, py)) return false;
+    selection_.collapseTo(positionAt(px));  // the caret goes where the click is; dragging from there selects
+    dragging_ = true;
     return true;
 }
 
-bool EditBox::keyPressed(int key, int /*mods*/) {
-    constexpr int kBackspace = 259;
-    constexpr int kDelete = 261;
-    constexpr int kRight = 262;
-    constexpr int kLeft = 263;
-    constexpr int kHome = 268;
-    constexpr int kEnd = 269;
-    switch (key) {
-        case kBackspace:
-            if (cursor_ > 0) {
-                chars_.erase(cursor_ - 1, 1);
-                --cursor_;
-                changed();
-            }
-            return true;
-        case kDelete:
-            if (cursor_ < chars_.size()) {
-                chars_.erase(cursor_, 1);
-                changed();
-            }
-            return true;
-        case kLeft:
-            if (cursor_ > 0) --cursor_;
-            return true;
-        case kRight:
-            if (cursor_ < chars_.size()) ++cursor_;
-            return true;
-        case kHome:
-            cursor_ = 0;
-            return true;
-        case kEnd:
-            cursor_ = chars_.size();
-            return true;
-        default:
-            return false;
-    }
+void EditBox::mouseDragged(double px, double /*py*/) {
+    if (dragging_) selection_.cursor = positionAt(px);
+}
+
+bool EditBox::mouseReleased(double /*px*/, double /*py*/, int button) {
+    if (button == 0) dragging_ = false;
+    return false;  // (a text box does not take the release: nothing clicks)
+}
+
+bool EditBox::keyPressed(int key, int mods) {
+    bool textChanged = false;
+    if (!editKey(chars_, selection_, maxLength_, key, mods, textChanged)) return false;
+    if (textChanged) changed();
+    return true;
 }
 
 void EditBox::charTyped(unsigned int codePoint) {
-    if (codePoint < 32 || codePoint == 127 || chars_.size() >= maxLength_) return;
-    chars_.insert(cursor_, 1, static_cast<char32_t>(codePoint));
-    ++cursor_;
+    if (!isAllowedTextChar(static_cast<char32_t>(codePoint)) || (chars_.size() >= maxLength_ && !selection_.any())) return;
+    insertText(chars_, selection_, maxLength_, std::u32string(1, static_cast<char32_t>(codePoint)));
     changed();
 }
 
@@ -251,9 +233,14 @@ void EditBox::renderContents(GuiGraphics& graphics) {
         return;
     }
     graphics.text(text(), static_cast<float>(textX), static_cast<float>(textY), kTextColor);
+    if (selection_.any()) {  // what is selected: a light bar with the text in blue on it (the game inverts the colours there)
+        const int from = textX + prefixWidth(selection_.begin()), to = textX + prefixWidth(selection_.end());
+        graphics.fill(from, textY - 1, to, textY + 1 + Font::kLineHeight, 0xFFFFFFFFu);
+        graphics.text(encodeUtf8(chars_.substr(selection_.begin(), selection_.end() - selection_.begin())), static_cast<float>(from), static_cast<float>(textY), 0xFF1F1FFFu, false);
+    }
     if (focused && (static_cast<long long>(graphics.timeMillis()) / 300) % 2 == 0) {
-        const int caretX = textX + prefixWidth(cursor_);
-        if (cursor_ == chars_.size()) {
+        const int caretX = textX + prefixWidth(selection_.cursor);
+        if (selection_.cursor == chars_.size()) {
             graphics.text("_", static_cast<float>(caretX), static_cast<float>(textY), kTextColor);
         } else {
             graphics.fill(caretX, textY - 1, caretX + 1, textY + 1 + Font::kLineHeight, 0xFFD0D0D0u);

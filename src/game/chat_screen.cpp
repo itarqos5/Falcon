@@ -1,3 +1,4 @@
+#include "falcon/ui/text_edit.hpp"
 #include "falcon/game/chat_screen.hpp"
 
 #include "falcon/game/game_session.hpp"
@@ -8,8 +9,8 @@
 
 namespace falcon {
 namespace {
-constexpr int kEnter = 257, kKpEnter = 335, kBackspace = 259, kDelete = 261, kEscape = 256, kTab = 258;
-constexpr int kRight = 262, kLeft = 263, kArrowDown = 264, kArrowUp = 265, kPageUp = 266, kPageDown = 267, kHome = 268, kEnd = 269;
+constexpr int kEnter = 257, kKpEnter = 335, kEscape = 256, kTab = 258;
+constexpr int kArrowDown = 264, kArrowUp = 265, kPageUp = 266, kPageDown = 267;
 constexpr int kSuggestionLines = 10;      // the most the list shows at once (autoSuggestions' line limit)
 constexpr int kRowHeight = 12;
 constexpr std::uint32_t kListBackground = 0xD0000000u, kSelectedColor = 0xFFFFFF00u, kListColor = 0xFFAAAAAAu, kGhostColor = 0xFF808080u;
@@ -19,7 +20,7 @@ constexpr const char* kSection = "\xC2\xA7";
 ChatScreen::ChatScreen(ScreenNavigator& navigator, ScreenServices& services, std::string initial)
     : Screen(navigator), services_(services) {
     for (const char32_t cp : decodeUtf8(initial)) input_.push_back(cp);
-    cursor_ = input_.size();
+    cursor_ = highlight_ = input_.size();
     draft_ = initial;
     refreshCommand();
 }
@@ -53,7 +54,7 @@ void ChatScreen::setFromHistory(int delta) {
             historyPos_ = -1;
             input_.clear();
             for (const char32_t cp : decodeUtf8(draft_)) input_.push_back(cp);
-            cursor_ = input_.size();
+            cursor_ = highlight_ = input_.size();
             refreshCommand();
             return;
         }
@@ -62,7 +63,7 @@ void ChatScreen::setFromHistory(int delta) {
     const std::string& entry = history[history.size() - 1 - static_cast<std::size_t>(historyPos_)];
     input_.clear();
     for (const char32_t cp : decodeUtf8(entry)) input_.push_back(cp);
-    cursor_ = input_.size();
+    cursor_ = highlight_ = input_.size();
     refreshCommand();
 }
 
@@ -110,13 +111,24 @@ void ChatScreen::applySuggestion() {
     const std::vector<char32_t> decoded = decodeUtf8(chosen);
     const std::u32string text(decoded.begin(), decoded.end());
     input_.insert(from, text);
-    cursor_ = from + text.size();
+    cursor_ = highlight_ = from + text.size();
     historyPos_ = -1;
     refreshCommand();
 }
 
 bool ChatScreen::keyPressed(int key, int mods) {
     if (services_.session == nullptr) return true;
+    {  // the keys that edit the line (Ctrl+A / C / X / V, Backspace, Delete, the arrows, Home, End) are the game's EditBox
+        TextSelection selection{cursor_, highlight_};
+        bool textChanged = false;
+        if (editKey(input_, selection, ChatComponent::kMaxMessageLength, key, mods, textChanged)) {
+            cursor_ = selection.cursor;
+            highlight_ = selection.highlight;
+            if (textChanged) historyPos_ = -1;
+            refreshCommand();
+            return true;
+        }
+    }
     const bool listShown = !suggestions_.list.empty() && !hidden_;
     switch (key) {
         case kEnter:
@@ -135,36 +147,6 @@ bool ChatScreen::keyPressed(int key, int mods) {
                 hidden_ = true;
                 return true;
             }
-            return true;
-        case kBackspace:
-            if (cursor_ > 0) {
-                input_.erase(cursor_ - 1, 1);
-                --cursor_;
-                historyPos_ = -1;
-                refreshCommand();
-            }
-            return true;
-        case kDelete:
-            if (cursor_ < input_.size()) {
-                input_.erase(cursor_, 1);
-                refreshCommand();
-            }
-            return true;
-        case kLeft:
-            if (cursor_ > 0) --cursor_;
-            refreshCommand();
-            return true;
-        case kRight:
-            if (cursor_ < input_.size()) ++cursor_;
-            refreshCommand();
-            return true;
-        case kHome:
-            cursor_ = 0;
-            refreshCommand();
-            return true;
-        case kEnd:
-            cursor_ = input_.size();
-            refreshCommand();
             return true;
         case kArrowUp:
             if (listShown) cycleSuggestion(-1);
@@ -186,9 +168,11 @@ bool ChatScreen::keyPressed(int key, int mods) {
 }
 
 void ChatScreen::charTyped(unsigned int codePoint) {
-    if (codePoint < 32 || codePoint == 127 || input_.size() >= ChatComponent::kMaxMessageLength) return;
-    input_.insert(cursor_, 1, static_cast<char32_t>(codePoint));
-    ++cursor_;
+    if (!isAllowedTextChar(static_cast<char32_t>(codePoint)) || (input_.size() >= ChatComponent::kMaxMessageLength && cursor_ == highlight_)) return;
+    TextSelection selection{cursor_, highlight_};
+    insertText(input_, selection, ChatComponent::kMaxMessageLength, std::u32string(1, static_cast<char32_t>(codePoint)));
+    cursor_ = selection.cursor;
+    highlight_ = selection.highlight;
     historyPos_ = -1;
     refreshCommand();
 }
@@ -243,6 +227,12 @@ void ChatScreen::render(GuiGraphics& g, int /*mouseX*/, int /*mouseY*/, const Fr
             g.text(span.text, x, textY, 0xFF000000u | (span.hasColor ? span.rgb : 0xE0E0E0u), true, span.underlined, span.bold);
             x += static_cast<float>(g.textWidth(span.text, span.bold));
         }
+    }
+    if (cursor_ != highlight_) {  // what is selected: a light bar with the text in blue on it
+        const std::size_t from = std::min(cursor_, highlight_), to = std::max(cursor_, highlight_);
+        const int left = 4 + g.textWidth(encodeUtf8(input_.substr(0, from))), right = 4 + g.textWidth(encodeUtf8(input_.substr(0, to)));
+        g.fill(left, static_cast<int>(textY) - 1, right, static_cast<int>(textY) + Font::kLineHeight, 0xFFFFFFFFu);
+        g.text(encodeUtf8(input_.substr(from, to - from)), static_cast<float>(left), textY, 0xFF1F1FFFu, false);
     }
     const int caretX = 4 + g.textWidth(before);
     // The first suggestion's rest, as grey text after the caret (only when what is typed so far is a start of it).

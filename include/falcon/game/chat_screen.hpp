@@ -41,6 +41,7 @@ private:
     ScreenServices& services_;
     std::u32string input_;
     std::size_t cursor_ = 0;
+    std::size_t highlight_ = 0;  // the other end of what is selected (the caret again: nothing)
     int historyPos_ = -1;   // -1: the live edit; else an index from the end of the sent history
     std::string draft_;     // the live edit, kept while browsing history
 

@@ -174,6 +174,7 @@ add_library(falcon_base
     src/platform/window.cpp
     src/platform/key_names.cpp
     src/platform/dialog.cpp
+    src/platform/clipboard.cpp
     src/platform/memory.cpp
     src/platform/system_info.cpp
     src/platform/ownership.cpp
@@ -202,6 +203,7 @@ add_library(falcon_ui
     src/ui/sprite_manager.cpp
     src/ui/gui_graphics.cpp
     src/ui/widgets.cpp
+    src/ui/text_edit.cpp
     src/ui/screen.cpp
     src/ui/scroll_list.cpp
     src/ui/list_screen.cpp
