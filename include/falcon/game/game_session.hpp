@@ -211,6 +211,7 @@ private:
     // the keys move the player; otherwise (a menu is open) the player only carries on with what they were doing.
     void tickPlayer(double seconds, bool steering);
     void tickFovModifier();
+    void drawFireOverlay(GuiGraphics& g, int guiWidth, int guiHeight);
     // The 20 ticks a second of the HUD (the fading name of the held item).
     void tickHud(double seconds);
     // ---- world sounds ----

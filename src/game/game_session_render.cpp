@@ -273,6 +273,8 @@ void GameSession::renderHud(GuiGraphics& g, int guiWidth, int guiHeight, bool ch
     chatFont_ = &g.font();  // so a sent message can be word-wrapped
     if (!ready_) return;  // the loading screen (renderLoading) takes the place of the HUD until the world is ready
 
+    drawFireOverlay(g, guiWidth, guiHeight);
+
     // F1 hides the crosshair and the hotbar (the debug screen stays, which is what people take screenshots with).
     if (!hudHidden_) {
         // Crosshair: 15x15 in the middle (only in first person).
@@ -287,6 +289,35 @@ void GameSession::renderHud(GuiGraphics& g, int guiWidth, int guiHeight, bool ch
 
     // The chat: faded on the HUD, full and scrollable when its screen is open (F1 hides it unless it is open).
     if (!hudHidden_ || chatFocused) chat_.render(g, guiWidth, guiHeight, services_.options, chatFocused);
+}
+
+// ScreenEffectRenderer.renderFire: while the player burns, two quads of the fire picture (block/fire_1, its frames played one a tick) stand half a block in front
+// of the eyes, 0.3 below the middle and 0.24 either side, turned 10 degrees outwards, so the flames fill the lower part of the screen. They are put on the screen
+// here by projecting the corners with the view's field of view; not seen in first person only when the camera is behind the player (F5).
+void GameSession::drawFireOverlay(GuiGraphics& g, int guiWidth, int guiHeight) {
+    if (burnTicks_ <= 0 || perspective_ != 0 || info_.gameType == 3 || guiHeight <= 0) return;
+    const Texture2D& fire = g.textures().get("block/fire_1.png");
+    if (fire.width() <= 0 || fire.height() < fire.width()) return;
+    const int frames = fire.height() / fire.width();
+    const int frame = static_cast<int>(static_cast<long long>(playerAgeTicks_ + partialTick_)) % frames;
+    const double tanHalf = std::tan(static_cast<double>(services_.options.fov) * 0.5 * 3.14159265358979 / 180.0);
+    const double aspect = static_cast<double>(guiWidth) / static_cast<double>(guiHeight);
+    for (int i = 0; i < 2; ++i) {
+        const double side = i * 2 - 1, angle = side * 10.0 * 3.14159265358979 / 180.0;
+        const auto corner = [&](double x, double y, double& sx, double& sy) {  // (x, y) of the quad, z = -0.5, then turned and moved
+            const double vx = x * std::cos(angle) - 0.5 * std::sin(angle) - side * 0.24;
+            const double depth = std::max(0.05, x * std::sin(angle) + 0.5 * std::cos(angle));
+            sx = (vx / (depth * tanHalf * aspect) * 0.5 + 0.5) * guiWidth;
+            sy = (0.5 - (y - 0.3) / (depth * tanHalf) * 0.5) * guiHeight;
+        };
+        double left = 0, top = 0, right = 0, bottom = 0, unused = 0;
+        corner(-0.5, 0.5, left, top);
+        corner(0.5, -0.5, right, bottom);
+        corner(0.5, 0.5, unused, top);
+        if (right <= left || bottom <= top) continue;
+        g.blit(fire, static_cast<int>(left), static_cast<int>(top), 0.0f, static_cast<float>(frame * fire.width()), static_cast<int>(right - left), static_cast<int>(bottom - top),
+               fire.width(), fire.width(), fire.width(), fire.height(), 0xE5FFFFFFu);
+    }
 }
 
 // Hud.extractItemHotbar and extractSelectedItemName: the 182x22 bar at the bottom middle with the nine hotbar stacks, the selected
