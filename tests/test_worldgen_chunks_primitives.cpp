@@ -127,6 +127,26 @@ void testPrimitives(const OverworldGenerator& gen, const falcon::BlockRegistry& 
 
 // =================================================================================================================
 // Chunk building, threads, presets, spawn
+// The terrain of a few chunks of seed 12345, as one number: every block of eight chunks in different parts of the world, in order, hashed (FNV-1a). The number was made by the Windows
+// build, whose chunks are the ones the game makes (the whole-chunk comparison above); this keeps every other system, compiler and C library to the same terrain (the generator is
+// float and double arithmetic and the C library's own functions, which are not the same everywhere), and a later change from changing it without anybody noticing.
+void testTerrainChecksum(const OverworldGenerator& gen) {
+    std::uint64_t hash = 14695981039346656037ull;
+    for (const auto& [cx, cz] : {std::pair{0, 0}, std::pair{-8, -8}, std::pair{44, 22}, std::pair{-168, 112}, std::pair{3, -7}, std::pair{100, 100}, std::pair{-50, 60}, std::pair{13, 13}}) {
+        const std::shared_ptr<falcon::Chunk> chunk = gen.generate(cx, cz);
+        for (int z = 0; z < 16; ++z) {
+            for (int x = 0; x < 16; ++x) {
+                for (int y = falcon::kMinY; y < falcon::kMaxY; ++y) {
+                    hash = (hash ^ static_cast<std::uint64_t>(static_cast<std::uint32_t>(chunk->at(x, y, z)))) * 1099511628211ull;
+                }
+            }
+        }
+    }
+    constexpr std::uint64_t kExpected = 0x3566119324597cc7ull;
+    if (hash != kExpected) std::fprintf(stderr, "terrain checksum of seed 12345: 0x%016llx\n", static_cast<unsigned long long>(hash));
+    CHECK(hash == kExpected);
+}
+
 void testChunkObject(const OverworldGenerator& gen) {
     for (const auto& [cx, cz] : {std::pair{0, 0}, std::pair{-8, -8}, std::pair{44, 22}, std::pair{-168, 112}}) {
         DenseChunk dense;

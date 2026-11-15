@@ -49,3 +49,7 @@ add_custom_target(check
     COMMENT "Running the unit tests"
     USES_TERMINAL
 )
+
+# A world folder without any screen (level.dat and session.lock, as Create New World writes them): for scripted runs that open a world with --play (the CI builds, the benchmarks).
+add_executable(falcon_make_world EXCLUDE_FROM_ALL ../tools/make_world.cpp)
+target_link_libraries(falcon_make_world PRIVATE falcon::core falcon_warnings)

@@ -187,6 +187,7 @@ int main() {
                     } else {
                         testChunks(*gen, *registry, truth);
                     }
+                    testTerrainChecksum(*gen);
                     testChunkObject(*gen);
                     testThreads(*gen);
                     testPresetsAndSpawn(gd, *registry, *gen);

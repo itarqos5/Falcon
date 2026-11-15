@@ -114,6 +114,7 @@ void testBiomes(const GameData& gd);
 bool loadTruth(const std::filesystem::path& file, Truth& out);
 void testChunks(const OverworldGenerator& gen, const falcon::BlockRegistry& registry, const Truth& truth);
 void testPrimitives(const OverworldGenerator& gen, const falcon::BlockRegistry& registry);
+void testTerrainChecksum(const OverworldGenerator& gen);
 void testChunkObject(const OverworldGenerator& gen);
 void testThreads(const OverworldGenerator& gen);
 void testPresetsAndSpawn(const GameData& gd, const falcon::BlockRegistry& registry, const OverworldGenerator& gen);
