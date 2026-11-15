@@ -108,7 +108,8 @@ std::string uuidWithoutDashes(const std::array<std::uint8_t, 16>& id) {
     return s;
 }
 
-Bytes chatSignaturePayload(const std::array<std::uint8_t, 16>& sender, const std::array<std::uint8_t, 16>& session, int index, std::int64_t salt, std::int64_t seconds, const std::string& text) {
+Bytes chatSignaturePayload(const std::array<std::uint8_t, 16>& sender, const std::array<std::uint8_t, 16>& session, int index, std::int64_t salt, std::int64_t seconds, const std::string& text,
+                         const std::vector<std::array<std::uint8_t, 256>>& seen) {
     Writer w;
     w.i32(1);
     w.uuid(sender);
@@ -118,7 +119,8 @@ Bytes chatSignaturePayload(const std::array<std::uint8_t, 16>& sender, const std
     w.i64(seconds);
     w.i32(static_cast<std::int32_t>(text.size()));
     w.raw(Bytes(text.begin(), text.end()));
-    w.i32(0);
+    w.i32(static_cast<std::int32_t>(seen.size()));
+    for (const auto& signature : seen) w.raw(Bytes(signature.begin(), signature.end()));
     return std::move(w.data);
 }
 

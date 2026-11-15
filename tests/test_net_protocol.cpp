@@ -3,6 +3,7 @@
 
 #include "falcon/net/bytes.hpp"
 #include "falcon/net/crypto.hpp"
+#include "falcon/net/last_seen.hpp"
 #include "falcon/net/multiplayer_client.hpp"
 #include "falcon/net/session_auth.hpp"
 #include "falcon/net/protocol_data.hpp"
@@ -250,12 +251,23 @@ void test_rsa() {
             sender[i] = static_cast<std::uint8_t>(i + 1);
             session[i] = static_cast<std::uint8_t>(0x80 + i);
         }
-        const Bytes payload = chatSignaturePayload(sender, session, 3, 0x0123456789abcdefLL, 1700000000LL, "héllo ✓");
+        const Bytes payload = chatSignaturePayload(sender, session, 3, 0x0123456789abcdefLL, 1700000000LL, "héllo ✓", {});
         CHECK(payload.size() == 4 + 16 + 16 + 4 + 8 + 8 + 4 + 10 + 4);  // (the text is 7 characters and 10 bytes)
         CHECK(payload[0] == 0 && payload[3] == 1);
         Bytes chatSignature;
         CHECK(rsaSign(privateKey, payload, chatSignature, error));
         CHECK(hexOf(chatSignature) == vectors::kChatSignatureHex);
+        // with two messages of others seen, their signatures are in what is signed
+        std::vector<std::array<std::uint8_t, 256>> seen(2);
+        for (std::size_t i = 0; i < 256; ++i) {
+            seen[0][i] = static_cast<std::uint8_t>(i);
+            seen[1][i] = static_cast<std::uint8_t>(255 - i);
+        }
+        const Bytes withSeen = chatSignaturePayload(sender, session, 3, 0x0123456789abcdefLL, 1700000000LL, "héllo ✓", seen);
+        CHECK(withSeen.size() == payload.size() + 2 * 256);
+        Bytes seenSignature;
+        CHECK(rsaSign(privateKey, withSeen, seenSignature, error));
+        CHECK(hexOf(seenSignature) == vectors::kChatSignatureSeenHex);
     }
     Bytes locked;
     CHECK(rsaEncrypt(publicKey, bytesOf("0123456789abcdef"), locked, error));
@@ -371,6 +383,39 @@ void test_encrypted_connection() {
 }
 #endif
 
+// Which messages of others were seen (the game's LastSeenMessagesTracker): the ring of twenty, the bits, the checksum of the signatures, the count since the last report.
+void test_last_seen() {
+    LastSeenTracker tracker;
+    LastSeenTracker::Update none = tracker.generateAndApplyUpdate();
+    CHECK(none.offset == 0 && none.acknowledged == 0 && none.seen.empty() && none.checksum == 1);  // (the checksum of an empty list is 1)
+    MessageSignature first{}, second{};
+    first.fill(1);
+    second.fill(2);
+    CHECK(tracker.addPending(first));
+    CHECK(!tracker.addPending(first));  // the same one twice counts once
+    CHECK(tracker.offset() == 1);
+    LastSeenTracker::Update one = tracker.generateAndApplyUpdate();
+    CHECK(one.offset == 1 && one.seen.size() == 1 && one.seen[0] == first);
+    CHECK(one.acknowledged == (1u << 19));  // the newest is the last of the twenty places
+    CHECK(one.checksum == 32);              // worked out with another implementation (Arrays.hashCode of the bytes, then 31 * 1 + that, the low byte)
+    CHECK(tracker.offset() == 0);
+    CHECK(tracker.addPending(second));
+    LastSeenTracker::Update two = tracker.generateAndApplyUpdate();
+    CHECK(two.offset == 1 && two.seen.size() == 2 && two.seen[0] == first && two.seen[1] == second);  // the first stays acknowledged
+    CHECK(two.acknowledged == ((1u << 19) | (1u << 18)));
+    CHECK(two.checksum == 225);
+    // twenty-one messages: the oldest falls out of the window
+    LastSeenTracker many;
+    for (int i = 0; i < 21; ++i) {
+        MessageSignature s{};
+        s.fill(static_cast<std::uint8_t>(10 + i));
+        CHECK(many.addPending(s));
+    }
+    const LastSeenTracker::Update window = many.generateAndApplyUpdate();
+    CHECK(window.offset == 21 && window.seen.size() == 20 && window.acknowledged == 0xFFFFFu);
+    CHECK(window.seen[0][0] == 11 && window.seen[19][0] == 30);  // (the message 10 is gone)
+}
+
 }  // namespace
 
 int main() {
@@ -383,6 +428,7 @@ int main() {
     test_cfb8();
     test_rsa();
     test_account_texts();
+    test_last_seen();
 #ifdef _WIN32
     test_encrypted_connection();
 #endif

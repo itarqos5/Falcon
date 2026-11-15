@@ -1,6 +1,7 @@
 #pragma once
 
 #include "falcon/net/connection.hpp"
+#include "falcon/net/last_seen.hpp"
 #include "falcon/net/protocol_data.hpp"
 #include "falcon/net/session_auth.hpp"
 #include "falcon/text/styled_text.hpp"
@@ -204,6 +205,7 @@ private:
     bool haveChatKeys_ = false, chatSessionSent_ = false;
     Uuid chatSessionId_{};
     int chatIndex_ = 0;  // the number of the next signed message in the chain
+    LastSeenTracker lastSeen_;  // the signed messages of others that were seen (every message of ours says which)
     int menuStateId_ = 0;  // the state of the player's menu as the server last said it (a click must carry it)
     std::vector<std::string> soundNames_;
     int sequence_ = 0;

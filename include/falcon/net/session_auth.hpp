@@ -5,6 +5,7 @@
 #include <array>
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace falcon::net {
 
@@ -37,9 +38,9 @@ struct ChatKeys {
 [[nodiscard]] std::string uuidWithoutDashes(const std::array<std::uint8_t, 16>& id);
 
 // What the signature of a chat message covers (PlayerChatMessage.updateSignature, SignedMessageLink and SignedMessageBody): the version 1, who sends, in which chat session,
-// the number of the message in the chain, the salt, the time in whole seconds, the message (its length in bytes, then the bytes) and the messages of others that were seen
-// (none are acknowledged here: a count of 0). Whole numbers are big-endian.
+// the number of the message in the chain, the salt, the time in whole seconds, the message (its length in bytes, then the bytes) and the signatures of the messages of others
+// that were seen (their count, then each one). Whole numbers are big-endian.
 [[nodiscard]] Bytes chatSignaturePayload(const std::array<std::uint8_t, 16>& sender, const std::array<std::uint8_t, 16>& session, int index, std::int64_t salt, std::int64_t seconds,
-                                         const std::string& text);
+                                         const std::string& text, const std::vector<std::array<std::uint8_t, 256>>& seen);
 
 }  // namespace falcon::net

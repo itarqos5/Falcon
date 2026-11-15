@@ -52,4 +52,13 @@ inline constexpr const char* kChatSignatureHex =
     "7f22f0cabbcc473c82307c8e18baaac0dba08ef583c47a73f65bce26f88419479900c8b0f378848da991ee07dbbebaaf6e33"
     "0790b3eb62f4";
 
+// The same with two seen messages in the payload (signatures of the bytes 0,1,2... and 255,254,...): the signature of the whole.
+inline constexpr const char* kChatSignatureSeenHex =
+    "01679c35406dbc2d2a09fb48089a7729af66634b0bf0553655e7e2b92eed55ba061c81366a88c13f8012d03ff3f17296c239"
+    "28c94c151c0d50737d68d3373ee7a05f2138126dddfbc63eb6da07171c5a6e8f37e77eb868f50afd8d2a6327ce05bee07b8f"
+    "46b419b1e9edc9721521de6f40d9e51ffe54060f7ee337b92ef94778d5bf802d49fd061d17a0b14bcff96bf21f4f1b164eb3"
+    "160d0c0a9d553809ec2eefc2e72a9f529aaf7bd7e10719a98165da1a24844833f6d34664ace299f94df4dcf8f228e0a343df"
+    "81315b5738d83ae99423d42eaa56d6e04beaacff29b32b30c84e00f02247329d450892371a32d09a16e90013eada6c15a74f"
+    "ce5cf54778db";
+
 }  // namespace falcon::net::vectors

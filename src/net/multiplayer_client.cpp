@@ -624,7 +624,15 @@ void MultiplayerClient::handlePlay(const Packet& p, RemoteHandler& h) {
         case 66: {  // player_chat (the signature parts are skipped; the text is the message)
             const Uuid sender = r.uuid();
             r.varint();
-            if (r.boolean()) r.skip(256);
+            if (r.boolean()) {  // a signed message: it counts as seen, and the server hears of it in the next message or, after sixty-four, on its own (ServerboundChatAckPacket)
+                MessageSignature signature{};
+                for (std::uint8_t& b : signature) b = static_cast<std::uint8_t>(r.u8());
+                if (r.ok && lastSeen_.addPending(signature) && lastSeen_.offset() > LastSeenTracker::kReportAfter) {
+                    Writer ack;
+                    ack.varint(lastSeen_.takeOffset());
+                    connection_.send(6, ack.data);
+                }
+            }
             const std::string content = r.string();
             StyledText line;
             const TabEntry* who = tabEntry(sender);
@@ -915,11 +923,12 @@ void MultiplayerClient::sendChat(const std::string& text) {
     const std::int64_t millis = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
     std::int64_t salt = 0;
     Bytes signature;
+    const LastSeenTracker::Update seen = lastSeen_.generateAndApplyUpdate();  // (the messages of others that were seen: said now, and the signature covers them)
     if (chatSessionSent_ && haveChatKeys_) {  // SignedMessageLink and SignedMessageBody: what the signature covers, in the order the game feeds it
         std::uint8_t random[8];
         if (randomBytes(random, sizeof random)) {
             for (const std::uint8_t b : random) salt = (salt << 8) | b;
-            const Bytes payload = chatSignaturePayload(selfId_, chatSessionId_, chatIndex_, salt, millis / 1000, text);
+            const Bytes payload = chatSignaturePayload(selfId_, chatSessionId_, chatIndex_, salt, millis / 1000, text, seen.seen);
             std::string error;
             if (rsaSign(chatKeys_.privateKey, payload, signature, error)) ++chatIndex_;
             else std::printf("[falcon] a chat message could not be signed: %s\n", error.c_str());
@@ -931,9 +940,11 @@ void MultiplayerClient::sendChat(const std::string& text) {
     w.i64(signature.empty() ? 0 : salt);
     w.boolean(!signature.empty());
     if (!signature.empty()) w.raw(signature);  // 256 bytes
-    w.varint(0);  // LastSeenMessages.Update: the offset,
-    w.u8(0); w.u8(0); w.u8(0);  // the 20 messages seen (a bit each; none),
-    w.u8(1);  // and the checksum of that (of an empty list: 1)
+    w.varint(seen.offset);  // LastSeenMessages.Update: how many came since the last one,
+    w.u8(static_cast<int>(seen.acknowledged & 0xFF));  // which of the twenty are seen (a bit each, the oldest first),
+    w.u8(static_cast<int>((seen.acknowledged >> 8) & 0xFF));
+    w.u8(static_cast<int>((seen.acknowledged >> 16) & 0xFF));
+    w.u8(seen.checksum);  // and the checksum of those
     connection_.send(9, w.data);
 }
 
