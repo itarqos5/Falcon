@@ -1,0 +1,69 @@
+{
+  "measured": "2026-11-15",
+  "pc": "AMD Ryzen 5 5600G, AMD Radeon RX 580 2048SP, 16 GB, Windows 10, Java 25",
+  "note": "see docs/vs-vanilla.md for the method and what these numbers do not show; no frame rate comparison with vanilla was run",
+  "vanilla": [
+    {
+      "run": "vanilla8",
+      "renderDistance": 8,
+      "hidden": false,
+      "readyMs": 15244,
+      "workingSetMB": 1484.1,
+      "privateMB": 2295.9
+    },
+    {
+      "run": "vanilla-probe",
+      "renderDistance": 8,
+      "hidden": false,
+      "readyMs": 15616,
+      "workingSetMB": null,
+      "privateMB": null,
+      "note": "start-up only (a probe of the same kind)"
+    }
+  ],
+  "falconFirstStart": [
+    {
+      "run": "falcon8a",
+      "renderDistance": 8,
+      "hidden": true,
+      "readyMs": 9227,
+      "workingSetMB": null,
+      "privateMB": null,
+      "note": "memory not read (the game had ended)"
+    },
+    {
+      "run": "falcon8",
+      "renderDistance": 8,
+      "hidden": true,
+      "readyMs": 9195,
+      "workingSetMB": 244.6,
+      "privateMB": 369.6
+    },
+    {
+      "run": "falcon8warm",
+      "renderDistance": 8,
+      "hidden": true,
+      "readyMs": 9073,
+      "workingSetMB": 245.7,
+      "privateMB": 372.4
+    }
+  ],
+  "falconLaterStarts": [
+    {
+      "run": "falcon8w",
+      "renderDistance": 8,
+      "hidden": true,
+      "readyMs": 5268,
+      "workingSetMB": 244.8,
+      "privateMB": 372.8
+    },
+    {
+      "run": "falcon16w",
+      "renderDistance": 16,
+      "hidden": true,
+      "readyMs": 5294,
+      "workingSetMB": 391.5,
+      "privateMB": 521.3
+    }
+  ]
+}
