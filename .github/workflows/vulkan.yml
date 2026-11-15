@@ -4,7 +4,8 @@ name: Vulkan
 
 on:
   push:
-    branches: [vulkan]
+    branches: [main]
+    paths-ignore: ['website/**', 'docs/**', '**.md', '.github/workflows/discord.yml']
   workflow_dispatch:
 
 permissions:
