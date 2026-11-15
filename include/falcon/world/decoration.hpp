@@ -2,6 +2,7 @@
 
 #include "falcon/world/block_registry.hpp"
 #include "falcon/world/chunk.hpp"
+#include "falcon/worldgen/lod_surface.hpp"
 #include "falcon/worldgen/overworld_generator.hpp"
 
 #include <cstdint>
@@ -22,6 +23,10 @@ namespace falcon {
 class Decorator {
 public:
     Decorator(const worldgen::OverworldGenerator& generator, const BlockRegistry& registry, std::int64_t seed);
+
+    // What a biome grows, for the far levels of detail (worldgen/lod_surface.hpp), which draw forests without making a tree: how many trees a chunk of it has, the kind of the
+    // commonest (0 none, 1 oak, 2 birch, 3 spruce, 4 acacia, 5 jungle, 6 cherry, 7 dark oak) and how tall such a tree usually is.
+    [[nodiscard]] worldgen::LodTrees treeFacts(worldgen::BiomeId biome) const;
 
     // Decorates a freshly generated chunk (before it is shared with other threads).
     void decorate(Chunk& chunk, int chunkX, int chunkZ, const worldgen::ChunkExtras& extras) const;

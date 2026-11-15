@@ -114,6 +114,15 @@ public:
     // point-sampled downward from the preliminary surface; it can differ from the real chunk by a block next to
     // caves). Fluids and surface rules are ignored; below sea level this is the sea floor.
     [[nodiscard]] int surfaceHeightAt(int x, int z) const;
+    // The y of the highest solid block of every column of a chunk (index x + 16 * z), from the same final density the chunk's blocks are made from, so it is exactly the
+    // chunk's ground, but without the aquifers, the surface rules, the caves or anything else that follows: about 4 ms a chunk, 16 microseconds a column.
+    void surfaceHeights(int chunkX, int chunkZ, std::array<std::int16_t, 256>& out) const;
+    // The same answer for a column whose ground is one piece (no floating islands), in a fraction of the time: starting from the preliminary surface it probes the
+    // final density upward in doubling steps to where the solid ends, then halves the gap. Flat ground costs two evaluations instead of a scan of thirty.
+    [[nodiscard]] int surfaceHeightQuickAt(int x, int z) const;
+    // The preliminary surface level of a column (the game's aquifer surface, "find_top_surface"): one evaluation of a function of x and z only, so far cheaper than
+    // surfaceHeightAt, and the terrain's height without the jagged detail that the final density adds (the level LODs far away are drawn from).
+    [[nodiscard]] int preliminarySurfaceAt(int x, int z) const;
 
     struct Spawn {
         double x, y, z;

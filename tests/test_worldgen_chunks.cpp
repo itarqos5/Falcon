@@ -1,6 +1,60 @@
 // D:/Projects/Falcon/tests/worldgen_chunks tests (the others are in D:/Projects/Falcon/tests/test_worldgen_chunks_*.cpp).
 #include "test_worldgen_chunks_support.hpp"
 
+#include "falcon/worldgen/lod_surface.hpp"
+
+// The surface the levels of detail are drawn from (worldgen/lod_surface.hpp), against the chunks the generator really makes: the ground read from whole chunks is the
+// chunk's own to a block, and the cheaper ways of getting a height are closer to it the more they are told (a corrected surface beats the bare preliminary one).
+void testLodSurface(const GameData& gd, const falcon::BlockRegistry& registry) {
+    std::string error;
+    std::shared_ptr<const OverworldGenerator> gen = OverworldGenerator::create(gd.root, registry, 12345, error);
+    CHECK(gen != nullptr);
+    if (!gen) return;
+    const falcon::worldgen::LodSurface lod(gen);
+    const auto spawn = gen->findSpawn();
+    const int baseX = static_cast<int>(std::floor(spawn.x)) >> 4, baseZ = static_cast<int>(std::floor(spawn.z)) >> 4;
+
+    long total = 0, within4 = 0;
+    double absolute = 0.0;
+    for (int cz = baseZ - 2; cz <= baseZ + 2; ++cz) {
+        for (int cx = baseX - 2; cx <= baseX + 2; ++cx) {
+            falcon::worldgen::ChunkExtras extras;
+            (void)gen->generate(cx, cz, extras);
+            const falcon::worldgen::LodGrid grid = lod.grid(cx * 16, cz * 16, 1, 16, falcon::worldgen::LodMode::Chunk);
+            for (int j = 0; j < 16; ++j) {
+                for (int i = 0; i < 16; ++i) {
+                    const int real = extras.heightmaps.worldSurface[static_cast<std::size_t>(i + 16 * j)] - 1;  // the top block (the sea's surface over water)
+                    const falcon::worldgen::LodColumn& c = grid.at(i, j);
+                    const int ground = std::max<int>(c.floor, falcon::worldgen::LodSurface::kSeaLevel);
+                    const int off = std::abs(ground - real);
+                    ++total;
+                    absolute += off;
+                    within4 += off <= 4;
+                }
+            }
+        }
+    }
+    std::printf("  lod surface: %ld columns read from whole chunks, mean error %.2f blocks, %.1f%% within 4\n", total, absolute / static_cast<double>(total),
+                100.0 * static_cast<double>(within4) / static_cast<double>(total));
+    CHECK(absolute / static_cast<double>(total) < 1.0);
+    CHECK(static_cast<double>(within4) > 0.98 * static_cast<double>(total));
+
+    // The cheaper modes against that, on cells of 8 blocks.
+    const auto error8 = [&](falcon::worldgen::LodMode mode) {
+        const int originX = (baseX - 2) * 16, originZ = (baseZ - 2) * 16;
+        const falcon::worldgen::LodGrid truth = lod.grid(originX, originZ, 8, 8, falcon::worldgen::LodMode::Chunk);
+        const falcon::worldgen::LodGrid other = lod.grid(originX, originZ, 8, 8, mode);
+        double sum = 0.0;
+        for (int j = 0; j < 8; ++j) {
+            for (int i = 0; i < 8; ++i) sum += std::abs(other.at(i, j).floor - truth.at(i, j).floor);
+        }
+        return sum / 64.0;
+    };
+    const double preliminary = error8(falcon::worldgen::LodMode::Preliminary), residual = error8(falcon::worldgen::LodMode::Residual);
+    std::printf("  lod surface, cells of 8: preliminary %.2f blocks off, corrected %.2f\n", preliminary, residual);
+    CHECK(residual <= preliminary);
+}
+
 // The carvers and the ores (worldgen/underground.hpp): caves cut into the rock and join across chunk borders, lava lies at the bottom of them, the ores appear in their
 // stone and deepslate variants, and a chunk is the same however often it is made.
 void testUnderground(const GameData& gd, const falcon::BlockRegistry& registry, const OverworldGenerator& plain) {
@@ -194,6 +248,7 @@ int main() {
                     testErrorsAndFacts(gd, *registry, *gen);
                     testFluidTracking(gd, *registry, *gen);
                     testUnderground(gd, *registry, *gen);
+                    testLodSurface(gd, *registry);
                     performanceReport(gd, *registry);
                 }
             }

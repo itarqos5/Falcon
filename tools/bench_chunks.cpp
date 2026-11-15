@@ -11,6 +11,7 @@
 #include "falcon/world/chunk.hpp"
 #include "falcon/world/decoration.hpp"
 #include "falcon/world/light.hpp"
+#include "falcon/worldgen/lod_surface.hpp"
 #include "falcon/worldgen/noise_router.hpp"
 #include "falcon/worldgen/overworld_generator.hpp"
 #include "falcon/worldgen/underground.hpp"
@@ -84,7 +85,7 @@ int main(int argc, char** argv) {
     int size = 12;
     unsigned threads = 1;
     std::int64_t seed = 12345;
-    bool withLight = false, withCaves = true, withDecoration = true;
+    bool withLight = false, withCaves = true, withDecoration = true, lodBench = false;
     std::string samplePhase, sampleFile;  // --sample gen|light <file>
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
@@ -94,6 +95,7 @@ int main(int argc, char** argv) {
         else if (a == "--light") withLight = true;
         else if (a == "--no-caves") withCaves = false;
         else if (a == "--no-decorate") withDecoration = false;
+        else if (a == "--lod-bench") lodBench = true;
         else if (a == "--sample" && i + 2 < argc) {
             samplePhase = argv[++i];
             sampleFile = argv[++i];
@@ -135,6 +137,94 @@ int main(int argc, char** argv) {
         generator->setChunkStage([&underground, self](std::vector<falcon::Block>& blocks, int cx, int cz) { underground.apply(blocks, cx, cz, *self); });
     }
     const falcon::Decorator decorator(*generator, *registry, seed);
+
+    if (lodBench) {
+        // What the LODs are drawn from (worldgen/lod_surface.hpp): how long a column takes to predict, and how close the prediction is to the chunks the game makes.
+        const auto where = generator->findSpawn();
+        const int cx0 = static_cast<int>(std::floor(where.x)) >> 4, cz0 = static_cast<int>(std::floor(where.z)) >> 4;
+        const std::shared_ptr<const falcon::worldgen::OverworldGenerator> shared(std::move(generator));
+        const falcon::worldgen::LodSurface lod(shared);
+        using falcon::worldgen::LodPredictor;
+        const int columns = 20000;
+        const auto t1 = Clock::now();
+        long exact = 0;
+        for (int i = 0; i < columns / 10; ++i) exact += shared->surfaceHeightAt(static_cast<int>(where.x) + (i % 200) * 16, static_cast<int>(where.z) + (i / 200) * 16);
+        std::printf("full scan (the old density scan): %.1f microseconds a column (checksum %ld)\n", millisSince(t1) * 1000.0 / (columns / 10), exact);
+        const auto tb = Clock::now();
+        long biomes = 0;
+        for (int i = 0; i < columns; ++i) biomes += shared->biomeAt(static_cast<int>(where.x) + (i % 200) * 16, 70, static_cast<int>(where.z) + (i / 200) * 16);
+        std::printf("biome alone      : %.1f microseconds a column (checksum %ld)\n", millisSince(tb) * 1000.0 / columns, biomes);
+        for (const LodPredictor how : {LodPredictor::Preliminary, LodPredictor::Density}) {
+            const auto t0 = Clock::now();
+            long sum = 0;
+            for (int i = 0; i < columns; ++i) sum += lod.column(static_cast<int>(where.x) + (i % 200) * 16, static_cast<int>(where.z) + (i / 200) * 16, how).height;
+            std::printf("%s: %.1f microseconds a column (checksum %ld)\n", how == LodPredictor::Preliminary ? "preliminary surface" : "density scan      ", millisSince(t0) * 1000.0 / columns, sum);
+        }
+
+        // Against real chunks: the top of the terrain each predictor says, and the top block the generator made (trees and the caves stage left out).
+        const int radius = 6;
+        for (const LodPredictor how : {LodPredictor::Preliminary, LodPredictor::Density}) {
+            long total = 0, within1 = 0, within4 = 0, within12 = 0;
+            double absolute = 0.0;
+            for (int cz = cz0 - radius; cz <= cz0 + radius; ++cz) {
+                for (int cx = cx0 - radius; cx <= cx0 + radius; ++cx) {
+                    falcon::worldgen::ChunkExtras extras;
+                    (void)shared->generate(cx, cz, extras);
+                    for (int i = 0; i < 256; ++i) {
+                        const int real = extras.heightmaps.worldSurface[static_cast<std::size_t>(i)] - 1;  // the top block (the sea's surface over water)
+                        const int guess = lod.column(cx * 16 + (i & 15), cz * 16 + (i >> 4), how).height;
+                        const int off = std::abs(guess - real);
+                        ++total;
+                        absolute += off;
+                        within1 += off <= 1;
+                        within4 += off <= 4;
+                        within12 += off <= 12;
+                    }
+                }
+            }
+            std::printf("%s against %ld real columns: mean error %.2f blocks; within 1 block %.0f%%, within 4 %.0f%%, within 12 %.0f%%\n",
+                        how == LodPredictor::Preliminary ? "preliminary surface" : "density scan      ", total, absolute / static_cast<double>(total),
+                        100.0 * static_cast<double>(within1) / static_cast<double>(total), 100.0 * static_cast<double>(within4) / static_cast<double>(total),
+                        100.0 * static_cast<double>(within12) / static_cast<double>(total));
+        }
+
+        // The grids a tile is made of, each way of getting the heights, against the same real columns: a square of 13 x 13 chunks, sampled every 8 and every 16 blocks.
+        const int span = (2 * radius + 1) * 16;
+        std::vector<int> realTop(static_cast<std::size_t>(span) * static_cast<std::size_t>(span), 0);
+        for (int cz = cz0 - radius; cz <= cz0 + radius; ++cz) {
+            for (int cx = cx0 - radius; cx <= cx0 + radius; ++cx) {
+                falcon::worldgen::ChunkExtras extras;
+                (void)shared->generate(cx, cz, extras);
+                for (int i = 0; i < 256; ++i) {
+                    realTop[static_cast<std::size_t>(((cz - (cz0 - radius)) * 16 + (i >> 4)) * span + (cx - (cx0 - radius)) * 16 + (i & 15))] =
+                        extras.heightmaps.worldSurface[static_cast<std::size_t>(i)] - 1;
+                }
+            }
+        }
+        for (const int cell : {1, 2, 8}) {
+            const int cells = (span - cell / 2) / cell - 1;  // the whole square
+            for (const falcon::worldgen::LodMode mode : {falcon::worldgen::LodMode::Preliminary, falcon::worldgen::LodMode::Residual, falcon::worldgen::LodMode::Direct, falcon::worldgen::LodMode::Chunk}) {
+                const auto t = Clock::now();
+                const falcon::worldgen::LodGrid grid = lod.grid((cx0 - radius) * 16, (cz0 - radius) * 16, cell, cells, mode);
+                const double ms = millisSince(t);
+                double absolute = 0.0;
+                long within4 = 0, total = 0;
+                for (int j = 0; j < cells; ++j) {
+                    for (int i = 0; i < cells; ++i) {
+                        const int off = std::abs(grid.at(i, j).height - realTop[static_cast<std::size_t>((j * cell + cell / 2) * span + i * cell + cell / 2)]);
+                        absolute += off;
+                        within4 += off <= 4;
+                        ++total;
+                    }
+                }
+                std::printf("grid, cell %2d, %-11s: %7.1f ms for %ld columns (%.1f microseconds each), mean error %.2f blocks, within 4 blocks %.0f%%\n", cell,
+                            mode == falcon::worldgen::LodMode::Preliminary ? "preliminary" : mode == falcon::worldgen::LodMode::Residual ? "residual" : mode == falcon::worldgen::LodMode::Direct ? "direct" : "chunk", ms,
+                            static_cast<long>(grid.columns.size()), ms * 1000.0 / static_cast<double>(grid.columns.size()), absolute / static_cast<double>(total),
+                            100.0 * static_cast<double>(within4) / static_cast<double>(total));
+            }
+        }
+        return 0;
+    }
 
     const auto spawn = generator->findSpawn();
     const int baseX = (static_cast<int>(std::floor(spawn.x)) >> 4) - size / 2, baseZ = (static_cast<int>(std::floor(spawn.z)) >> 4) - size / 2;

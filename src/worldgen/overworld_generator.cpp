@@ -486,6 +486,67 @@ int OverworldGenerator::surfaceHeightAt(int x, int z) const {
     return s.minY;
 }
 
+void OverworldGenerator::surfaceHeights(int chunkX, int chunkZ, std::array<std::int16_t, 256>& out) const {
+    const NoiseSettings& s = router_->settings();
+    const int height = s.height;
+    const float* density = router_->finalDensityVolumeScratch(chunkX, chunkZ);
+    for (int z = 0; z < 16; ++z) {
+        for (int x = 0; x < 16; ++x) {
+            const float* column = density + static_cast<std::size_t>(height) * (static_cast<std::size_t>(x) + 16u * static_cast<std::size_t>(z));
+            int top = 0;  // the bottom of the world when nothing in the column is solid
+            for (int yi = height - 1; yi >= 0; --yi) {
+                if (column[yi] > 0.0f) {
+                    top = yi;
+                    break;
+                }
+            }
+            out[static_cast<std::size_t>(x + 16 * z)] = static_cast<std::int16_t>(s.minY + top);
+        }
+    }
+}
+
+int OverworldGenerator::surfaceHeightQuickAt(int x, int z) const {
+    const NoiseSettings& s = router_->settings();
+    const int minY = s.minY, maxY = s.minY + s.height - 1;
+    const DensityFunction& density = router_->finalDensity();
+    const auto solid = [&](int y) { return density.compute(x, y, z) > 0.0f; };
+    int p = preliminarySurfaceAt(x, z);
+    if (!solid(p)) {
+        // Below the preliminary level there is air (a cave or the sea over a basin): walk down to the first solid block.
+        for (int y = p - 1; y >= minY; --y) {
+            if (solid(y)) return y;
+        }
+        return minY;
+    }
+    // Solid here: the top is above or at p. Gallop up while it stays solid, then bisect between the last solid block and the first air.
+    int lastSolid = p, step = 1;
+    int firstAir = -1;
+    while (firstAir < 0) {
+        const int y = std::min(lastSolid + step, maxY + 1);
+        if (y > maxY) {
+            firstAir = maxY + 1;
+        } else if (solid(y)) {
+            lastSolid = y;
+            step *= 2;
+        } else {
+            firstAir = y;
+        }
+    }
+    while (firstAir - lastSolid > 1) {
+        const int mid = (lastSolid + firstAir) / 2;
+        if (solid(mid)) lastSolid = mid;
+        else firstAir = mid;
+    }
+    return lastSolid;
+}
+
+int OverworldGenerator::preliminarySurfaceAt(int x, int z) const {
+    const NoiseSettings& s = router_->settings();
+    const int maxY = s.minY + s.height - 1;
+    if (!router_->hasAquifers()) return maxY;
+    return std::clamp(javaFloorF(router_->aquiferSurfaceLevel().compute(x, 0, z)), s.minY, maxY);
+}
+
 // ---------------------------------------------------------------------------------------------------------------
 // The default spawn (UNVERIFIED port, from memory of the game's logic; the research spec does not cover it):
 //   1. Climate.findSpawnPosition: start at (0, 0), then two radial searches (radius 2048 in steps of 512, then radius

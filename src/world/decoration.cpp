@@ -95,6 +95,18 @@ Decorator::Decorator(const worldgen::OverworldGenerator& generator, const BlockR
     }
 }
 
+worldgen::LodTrees Decorator::treeFacts(worldgen::BiomeId biome) const {
+    worldgen::LodTrees out;
+    if (biome >= profiles_.size()) return out;
+    const Profile& p = profiles_[biome];
+    out.kind = static_cast<int>(p.trees[0]);
+    if (out.kind == 0) return out;
+    out.perChunk = p.treesPerChunk;
+    static constexpr int kHeights[8] = {0, 6, 6, 8, 6, 11, 6, 7};  // by kind: the middle of what placeTree makes
+    out.height = kHeights[out.kind];
+    return out;
+}
+
 // What each biome grows. The tree counts and the patch counts follow the game's own placed features: grass comes in a
 // few patches a chunk, while flowers and tall grass sit behind a rarity filter (1 in 32 chunks for plains and forest),
 // so most chunks have none and the ones that do have a clump.
