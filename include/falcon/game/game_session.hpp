@@ -299,6 +299,7 @@ private:
     double hudTickAccumulator_ = 0.0;
     int framebufferWidth_ = 0, framebufferHeight_ = 0;
     // The right-hand side of the debug screen: the graphics lines never change (read once), the memory of the PC is read once a second.
+    float swimAmount_ = 0.0f, swimAmountOld_ = 0.0f;                        // Player.swimAmount: how far into the swimming pose (0 to 1)
     std::vector<std::string> gpuLines_;
     SystemMemory systemMemory_;
     double systemMemoryAge_ = 1.0e9;

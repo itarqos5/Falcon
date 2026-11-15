@@ -120,6 +120,7 @@ public:
     [[nodiscard]] std::array<double, 3> eye() const { return {x, eyeY(), z}; }
     [[nodiscard]] Aabb boundingBox() const;
     [[nodiscard]] bool isSwimming() const { return !flying && !spectator && swimming_; }
+    [[nodiscard]] bool isVisuallySwimming() const { return pose_ == PlayerPose::Swimming; }  // the swimming (or crawling) pose
     [[nodiscard]] bool isMovingSlowly() const { return crouching_ || (pose_ == PlayerPose::Swimming && !inWater); }
     [[nodiscard]] bool isUnderWater() const { return wasUnderwater_; }  // the eyes were in water
     [[nodiscard]] bool isInLava() const { return !firstTick_ && lavaHeight_ > 0.0; }

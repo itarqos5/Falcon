@@ -7,6 +7,7 @@
 
 #include <array>
 #include <filesystem>
+#include <map>
 #include <memory>
 #include <string>
 
@@ -28,6 +29,12 @@ struct BodyPose {
     std::array<float, 3> light{1.0f, 1.0f, 1.0f};  // the light colour where the player stands
     // Cape, Jacket, Left Sleeve, Right Sleeve, Left Pant Leg, Right Pant Leg, Hat: the Skin Customization options.
     std::array<bool, 7> parts = {true, true, true, true, true, true, true};
+    // Swimming (Player.getSwimAmount: 0 to 1 and back at 0.09 a tick): the body lies down and the arms crawl.
+    float swimAmount = 0.0f;
+    bool visuallySwimming = false;  // the swimming pose (not just a swimAmount that is running down)
+    bool inWater = false;
+    // What is worn, as item names ("iron_helmet"): head, chest, legs, feet; empty for nothing.
+    std::array<std::string, 4> armor;
 };
 
 // The player seen from outside (F5): the game's real player model (entity-models.json) in the default skin, in the world, animated the way the
@@ -46,9 +53,14 @@ public:
 private:
     PlayerBodyRenderer() = default;
     EntityPart model_;
+    std::array<EntityPart, 4> armorModels_;  // helmet, chestplate, leggings, boots (the armor layers of the player model)
+    std::array<bool, 4> haveArmorModel_{};
+    std::map<std::string, std::unique_ptr<Texture2D>> armorTextures_;  // by "humanoid/iron"; null for one that cannot be read
+    const ResourceManager* resources_ = nullptr;
+    const Texture2D* armorTexture(const std::string& layer, const std::string& material);
     Texture2D skin_;
     ShaderProgram shader_;
-    gl::GLint uProj_ = -1, uLight_ = -1, uSkin_ = -1;
+    gl::GLint uProj_ = -1, uLight_ = -1, uSkin_ = -1, uTint_ = -1;
     gl::GLuint vao_ = 0, vbo_ = 0;
 };
 

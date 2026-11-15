@@ -914,6 +914,8 @@ void GameSession::tickBody() {
 
 bool GameSession::giveItem(const std::string& spec) {
     // "item", "item:count" or "item:count:wear".
+    swimAmountOld_ = swimAmount_;  // Player.updateSwimAmount
+    swimAmount_ = player_.isVisuallySwimming() ? std::min(1.0f, swimAmount_ + 0.09f) : std::max(0.0f, swimAmount_ - 0.09f);
     std::vector<std::string> parts;
     for (std::size_t from = 0;;) {
         const std::size_t colon = spec.find(':', from);
@@ -1335,6 +1337,14 @@ std::vector<std::string> GameSession::debugLines() const {
     const int by = static_cast<int>(std::floor(player_.y));
     const int bz = static_cast<int>(std::floor(player_.z));
     lines.push_back(format("Block: %d %d %d   Chunk: %d %d in %d %d", bx, by, bz, bx & 15, bz & 15, chunkOf(bx), chunkOf(bz)));
+            pose.swimAmount = swimAmountOld_ + (swimAmount_ - swimAmountOld_) * t;
+            pose.visuallySwimming = player_.isVisuallySwimming();
+            pose.inWater = player_.inWater;
+            for (std::size_t i = 0; i < 4; ++i) {  // head, chest, legs, feet
+                static constexpr int kSlots[4] = {Inventory::kHead, Inventory::kChest, Inventory::kLegs, Inventory::kFeet};
+                const ItemStack& worn = inventory_.item(kSlots[i]);
+                if (!worn.isEmpty() && worn.type().armorSlot != EquipSlot::None) pose.armor[i] = worn.type().name;
+            }
     lines.push_back(format("Facing: %s (%.1f / %.1f)", facing(player_.yaw), static_cast<double>(player_.yaw), static_cast<double>(player_.pitch)));
     if (overworld_) {
         const std::string_view biome = overworld_->biomeNameAt(static_cast<int>(std::floor(player_.x)), static_cast<int>(std::floor(player_.y)), static_cast<int>(std::floor(player_.z)));

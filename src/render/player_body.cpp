@@ -33,11 +33,12 @@ in vec2 vUv;
 in float vShade;
 uniform sampler2D uSkin;
 uniform vec3 uLight;
+uniform vec3 uTint;
 out vec4 frag;
 void main() {
     vec4 c = texture(uSkin, vUv);
     if (c.a < 0.1) discard;
-    frag = vec4(c.rgb * vShade * uLight, 1.0);
+    frag = vec4(c.rgb * uTint * vShade * uLight, 1.0);
 }
 )";
 
@@ -114,6 +115,26 @@ Xf partTransform(const EntityPart& p) {
                mul(rotZ(p.rotation[2]), mul(rotY(p.rotation[1]), mul(rotX(p.rotation[0]), scaling({p.scale[0], p.scale[1], p.scale[2]})))));
 }
 
+// Mth.rotLerp for radians (ModelPart: HumanoidModel.rotlerpRad): the short way round.
+float rotlerp(float a, float from, float to) {
+    float f = std::fmod(to - from, 2.0f * kPi);
+    if (f < -kPi) f += 2.0f * kPi;
+    if (f >= kPi) f -= 2.0f * kPi;
+    return from + a * f;
+}
+float quadraticArmUpdate(float f) { return -65.0f * f + f * f; }
+
+// The armor layers follow the body's limbs: every part takes the pose of the part of the same name.
+void copyPose(EntityPart& dst, const EntityPart& whole) {
+    for (EntityPart& part : dst.children) {
+        if (const EntityPart* src = const_cast<EntityPart&>(whole).find(part.name)) {
+            part.offset = src->offset;
+            part.rotation = src->rotation;
+            part.scale = src->scale;
+        }
+    }
+}
+
 void collect(const EntityPart& part, const Xf& parent, const Xf& toWorld, const std::array<bool, 7>& parts, std::vector<Vertex>& out) {
     if (part.name == "jacket" && !parts[1]) return;
     if (part.name == "left_sleeve" && !parts[2]) return;
@@ -159,10 +180,22 @@ std::unique_ptr<PlayerBodyRenderer> PlayerBodyRenderer::create(const ResourceMan
         return nullptr;
     }
     out->skin_ = Texture2D(*skin, FilterMode::Nearest);
+    out->resources_ = &resources;
+    {  // the armor layers of the model (without them nothing is worn)
+        static const char* const kLayers[4] = {"minecraft:player#helmet", "minecraft:player#chestplate", "minecraft:player#leggings", "minecraft:player#boots"};
+        for (std::size_t i = 0; i < 4; ++i) {
+            std::string armorError;
+            if (auto armorModel = loadEntityModel(dir, kLayers[i], armorError)) {
+                out->armorModels_[i] = std::move(*armorModel);
+                out->haveArmorModel_[i] = true;
+            }
+        }
+    }
     out->shader_ = ShaderProgram("player_body", kVertex, kFragment);
     out->uProj_ = out->shader_.uniform("uProj");
     out->uLight_ = out->shader_.uniform("uLight");
     out->uSkin_ = out->shader_.uniform("uSkin");
+    out->uTint_ = out->shader_.uniform("uTint");
     gl::GenVertexArrays(1, &out->vao_);
     gl::GenBuffers(1, &out->vbo_);
     gl::BindVertexArray(out->vao_);
@@ -182,6 +215,21 @@ PlayerBodyRenderer::~PlayerBodyRenderer() {
     if (vbo_ != 0) gl::DeleteBuffers(1, &vbo_);
 }
 
+// The picture of an armor layer ("humanoid" or "humanoid_leggings") for a material ("iron"); null when the game has none.
+const Texture2D* PlayerBodyRenderer::armorTexture(const std::string& layer, const std::string& material) {
+    const std::string key = layer + "/" + material;
+    auto it = armorTextures_.find(key);
+    if (it == armorTextures_.end()) {
+        std::unique_ptr<Texture2D> texture;
+        if (resources_ != nullptr) {
+            const auto bytes = resources_->readBytes(ResourceLocation("minecraft", "textures/entity/equipment/" + key + ".png"));
+            if (const auto image = bytes ? decodePng(*bytes) : std::nullopt) texture = std::make_unique<Texture2D>(*image, FilterMode::Nearest);
+        }
+        it = armorTextures_.emplace(key, std::move(texture)).first;
+    }
+    return it->second.get();
+}
+
 void PlayerBodyRenderer::render(const Matrix4f& viewProj, const std::array<double, 3>& cam, const BodyPose& pose) {
     // HumanoidModel.setupAnim on a copy of the model.
     EntityPart model = model_;
@@ -194,6 +242,7 @@ void PlayerBodyRenderer::render(const Matrix4f& viewProj, const std::array<doubl
     if (head != nullptr) {
         head->rotation[1] = pose.headYaw * kDegrees;
         head->rotation[0] = pose.headPitch * kDegrees;
+        if (pose.swimAmount > 0.0f && pose.visuallySwimming) head->rotation[0] = rotlerp(pose.swimAmount, head->rotation[0], -kPi / 4.0f);  // looks along the swim
     }
     if (rightArm != nullptr && leftArm != nullptr && rightLeg != nullptr && leftLeg != nullptr && body != nullptr) {
         const float p = pose.walkPosition * 0.6662f, s = pose.walkSpeed;
@@ -252,12 +301,45 @@ void PlayerBodyRenderer::render(const Matrix4f& viewProj, const std::array<doubl
         rightArm->rotation[0] += std::sin(age * 0.067f) * 0.05f;
         leftArm->rotation[2] -= std::cos(age * 0.09f) * 0.05f + 0.05f;
         leftArm->rotation[0] -= std::sin(age * 0.067f) * 0.05f;
+        // HumanoidModel.setupAnim, swimAmount > 0: the arms go over the head and make the crawl stroke (a 26-step cycle), the legs kick.
+        if (pose.swimAmount > 0.0f) {
+            const float sw = pose.swimAmount, m = std::fmod(pose.walkPosition, 26.0f);
+            const float n = pose.attackProgress > 0.0f ? 0.0f : sw, o = sw;  // (the right arm keeps swinging when it attacks)
+            const auto lerp = [](float a, float from, float to) { return from + a * (to - from); };
+            const auto arms = [&](float xr, float zl, float zr) {
+                leftArm->rotation[0] = rotlerp(o, leftArm->rotation[0], xr);
+                rightArm->rotation[0] = lerp(n, rightArm->rotation[0], xr);
+                leftArm->rotation[1] = rotlerp(o, leftArm->rotation[1], kPi);
+                rightArm->rotation[1] = lerp(n, rightArm->rotation[1], kPi);
+                leftArm->rotation[2] = rotlerp(o, leftArm->rotation[2], zl);
+                rightArm->rotation[2] = lerp(n, rightArm->rotation[2], zr);
+            };
+            if (m < 14.0f) {
+                const float q = quadraticArmUpdate(m) / quadraticArmUpdate(14.0f);
+                arms(0.0f, kPi + 1.8707964f * q, kPi - 1.8707964f * q);
+            } else if (m < 22.0f) {
+                const float ph = (m - 14.0f) / 8.0f;
+                arms(kPi / 2.0f * ph, 5.012389f - 1.8707964f * ph, 1.2707963f + 1.8707964f * ph);
+            } else {
+                const float ph = (m - 22.0f) / 4.0f;
+                arms(kPi / 2.0f - kPi / 2.0f * ph, kPi, kPi);
+            }
+            leftLeg->rotation[0] = lerp(sw, leftLeg->rotation[0], 0.3f * std::cos(pose.walkPosition * 0.33333334f + kPi));
+            rightLeg->rotation[0] = lerp(sw, rightLeg->rotation[0], 0.3f * std::cos(pose.walkPosition * 0.33333334f));
+        }
     }
 
     // LivingEntityRenderer: to the player's place (a crouching player is 2/16 lower), turned about Y, the model's y-down mirrored space flipped,
     // shrunk to 0.9375 and dropped by 1.501.
     const double crouchDrop = pose.crouching ? -2.0 / 16.0 : 0.0;
     Xf entity = mul(scaling({-0.9375, -0.9375, 0.9375}), translation({0.0, -1.501, 0.0}));
+    if (pose.swimAmount > 0.0f) {  // PlayerRenderer.setupRotations: lying down by the pitch of the view (straight down out of the water), and lower and forward
+        const float target = pose.inWater ? -90.0f - pose.headPitch : -90.0f;
+        const float lie = target * pose.swimAmount;
+        Xf lay = rotX(static_cast<double>(lie) * static_cast<double>(kDegrees));
+        if (pose.visuallySwimming) lay = mul(lay, translation({0.0, -1.0, 0.3}));
+        entity = mul(lay, entity);
+    }
     entity = mul(rotY((180.0 - static_cast<double>(pose.bodyYaw)) * static_cast<double>(kDegrees)), entity);
     entity = mul(translation({pose.position[0] - cam[0], pose.position[1] - cam[1] + crouchDrop, pose.position[2] - cam[2]}), entity);
     std::vector<Vertex> vertices;
@@ -271,12 +353,38 @@ void PlayerBodyRenderer::render(const Matrix4f& viewProj, const std::array<doubl
     shader_.use();
     gl::UniformMatrix4fv(uProj_, 1, 0, viewProj.m.data());
     gl::Uniform3f(uLight_, pose.light[0], pose.light[1], pose.light[2]);
-    skin_.bind(0);
     gl::Uniform1i(uSkin_, 0);
     gl::BindVertexArray(vao_);
     gl::BindBuffer(gl::ARRAY_BUFFER, vbo_);
-    gl::BufferData(gl::ARRAY_BUFFER, static_cast<gl::GLsizeiptr>(vertices.size() * sizeof(Vertex)), vertices.data(), gl::STREAM_DRAW);
-    gl::DrawArrays(gl::TRIANGLES, 0, static_cast<gl::GLsizei>(vertices.size()));
+    const auto draw = [&](const std::vector<Vertex>& list, const Texture2D& texture, float r, float g, float b) {
+        if (list.empty()) return;
+        texture.bind(0);
+        gl::Uniform3f(uTint_, r, g, b);
+        gl::BufferData(gl::ARRAY_BUFFER, static_cast<gl::GLsizeiptr>(list.size() * sizeof(Vertex)), list.data(), gl::STREAM_DRAW);
+        gl::DrawArrays(gl::TRIANGLES, 0, static_cast<gl::GLsizei>(list.size()));
+    };
+    draw(vertices, skin_, 1.0f, 1.0f, 1.0f);
+    // The armor worn: each layer of the model in the posed body's pose, with its own picture (leather is brown unless dyed, with a plain overlay on top).
+    for (std::size_t slot = 0; slot < 4; ++slot) {
+        const std::string& item = pose.armor[slot];
+        if (item.empty() || !haveArmorModel_[slot]) continue;
+        const std::size_t cut = item.rfind('_');
+        if (cut == std::string::npos) continue;
+        std::string material = item.substr(0, cut);
+        if (material == "golden") material = "gold";
+        if (material == "turtle") material = "turtle_scute";
+        const Texture2D* texture = armorTexture(slot == 2 ? "humanoid_leggings" : "humanoid", material);
+        if (texture == nullptr) continue;
+        EntityPart worn = armorModels_[slot];
+        copyPose(worn, model);
+        std::vector<Vertex> list;
+        collect(worn, Xf{}, entity, pose.parts, list);
+        const bool leather = material == "leather";
+        draw(list, *texture, leather ? 0.627f : 1.0f, leather ? 0.396f : 1.0f, leather ? 0.251f : 1.0f);  // (0xA06540: the colour of undyed leather)
+        if (leather) {
+            if (const Texture2D* overlay = armorTexture(slot == 2 ? "humanoid_leggings" : "humanoid", "leather_overlay")) draw(list, *overlay, 1.0f, 1.0f, 1.0f);
+        }
+    }
     gl::BindVertexArray(0);
 }
 
