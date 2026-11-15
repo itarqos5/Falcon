@@ -60,6 +60,16 @@ PositionMoveRotation readPositionMoveRotation(Reader& r) {
     return p;
 }
 
+// The slots of the player's own menu (InventoryMenu) as the server numbers them: 0 the crafting result, 1-4 the crafting grid, 5-8 helmet to boots, 9-35 the inventory,
+// 36-44 the hotbar, 45 the offhand. The number of the same slot in Inventory (0-8 hotbar, 9-35, 36 boots to 39 helmet, 40 offhand); -1 for the crafting slots.
+int inventorySlotOfMenu(int menu) {
+    if (menu >= 5 && menu <= 8) return 44 - menu;  // 5 helmet (39), 6 chestplate (38), 7 leggings (37), 8 boots (36)
+    if (menu >= 9 && menu <= 35) return menu;
+    if (menu >= 36 && menu <= 44) return menu - 36;
+    if (menu == 45) return 40;
+    return -1;
+}
+
 }  // namespace
 
 MultiplayerClient::MultiplayerClient(const BlockRegistry& registry) : registry_(registry) {}
@@ -367,6 +377,56 @@ void MultiplayerClient::handlePlay(const Packet& p, RemoteHandler& h) {
             break;
         }
         case 4: break;  // block_changed_ack
+        case 18: {      // container_set_content: only the player's own inventory (container 0) is followed
+            const int container = r.varint();
+            r.varint();  // the state id
+            const int n = r.varint();
+            bool known = true;
+            for (int i = 0; i < n && r.ok && known; ++i) {
+                const ItemStack stack = readItemStack(r, componentIds_, known);
+                const int slot = inventorySlotOfMenu(i);
+                if (container == 0 && slot >= 0 && h.inventorySlot) h.inventorySlot(slot, stack);
+            }
+            break;
+        }
+        case 20: {  // container_set_slot
+            const int container = r.varint();
+            r.varint();  // the state id
+            const int menuSlot = r.i16();
+            bool known = true;
+            const ItemStack stack = readItemStack(r, componentIds_, known);
+            const int slot = inventorySlotOfMenu(menuSlot);
+            if (r.ok && container == 0 && slot >= 0 && h.inventorySlot) h.inventorySlot(slot, stack);
+            break;
+        }
+        case 110: {  // set_player_inventory
+            const int slot = r.varint();
+            bool known = true;
+            const ItemStack stack = readItemStack(r, componentIds_, known);
+            if (r.ok && slot >= 0 && slot <= 40 && h.inventorySlot) h.inventorySlot(slot, stack);
+            break;
+        }
+        case 107: {  // set_held_slot
+            const int slot = r.varint();
+            if (r.ok && slot >= 0 && slot < 9 && h.heldSlot) h.heldSlot(slot);
+            break;
+        }
+        case 60: {  // open_screen: a chest, a furnace ...: Falcon cannot show it, so it is closed again at once
+            const int container = r.varint();
+            if (r.ok) sendContainerClose(container);
+            break;
+        }
+        case 101: {  // set_entity_data: of what comes, the first entry (the flags every entity has) says whether a player sneaks
+            const int entity = r.varint();
+            const int index = r.u8();
+            const int serializer = r.varint();
+            if (r.ok && index == 0 && serializer == 0) {
+                const int flags = r.u8();
+                if (const auto it = players_.find(entity); it != players_.end() && r.ok) it->second.sneaking = (flags & 2) != 0;
+                if (entity == selfEntity_ && r.ok && h.selfFlags) h.selfFlags(flags);
+            }
+            break;
+        }
         case 124: {     // system_chat
             const StyledText text = readComponent(r);
             const bool overlay = r.boolean();
@@ -695,6 +755,46 @@ void MultiplayerClient::sendUseItemOn(int x, int y, int z, int face, double cx, 
     connection_.send(66, w.data);
 }
 
-void MultiplayerClient::sendSwing() {}
+void MultiplayerClient::sendSwing() {
+    if (phase_ != Phase::Play) return;
+    connection_.send(46, {});  // ServerboundPunchPacket has no fields
+}
+
+void MultiplayerClient::sendCreativeSlot(int inventorySlot, const ItemStack& stack) {
+    if (phase_ != Phase::Play) return;
+    const int menuSlot = inventorySlot >= 0 && inventorySlot < 9 ? 36 + inventorySlot : inventorySlot < 36 ? inventorySlot : inventorySlot == 36 ? 8 : inventorySlot == 37 ? 7 : inventorySlot == 38 ? 6 : inventorySlot == 39 ? 5 : 45;
+    Writer w;
+    w.i16(menuSlot);
+    writeItemStack(w, stack);
+    connection_.send(57, w.data);
+}
+
+void MultiplayerClient::sendUseItem(float yaw, float pitch) {
+    if (phase_ != Phase::Play) return;
+    Writer w;
+    w.varint(0);  // the main hand
+    w.varint(++sequence_);
+    w.f32(yaw);
+    w.f32(pitch);
+    connection_.send(67, w.data);
+}
+
+// ServerboundPlayerActionPacket for what has no block (drop, release use, swap hands): the position 0, the direction down, the sequence 0.
+void MultiplayerClient::sendAction(int action) {
+    if (phase_ != Phase::Play) return;
+    Writer w;
+    w.varint(action);
+    w.i64(packBlockPos(0, 0, 0));
+    w.u8(0);
+    w.varint(0);
+    connection_.send(41, w.data);
+}
+
+void MultiplayerClient::sendContainerClose(int containerId) {
+    if (phase_ != Phase::Play) return;
+    Writer w;
+    w.varint(containerId);
+    connection_.send(19, w.data);
+}
 
 }  // namespace falcon::net

@@ -242,6 +242,55 @@ StyledText componentToStyled(const NbtTag& component) {
 
 StyledText readComponent(Reader& r) { return componentToStyled(readNetworkNbt(r)); }
 
+ItemStack readItemStack(Reader& r, const ComponentIds& ids, bool& known) {
+    ItemStack stack;
+    const int count = r.varint();
+    if (!r.ok || count <= 0) return stack;
+    const int item = r.varint();
+    stack.item = static_cast<Item>(item);
+    stack.count = count;
+    const int added = r.varint();
+    const int removed = r.varint();
+    for (int i = 0; i < added && r.ok; ++i) {
+        const int type = r.varint();
+        if (type == ids.damage) stack.damage = r.varint();
+        else if (type == ids.repairCost || type == ids.maxStackSize || type == ids.maxDamage) r.varint();
+        else if (type == ids.unbreakable) {}  // (a unit: nothing is written)
+        else if (type == ids.customName) stack.customName = plainText(readComponent(r));
+        else if (type == ids.itemName) (void)readComponent(r);
+        else if (type == ids.enchantments) {
+            const int n = r.varint();
+            for (int e = 0; e < n && r.ok; ++e) {
+                r.varint();  // the enchantment
+                r.varint();  // its level
+            }
+        } else if (type == ids.glintOverride) r.boolean();
+        else if (type == ids.tooltipDisplay) {
+            r.boolean();  // hide everything
+            const int n = r.varint();
+            for (int h = 0; h < n && r.ok; ++h) r.varint();
+        } else if (type == ids.customData) (void)readNetworkNbt(r);
+        else {
+            known = false;
+            return stack;
+        }
+    }
+    for (int i = 0; i < removed && r.ok; ++i) r.varint();
+    if (!r.ok) known = false;
+    return stack;
+}
+
+void writeItemStack(Writer& w, const ItemStack& stack) {
+    if (stack.isEmpty()) {
+        w.varint(0);
+        return;
+    }
+    w.varint(stack.count);
+    w.varint(static_cast<int>(stack.item));
+    w.varint(0);
+    w.varint(0);
+}
+
 std::shared_ptr<Chunk> decodeChunk(Reader& r, int stateCount, std::string& error) {
     const int heightmaps = r.varint();
     for (int i = 0; i < heightmaps && r.ok; ++i) {

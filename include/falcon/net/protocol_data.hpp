@@ -4,6 +4,7 @@
 #include "falcon/net/bytes.hpp"
 #include "falcon/text/styled_text.hpp"
 #include "falcon/world/chunk.hpp"
+#include "falcon/world/item_stack.hpp"
 
 #include <functional>
 #include <memory>
@@ -24,5 +25,18 @@ void setComponentTranslator(std::function<std::string(const std::string&)> trans
 // The chunk of a level_chunk_with_light packet, from just after the chunk position: heightmaps, then the sections of blocks and biomes. `stateCount` is how many block
 // states there are (a palette of more than eight bits is the state's number as it is). Null and `error` when the data does not read.
 [[nodiscard]] std::shared_ptr<Chunk> decodeChunk(Reader& r, int stateCount, std::string& error);
+
+// The numbers (in the game's data component type registry) of the components of an item that Falcon can read; -1 for one the game's data does not have.
+// A component that is not one of these has no layout known here and cannot be stepped over.
+struct ComponentIds {
+    int damage = -1, repairCost = -1, maxStackSize = -1, maxDamage = -1, unbreakable = -1, customName = -1, itemName = -1, enchantments = -1, glintOverride = -1,
+        tooltipDisplay = -1, customData = -1;
+};
+
+// An item stack as the network writes it (ItemStack.OPTIONAL_STREAM_CODEC): the count, the item's number, then the components that differ from the item's own.
+// `known` turns false when a component that cannot be read was met: the stack is then what was read of it, and the reader is not after it.
+[[nodiscard]] ItemStack readItemStack(Reader& r, const ComponentIds& ids, bool& known);
+// The same the other way, without components (what a creative slot says to the server).
+void writeItemStack(Writer& w, const ItemStack& stack);
 
 }  // namespace falcon::net

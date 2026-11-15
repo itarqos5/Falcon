@@ -5,6 +5,7 @@
 #include "falcon/text/styled_text.hpp"
 #include "falcon/world/block_registry.hpp"
 #include "falcon/world/chunk.hpp"
+#include "falcon/world/item_stack.hpp"
 
 #include <array>
 #include <functional>
@@ -74,6 +75,9 @@ struct RemoteHandler {
     std::function<void(float progress, int level)> experience;
     std::function<void(int gameType)> gameMode;
     std::function<void(bool flying, bool mayFly, bool instabuild, bool invulnerable)> abilities;
+    std::function<void(int slot, const ItemStack&)> inventorySlot;  // a slot of the player's own inventory (numbered as Inventory is: 0-8 hotbar, 36-39 boots to helmet, 40 offhand)
+    std::function<void(int flags)> selfFlags;  // the flags every entity has, of the player: bit 0 on fire, bit 1 sneaking, bit 3 sprinting, bit 7 gliding
+    std::function<void(int slot)> heldSlot;                          // the server picks the hotbar slot in the hand
     std::function<void(const std::string&)> disconnect;
 };
 
@@ -93,6 +97,7 @@ public:
     void close();
 
     void setPlayerEntityType(int type) { playerType_ = type; }  // the number of minecraft:player in the entity type registry
+    void setComponentIds(const ComponentIds& ids) { componentIds_ = ids; }
     [[nodiscard]] Phase phase() const { return phase_; }
     [[nodiscard]] bool inPlay() const { return phase_ == Phase::Play; }
     [[nodiscard]] bool closed() const { return phase_ == Phase::Closed; }
@@ -122,7 +127,11 @@ public:
     void sendHeldSlot(int slot);
     void sendDig(int action, int x, int y, int z, int face);  // 0 start, 1 abort, 2 finish
     void sendUseItemOn(int x, int y, int z, int face, double cx, double cy, double cz);
-    void sendSwing();
+    void sendSwing();                                          // the arm swings (ServerboundPunchPacket: the main hand)
+    void sendCreativeSlot(int inventorySlot, const ItemStack& stack);  // creative mode: this slot of the inventory now holds this
+    void sendContainerClose(int containerId);
+    void sendUseItem(float yaw, float pitch);  // the item in the hand is used (eaten, drawn, thrown)
+    void sendAction(int action);               // ServerboundPlayerActionPacket without a block: 3 drop one, 4 drop all, 5 let go of a used item, 6 swap with the offhand
 
 private:
     void handleLogin(const Packet& p, RemoteHandler& h);
@@ -139,6 +148,7 @@ private:
     Uuid selfId_{};
     int selfEntity_ = -1;
     int playerType_ = -1;  // the entity type number of a player
+    ComponentIds componentIds_;
     int sequence_ = 0;
     int positionReminder_ = 0;
     bool haveLast_ = false;
