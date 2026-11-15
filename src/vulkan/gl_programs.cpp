@@ -4,6 +4,9 @@
 #include "spirv_data.hpp"
 
 #include <algorithm>
+#include <chrono>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <stdexcept>
 #include <unordered_map>
@@ -319,7 +322,14 @@ VkPipeline pipelineFor(const PipelineRequest& request, VertexBindings& bindings)
     auto& perProgram = pipelineCache()[programId];
     const auto it = perProgram.find(key);
     if (it != perProgram.end()) return it->second;
+    static const bool trace = std::getenv("FALCON_VK_TRACE") != nullptr;  // FALCON_VK_TRACE=1: every pipeline made, with how long it took
+    static int made = 0;
+    const auto started = std::chrono::steady_clock::now();
     const VkPipeline pipeline = createPipeline(request, layout);
+    if (trace) {
+        std::fprintf(stderr, "[vulkan] pipeline %d (program %u, %zu vertex bindings) made in %.2f ms\n", ++made, static_cast<unsigned>(programId), layout.bindings.size(),
+                     std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count());
+    }
     perProgram.emplace(std::move(key), pipeline);
     return pipeline;
 }
