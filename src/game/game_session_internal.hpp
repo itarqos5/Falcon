@@ -1,0 +1,71 @@
+#pragma once
+
+// The small things the parts of GameSession share (game_session*.cpp): the length of a tick, a printf into a string, a little statistics, the light a held item gives.
+#include "falcon/game/game_session.hpp"
+
+#include <algorithm>
+#include <cmath>
+#include <cstdarg>
+#include <cstdio>
+#include <numeric>
+#include <string>
+#include <thread>
+#include <vector>
+
+namespace falcon {
+namespace session {
+
+inline constexpr double kReach = 5.0;
+inline constexpr double kRepeatDelay = 0.25;  // holding break or place repeats this often
+inline constexpr int kLoadRadius = 4;         // chunks around the spawn that must be ready before play starts
+inline constexpr double kLoadTimeoutSeconds = 30.0;  // the game's client wait timeout (LevelLoadTracker.CLIENT_WAIT_TIMEOUT_MS)
+inline constexpr double kTickSeconds = 0.05;  // the game runs at 20 ticks a second
+inline constexpr int kMaxTicksPerFrame = 10;  // after a stall the game catches up by at most this many ticks and drops the rest
+
+inline std::string format(const char* pattern, ...) {
+    char buffer[512];
+    va_list args;
+    va_start(args, pattern);
+    std::vsnprintf(buffer, sizeof(buffer), pattern, args);
+    va_end(args);
+    return buffer;
+}
+
+// Chunks are made and meshed on this many threads: about half the logical cores (min 3, max 8), so loading and
+// terrain fill-in are quick while the main and render threads - and anything else running - still keep cores.
+inline unsigned workerCount() { return std::clamp(std::thread::hardware_concurrency() / 2, 3u, 8u); }
+
+inline double megabytes(std::size_t bytes) { return static_cast<double>(bytes) / (1024.0 * 1024.0); }
+
+inline float percentile(std::vector<float> values, double p) {
+    if (values.empty()) return 0.0f;
+    std::sort(values.begin(), values.end());
+    return values[std::min(values.size() - 1, static_cast<std::size_t>(p * static_cast<double>(values.size())))];
+}
+
+inline float average(const std::vector<float>& values) {
+    return values.empty() ? 0.0f : std::accumulate(values.begin(), values.end(), 0.0f) / static_cast<float>(values.size());
+}
+
+inline const char* facing(float yaw) {
+    float y = std::fmod(yaw, 360.0f);
+    if (y < 0) y += 360.0f;
+    static constexpr const char* kNames[4] = {"south (towards +Z)", "west (towards -X)", "north (towards -Z)", "east (towards +X)"};
+    return kNames[static_cast<int>((y + 45.0f) / 90.0f) % 4];
+}
+
+// The block light (0..15) an item gives off while it is held: the light of the block it places (a torch 14, a lantern 15, glowstone
+// 15, a redstone torch 7, ...), 0 for everything else. A block that only glows in some states (a furnace) is judged by its default.
+inline int carriedLightLevel(const ItemStack& stack) {
+    if (stack.isEmpty()) return 0;
+    const ItemType& type = stack.type();
+    if (!type.isBlockItem()) return 0;
+    const BlockRegistry& registry = blockRegistry();
+    const auto& blocks = registry.blocks();
+    if (static_cast<std::size_t>(type.blockIndex) >= blocks.size()) return 0;
+    return registry.state(static_cast<Block>(blocks[static_cast<std::size_t>(type.blockIndex)].defaultState)).emission;
+}
+
+}  // namespace session
+using namespace session;
+}  // namespace falcon
