@@ -247,6 +247,27 @@ void test_pack_repository_and_model() {
     CHECK(falcon::PackRepository::checkFormat(R"({"pack":{"min_format":98,"max_format":99}})") == falcon::PackCompatibility::TooNew);
     CHECK(falcon::PackRepository::checkFormat("{}") == falcon::PackCompatibility::Broken);
 
+    // A second folder (Falcon's own) is looked in too, and a pack put in either one after the list was made is found when it is looked at again: a folder, and a .zip.
+    {
+        const fs::path falconFolder = base / "falcon_packs";
+        fs::create_directories(falconFolder / "Falcon Pack");
+        std::ofstream(falconFolder / "Falcon Pack" / "pack.mcmeta") << R"({"pack":{"pack_format":97,"description":"From Falcon's folder"}})";
+        fs::create_directories(falconFolder / "Old Pack");  // (the same name as one in the game's folder: the game's is the one that is listed)
+        std::ofstream(falconFolder / "Old Pack" / "pack.mcmeta") << R"({"pack":{"pack_format":97,"description":"Not this one"}})";
+        auto two = falcon::PackRepository::load(language, assets, gameDir, {falconFolder});
+        CHECK(two.find("file/Falcon Pack") != nullptr && two.find("file/Falcon Pack")->description == "From Falcon's folder");
+        CHECK(two.find("file/Old Pack")->description == "Ancient");
+        CHECK(!two.refresh());  // nothing has changed
+        writeBytes(gameDir / "resourcepacks" / "Late Pack.zip", makeZip({{"pack.mcmeta", R"({"pack":{"pack_format":97,"description":"Came late"}})"}}));
+        fs::create_directories(falconFolder / "Later Pack");
+        std::ofstream(falconFolder / "Later Pack" / "pack.mcmeta") << R"({"pack":{"pack_format":97,"description":"Came later"}})";
+        CHECK(two.refresh());
+        CHECK(two.find("file/Late Pack.zip") != nullptr && two.find("file/Late Pack.zip")->description == "Came late");
+        CHECK(two.find("file/Later Pack") != nullptr && two.openSource("file/Later Pack") != nullptr && two.openSource("file/Late Pack.zip") != nullptr);
+        fs::remove(gameDir / "resourcepacks" / "Late Pack.zip");
+        CHECK(two.refresh() && two.find("file/Late Pack.zip") == nullptr);  // taken away: gone from the list
+    }
+
     // Selection rules.
     falcon::PackSelectionModel model(repo, {});
     CHECK((model.selected() == std::vector<std::string>{"vanilla"}));

@@ -362,7 +362,18 @@ int Client::run() {
     };
     // The resource packs the Resource Packs screen can list: the built-ins plus whatever is in
     // <.minecraft>/resourcepacks.
-    PackRepository packs = PackRepository::load(language, search.location->root, gameDir);
+    // (and in Falcon's own folder, %LOCALAPPDATA%\\Falcon\\resourcepacks, which is made here like the game makes its own at startup so that there is a place to put them)
+    std::vector<std::filesystem::path> extraPackFolders;
+    if (const char* local = std::getenv("LOCALAPPDATA"); local != nullptr && *local != '\0' && !options_.gameDir) {
+        extraPackFolders.push_back(std::filesystem::path(local) / "Falcon" / "resourcepacks");
+        std::error_code ignored;
+        std::filesystem::create_directories(extraPackFolders.back(), ignored);
+    }
+    if (!options_.gameDir) {
+        std::error_code ignored;
+        std::filesystem::create_directories(gameDir / "resourcepacks", ignored);
+    }
+    PackRepository packs = PackRepository::load(language, search.location->root, gameDir, std::move(extraPackFolders));
     std::printf("[falcon] resource packs: %zu available\n", packs.packs().size());
     memStage("resource pack list");
 

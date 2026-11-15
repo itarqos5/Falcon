@@ -159,7 +159,7 @@ private:
 PackSelectionScreen::PackSelectionScreen(ScreenNavigator& navigator, ScreenServices& services)
     : Screen(navigator),
       services_(services),
-      model_(std::make_unique<PackSelectionModel>(services.packs, services.options.resourcePacks)) {}
+      model_((void(services.packs.refresh()), std::make_unique<PackSelectionModel>(services.packs, services.options.resourcePacks))) {}  // (a pack put in a folder while the game ran is there now)
 
 const Texture2D& PackSelectionScreen::iconTexture(const PackInfo& pack, GuiGraphics& graphics) {
     if (pack.icon && !pack.icon->empty()) {

@@ -71,10 +71,11 @@ std::string PackRepository::readDescription(const std::string& mcmetaJson) {
 }
 
 PackRepository PackRepository::load(const Language& language, const fs::path& assetsRoot,
-                                    const fs::path& gameDir) {
+                                    const fs::path& gameDir, std::vector<fs::path> extraPackDirectories) {
     PackRepository repo;
     repo.assetsRoot_ = assetsRoot;
     repo.gameDir_ = gameDir;
+    repo.extraDirectories_ = std::move(extraPackDirectories);
 
     const auto builtInDescription = [&](const std::string& text) {
         return formatLanguageString(language.get("pack.nameAndSource"),
@@ -110,35 +111,66 @@ PackRepository PackRepository::load(const Language& language, const fs::path& as
         repo.packs_.emplace(p.id, std::move(p));
     }
 
-    // Packs the player dropped into <game dir>/resourcepacks: folders and .zip files.
-    std::error_code ec;
-    for (fs::directory_iterator it(repo.packDirectory(), ec), end; !ec && it != end; it.increment(ec)) {
-        const fs::path path = it->path();
-        const std::string name = path.filename().string();
-        PackInfo p;
-        p.id = "file/" + name;
-        p.title = name;
-        p.descriptionColor = kPackDescriptionColor;
-
-        std::optional<std::string> mcmeta;
-        std::optional<std::vector<unsigned char>> icon;
-        if (it->is_directory(ec)) {
-            mcmeta = readFileText(path / "pack.mcmeta");
-            icon = readFileBytes(path / "pack.png");
-        } else if (path.extension() == ".zip") {
-            if (const auto zip = ZipArchive::open(path)) {
-                mcmeta = zip->readText("pack.mcmeta");
-                icon = zip->read("pack.png");
-            }
-        } else {
-            continue;  // not a pack
-        }
-        p.description = mcmeta ? readDescription(*mcmeta) : std::string();
-        p.compatibility = mcmeta ? checkFormat(*mcmeta) : PackCompatibility::Broken;
-        p.icon = readIcon(icon);
-        repo.packs_.emplace(p.id, std::move(p));
-    }
+    repo.scanFolders();
     return repo;
+}
+
+std::vector<fs::path> PackRepository::packDirectories() const {
+    std::vector<fs::path> dirs = {packDirectory()};
+    for (const fs::path& extra : extraDirectories_) dirs.push_back(extra);
+    return dirs;
+}
+
+// Packs the player dropped into the pack folders: folders and .zip files.
+void PackRepository::scanFolders() {
+    std::error_code ec;
+    for (const fs::path& directory : packDirectories()) {
+        for (fs::directory_iterator it(directory, ec), end; !ec && it != end; it.increment(ec)) {
+            const fs::path path = it->path();
+            const std::string name = path.filename().string();
+            if (packs_.count("file/" + name) != 0) continue;  // (the same name in an earlier folder wins)
+            PackInfo p;
+            p.id = "file/" + name;
+            p.title = name;
+            p.descriptionColor = kPackDescriptionColor;
+            p.path = path;
+
+            std::optional<std::string> mcmeta;
+            std::optional<std::vector<unsigned char>> icon;
+            if (it->is_directory(ec)) {
+                mcmeta = readFileText(path / "pack.mcmeta");
+                icon = readFileBytes(path / "pack.png");
+            } else if (path.extension() == ".zip" || path.extension() == ".ZIP") {
+                if (const auto zip = ZipArchive::open(path)) {
+                    mcmeta = zip->readText("pack.mcmeta");
+                    icon = zip->read("pack.png");
+                }
+            } else {
+                continue;  // not a pack
+            }
+            p.description = mcmeta ? readDescription(*mcmeta) : std::string();
+            p.compatibility = mcmeta ? checkFormat(*mcmeta) : PackCompatibility::Broken;
+            p.icon = readIcon(icon);
+            packs_.emplace(p.id, std::move(p));
+        }
+        ec.clear();
+    }
+}
+
+bool PackRepository::refresh() {
+    std::map<std::string, std::pair<std::filesystem::path, std::string>> before;
+    for (const auto& [id, info] : packs_) {
+        if (id.rfind("file/", 0) == 0) before[id] = {info.path, info.description};
+    }
+    for (auto it = packs_.begin(); it != packs_.end();) {
+        it = it->first.rfind("file/", 0) == 0 ? packs_.erase(it) : std::next(it);
+    }
+    scanFolders();
+    std::map<std::string, std::pair<std::filesystem::path, std::string>> after;
+    for (const auto& [id, info] : packs_) {
+        if (id.rfind("file/", 0) == 0) after[id] = {info.path, info.description};
+    }
+    return before != after;
 }
 
 std::shared_ptr<const ResourceSource> PackRepository::openSource(const std::string& id) const {
@@ -153,7 +185,7 @@ std::shared_ptr<const ResourceSource> PackRepository::openSource(const std::stri
 
     constexpr std::string_view kFilePrefix = "file/";
     if (id.rfind(kFilePrefix, 0) != 0) return nullptr;
-    const fs::path path = packDirectory() / id.substr(kFilePrefix.size());
+    const fs::path path = !info->path.empty() ? info->path : packDirectory() / id.substr(kFilePrefix.size());
     std::error_code ec;
     if (fs::is_directory(path, ec)) return makeDirectoryPack(path);
     return openZip(path);
