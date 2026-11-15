@@ -4,6 +4,7 @@
 #include "falcon/gfx/texture.hpp"
 #include "falcon/render/block_models.hpp"
 #include "falcon/render/camera.hpp"
+#include "falcon/render/lod_renderer.hpp"
 #include "falcon/util/priority_pool.hpp"
 #include "falcon/world/chunk.hpp"
 #include "falcon/world/chunk_cache.hpp"
@@ -127,6 +128,10 @@ public:
         waterFogStart_ = fogStart;
         waterFogEnd_ = fogEnd;
     }
+    // Levels of detail beyond the loaded chunks (render/lod_renderer.hpp): call every frame with the options. Only a world this client generates itself has them (not a
+    // server's: its terrain is not known here).
+    void setLods(const LodSettings& settings);
+    [[nodiscard]] LodStats lodStats() const { return lod_ ? lod_->stats() : LodStats{}; }
     // The Smooth Lighting option: per-corner light and ambient occlusion, or flat per-face light. Changing it re-meshes
     // everything (the light is baked into the vertices).
     void setSmoothLighting(bool on);
@@ -270,6 +275,8 @@ private:
     std::shared_ptr<WorldEdits> edits_;            // what the player changed (see setEdits)
     std::shared_ptr<const Decorator> decorator_;  // trees, plants and snow on the generated terrain (null without the generator)
     Level level_;
+    std::unique_ptr<LodRenderer> lod_;  // (before the pool: the workers that make its tiles are joined first)
+    LodSettings lodSettings_;
 
     ShaderProgram world_;
     ShaderProgram sky_;

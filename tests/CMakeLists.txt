@@ -37,6 +37,11 @@ add_executable(falcon_world_tests EXCLUDE_FROM_ALL test_world_rules.cpp)
 target_link_libraries(falcon_world_tests PRIVATE falcon::core falcon_warnings)
 add_test(NAME falcon_world_tests COMMAND falcon_world_tests)
 
+# The levels of detail: how the columns of a tile are meshed (no graphics card needed).
+add_executable(falcon_lod_tests EXCLUDE_FROM_ALL test_lod.cpp)
+target_link_libraries(falcon_lod_tests PRIVATE falcon::core falcon_warnings)
+add_test(NAME falcon_lod_tests COMMAND falcon_lod_tests)
+
 # The multiplayer protocol's data: the byte codec and item stacks as the network writes them.
 add_executable(falcon_net_tests EXCLUDE_FROM_ALL test_net_protocol.cpp)
 target_link_libraries(falcon_net_tests PRIVATE falcon::core falcon_warnings)
@@ -44,7 +49,7 @@ add_test(NAME falcon_net_tests COMMAND falcon_net_tests)
 
 add_custom_target(check
     COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure
-    DEPENDS falcon_tests falcon_worldgen_tests falcon_worldgen_chunk_tests falcon_item_tests falcon_world_tests falcon_net_tests
+    DEPENDS falcon_tests falcon_worldgen_tests falcon_worldgen_chunk_tests falcon_item_tests falcon_world_tests falcon_net_tests falcon_lod_tests
     WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
     COMMENT "Running the unit tests"
     USES_TERMINAL

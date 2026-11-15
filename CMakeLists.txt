@@ -339,6 +339,7 @@ add_library(falcon_core
     src/render/player_body.cpp
     src/render/mob_renderer.cpp
     src/render/world_renderer.cpp
+    src/render/lod_renderer.cpp
     src/world/server_list.cpp
     src/worldgen/random.cpp
     src/worldgen/json_tree.cpp

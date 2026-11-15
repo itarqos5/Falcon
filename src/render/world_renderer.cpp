@@ -776,7 +776,22 @@ void WorldRenderer::uploadMesh(MeshResult&& result) {
     quadsTotal_ += result.vertices.size() / 4;
 }
 
+void WorldRenderer::setLods(const LodSettings& settings) {
+    lodSettings_ = settings;
+    lodSettings_.enabled = settings.enabled && overworld_ != nullptr && !remote_;
+    if (lodSettings_.enabled && !lod_) {
+        std::vector<worldgen::LodTrees> trees;  // what each biome grows, so that the distant forests can be drawn
+        if (decorator_) {
+            trees.resize(overworld_->biomes().size());
+            for (std::size_t i = 0; i < trees.size(); ++i) trees[i] = decorator_->treeFacts(static_cast<worldgen::BiomeId>(i));
+        }
+        lod_ = std::make_unique<LodRenderer>(overworld_, std::move(trees), pool_);
+    }
+    if (lod_) lod_->setSettings(lodSettings_);
+}
+
 void WorldRenderer::update(double playerX, double playerZ, int renderDistance, double uploadBudgetMs) {
+    if (lod_ && lodSettings_.enabled) lod_->update(playerX, playerZ, renderDistance, uploadBudgetMs * 0.5);
     const int pcx = chunkOf(static_cast<int>(std::floor(playerX)));
     const int pcz = chunkOf(static_cast<int>(std::floor(playerZ)));
     playerChunkX_ = pcx;
