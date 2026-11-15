@@ -223,11 +223,13 @@ void SelectWorldScreen::pollScan() {
         loaded_ = true;
         if (levels_.empty()) {
             // No worlds at all: like the game, go straight to Create New World. Cancelling it leaves for the
-            // title screen (this screen is replaced, not kept underneath); making a world opens this list again.
+            // title screen (this screen is replaced, not kept underneath); making a world plays it, with this list
+            // underneath for when the player leaves it.
             navigator_.pop();
             navigator_.push(std::make_unique<CreateWorldScreen>(
-                navigator_, services_, [&navigator = navigator_, &services = services_](const std::string&) {
+                navigator_, services_, [&navigator = navigator_, &services = services_](const std::string& folder) {
                     navigator.push(std::make_unique<SelectWorldScreen>(navigator, services));
+                    if (services.startWorld) services.startWorld(folder);
                 }));
             return;
         }
@@ -240,6 +242,7 @@ void SelectWorldScreen::openCreateWorld() {
     navigator_.push(std::make_unique<CreateWorldScreen>(navigator_, services_, [this](const std::string& folder) {
         selectAfterScan_ = folder;
         startScan();
+        if (services_.startWorld) services_.startWorld(folder);  // (the game plays a world as soon as it is made; a world Falcon made is always one it can open)
     }));
 }
 

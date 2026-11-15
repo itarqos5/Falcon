@@ -315,7 +315,7 @@ void CreateWorldScreen::create() {
         std::fflush(stdout);
         return;
     }
-    std::printf("[falcon] created world '%s' in %s (seed %lld); there is no world generation or play yet\n",
+    std::printf("[falcon] created world '%s' in %s (seed %lld)\n",
                 folder.c_str(), savesDir().string().c_str(), static_cast<long long>(seed));
     std::fflush(stdout);
     navigator_.pop();
