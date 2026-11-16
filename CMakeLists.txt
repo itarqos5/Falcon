@@ -317,6 +317,9 @@ add_library(falcon_core
     src/world/boat.cpp
     src/world/item_entity.cpp
     src/world/day_cycle.cpp
+    src/world/mob.cpp
+    src/world/mob_path.cpp
+    src/world/mob_spawn.cpp
     src/world/world_save.cpp
     src/world/block_containers.cpp
     src/world/collision_shapes.cpp

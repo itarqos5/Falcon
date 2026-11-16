@@ -315,13 +315,14 @@ void MobRenderer::render(const Matrix4f& viewProj, const std::array<double, 3>& 
         gl::BufferData(gl::ARRAY_BUFFER, static_cast<gl::GLsizeiptr>(list.size() * sizeof(Vertex)), list.data(), gl::STREAM_DRAW);
         gl::DrawArrays(gl::TRIANGLES, 0, static_cast<gl::GLsizei>(list.size()));
     };
-    draw(vertices, *loaded.texture, 1.0f, 1.0f, 1.0f);
+    const float redness = std::clamp(pose.hurt, 0.0f, 1.0f) * 0.55f;  // (the game lays red over a mob that was hit)
+    draw(vertices, *loaded.texture, 1.0f, 1.0f - redness, 1.0f - redness);
     if (loaded.wool && loaded.woolTexture) {
         EntityPart fleece = *loaded.wool;
         copyPose(fleece, model);
         std::vector<Vertex> list;
         collect(fleece, Xf{}, entity, all, list);
-        draw(list, *loaded.woolTexture, 0.976f, 1.0f, 0.996f);  // (white wool: DyeColor.WHITE's 0xF9FFFE)
+        draw(list, *loaded.woolTexture, 0.976f, 1.0f - redness, 0.996f - redness);  // (white wool: DyeColor.WHITE's 0xF9FFFE)
     }
     gl::BindVertexArray(0);
 }

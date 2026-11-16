@@ -219,6 +219,26 @@ GameSession::GameSession(ScreenServices& services, const ResourceManager& resour
         blockTags_ = std::make_unique<BlockTags>(resources.dataRoot() / "data" / "minecraft" / "tags" / "block", *registry_);
         mining_ = std::make_unique<MiningRules>(*registry_, *blockTags_);
         loot_ = std::make_unique<BlockLoot>(resources.dataRoot(), *registry_);
+        {  // the mobs: what they need of the world
+            MobsHost mobHost;
+            mobHost.sound = [this](const std::string& event, double x, double y, double z, float volume, float pitch, bool hostile) {
+                const std::array<double, 3> at = {x, y, z};
+                playWorldSound(event, hostile ? SoundSource::Hostile : SoundSource::Neutral, volume, pitch, &at);
+            };
+            mobHost.hurtPlayer = [this](float amount, double fromX, double fromZ, float knockback) { mobHitsPlayer(amount, fromX, fromZ, knockback); };
+            mobHost.explode = [this](double x, double y, double z, float power) {
+                if (physics_) physics_->explode(x, y, z, power);
+            };
+            mobHost.dropItem = [this](ItemStack stack, double x, double y, double z) {
+                if (!gameRuleOn("mob_drops")) return;
+                itemEntities_.spawn(std::move(stack), x, y, z, static_cast<double>(randomFloat()) * 0.2 - 0.1, 0.2, static_cast<double>(randomFloat()) * 0.2 - 0.1, 10, randomFloat() * 6.2831855f);
+            };
+            mobHost.addExperience = [this](int points) { addExperience(points); };
+            mobHost.burnPlayer = [this](int ticks) { burnTicks_ = std::max(burnTicks_, ticks); };
+            mobHost.surfaceY = [this](int x, int z) { return renderer_.surfaceHeight(x, z); };
+            mobHost.light = [this](int x, int y, int z, int& sky, int& block) { renderer_.lightAt(x, y, z, sky, block); };
+            mobSim_ = std::make_unique<Mobs>(std::move(mobHost), static_cast<std::uint64_t>(info_.seed));
+        }
         {  // the ten crack pictures drawn on a block being dug
             std::vector<Image> stages;
             for (int i = 0; i < 10; ++i) {
@@ -297,6 +317,7 @@ void GameSession::loadSave() {
         applyGameRule(rule, value);
     }
     if (saved.difficulty >= 0 && saved.difficulty <= 3) difficulty_ = saved.difficulty;
+    if (mobSim_ && saved.mobs.type == NbtTag::Type::Compound) mobSim_->fromNbt(saved.mobs);
     dayTime_ = saved.dayTime >= 0 ? saved.dayTime : daycycle::kNoon;  // (a world from before there was a clock was always noon)
     gameTime_ = saved.gameTime;
 }

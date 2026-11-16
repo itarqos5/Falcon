@@ -16,6 +16,7 @@
 #include "falcon/world/boat.hpp"
 #include "falcon/world/block_containers.hpp"
 #include "falcon/world/item_entity.hpp"
+#include "falcon/world/mob.hpp"
 #include "falcon/platform/window.hpp"
 #include "falcon/render/block_icons.hpp"
 #include "falcon/render/block_models.hpp"
@@ -172,6 +173,8 @@ public:
     [[nodiscard]] int droppedCount() const { return droppedCount_; }
     // The items lying in the world.
     [[nodiscard]] ItemEntities& itemEntities() { return itemEntities_; }
+    // The mobs of this world (null on a server: its mobs are the server's).
+    [[nodiscard]] Mobs* mobSim() { return mobSim_.get(); }
     // The time of day in ticks (0 sunrise, 6000 noon, 12000 sunset, 18000 midnight) and how many ticks the world has run; /time changes the first. `freeze` stops the clock (--time).
     [[nodiscard]] long long dayTime() const { return dayTime_; }
     [[nodiscard]] long long gameTime() const { return gameTime_; }
@@ -277,6 +280,10 @@ private:
     void runCommand(const std::string& text);  // a command typed in the chat, without its "/"
     void applyGameRule(const std::string& rule, const std::string& value);
     void tickBurning();
+    void tickMobs();
+    void attackMob(int id);  // the player hits a mob: the damage the held item and the attack cooldown give, the knockback, the sounds
+    void mobHitsPlayer(float amount, double fromX, double fromZ, float knockback);
+    void renderLocalMobs(const std::array<double, 3>& camPos);
     void tickTime();  // the clock: a tick of the day, unless the game rule advance_time is off
     void pumpRemote();
     // What LocalPlayer.sendChanges says each tick. A rider (`riding`) sends how it looks round and nothing of its position; one who steers a boat also sends the boat's place.
@@ -340,6 +347,8 @@ private:
     double lastSaveTicks_ = 0.0;
     std::mt19937 rng_{std::random_device{}()};
     ItemEntities itemEntities_;
+    std::unique_ptr<Mobs> mobSim_;  // the mobs that live in this world (singleplayer)
+    int sinceAttack_ = 100;         // ticks since the player last swung at a mob (the attack cooldown)
     StepClock stepClock_;
     bool wasInWater_ = false;
     int invulnerableTime_ = 0;   // ticks left of the protection after a hit (20 at a hit, only a stronger hit counts above 10)

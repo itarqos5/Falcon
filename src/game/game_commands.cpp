@@ -412,6 +412,15 @@ void CommandRunner::kill() {
                 if (n > 0) lastName = tr("entity.minecraft.falling_block");
             }
         }
+        if (s.mobSim_) {  // the mobs: each is killed as a blow from nowhere would (drops and all)
+            for (Mob& mob : s.mobSim_->mobs()) {
+                if (mob.dead() || killed >= limit || !typePasses(sel, mob.species->id) || !distancePasses(sel, mob.x, mob.y, mob.z)) continue;
+                mob.invulnerable = 0;
+                s.mobSim_->hurt(mob.id, 1.0e6f, mob.x, mob.z, 0.0f, false);
+                ++killed;
+                lastName = tr("entity.minecraft." + std::string(mob.species->id));
+            }
+        }
     }
     if (killed == 0) return fail(tr("argument.entity.notfound.entity"));
     say(killed == 1 ? tr("commands.kill.success.single", {lastName}) : tr("commands.kill.success.multiple", {std::to_string(killed)}));
@@ -674,8 +683,10 @@ void CommandRunner::summon() {
         const auto item = itemRegistry().find(id);
         if (!item || *item == Item::Air) return fail("Unknown item '" + id + "'");
         s.itemEntities_.spawn(ItemStack(*item, count), at.x, at.y, at.z, 0.0, 0.0, 0.0, 10, s.randomFloat() * 6.2831855f);
+    } else if (s.mobSim_ && mobSpecies(entity) != nullptr) {
+        if (Mob* mob = s.mobSim_->spawn(entity, at.x, at.y, at.z, true)) mob->yaw = mob->yawo = s.randomFloat() * 360.0f - 180.0f;
     } else {
-        return fail("Falcon has no " + tr("entity.minecraft." + entity) + " yet: only TNT, falling blocks and items can be summoned");
+        return fail("Falcon has no " + tr("entity.minecraft." + entity) + " yet");
     }
     say(tr("commands.summon.success", {tr("entity.minecraft." + entity)}));
 }

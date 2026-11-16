@@ -49,6 +49,25 @@ void GameSession::collectDrop(Block broken, int x, int y, int z, const ItemStack
     }
 }
 
+// Player.attack: the item's damage scaled by how far the attack cooldown has come (0.2 to 1), half as much again for a critical hit (falling, in the open, once the cooldown is nearly up),
+// a push away that is stronger when sprinting; a weapon wears a little.
+void GameSession::attackMob(int id) {
+    const ItemStack& held = inventory_.selectedItem();
+    const float base = held.isEmpty() ? 1.0f : held.type().attackDamage();
+    const float speed = held.isEmpty() ? 4.0f : held.type().attackSpeed();
+    const float strength = std::clamp((static_cast<float>(sinceAttack_) + 0.5f) / (20.0f / speed), 0.0f, 1.0f);
+    float damage = base * (0.2f + strength * strength * 0.8f);
+    const bool strong = strength > 0.9f;
+    const bool crit = strong && player_.fallDistance > 0.0 && !player_.onGround && !player_.inWater && !player_.sprinting;
+    if (crit) damage *= 1.5f;
+    float knockback = 0.4f;
+    if (strong && player_.sprinting) knockback += 0.5f;
+    const std::string sound = crit ? "entity.player.attack.crit" : strong ? (player_.sprinting ? "entity.player.attack.knockback" : "entity.player.attack.strong") : "entity.player.attack.weak";
+    playWorldSound(sound, SoundSource::Players, 1.0f, 1.0f);
+    if (mobSim_) mobSim_->hurt(id, damage, player_.x, player_.z, knockback, true);
+    if (!creative()) damageHeldTool(held.type().maxDamage > 0 && held.type().attackDamageBonus > 0.0f ? 1 : 0);
+}
+
 void GameSession::damageHeldTool(int amount) {
     ItemStack& tool = inventory_.selectedItem();
     if (tool.isEmpty() || !tool.isDamageable() || amount <= 0) return;
@@ -248,6 +267,19 @@ void GameSession::interact(double dt, bool active) {
                 hand_.resetAttackStrength();
             }
             attack = false;  // (nothing to dig this frame)
+        }
+    }
+    if (!remote_ && attack && mobSim_ && info_.gameType != 3) {  // a mob under the crosshair, nearer than what is behind it, is hit (not dug at)
+        const int mob = mobSim_->pick(eye, look, std::min(3.0, target_ ? target_->distance : 3.0));
+        if (mob >= 0) {
+            stopDigging();
+            if (freshPress) {
+                attackMob(mob);
+                swingArm();
+                hand_.resetAttackStrength();
+                sinceAttack_ = 0;
+            }
+            attack = false;
         }
     }
     digHeld_ = pressed;

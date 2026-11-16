@@ -203,6 +203,7 @@ std::string writeWorldSave(const std::filesystem::path& file, const WorldSave& s
         for (const auto& [name, value] : save.gameRules) rules.put(name, NbtTag::ofString(value));
         root.put("gameRules", std::move(rules));
         root.put("difficulty", integer(save.difficulty));
+        if (save.mobs.type == NbtTag::Type::Compound) root.put("mobs", save.mobs);
         root.put("dayTime", NbtTag::ofInteger(NbtTag::Type::Long, save.dayTime));
         root.put("gameTime", NbtTag::ofInteger(NbtTag::Type::Long, save.gameTime));
     }
@@ -266,6 +267,7 @@ bool readWorldSave(const std::filesystem::path& file, WorldSave& save, WorldEdit
         }
         loaded.difficulty = static_cast<int>(root->getInt("difficulty", -1));
         loaded.dayTime = root->getInt("dayTime", -1);
+        if (const NbtTag* mobs = root->get("mobs"); mobs != nullptr) loaded.mobs = *mobs;
         loaded.gameTime = root->getInt("gameTime", 0);
         if (const NbtTag* items = root->get("items"); items != nullptr) {
             for (const NbtTag& t : items->items) {

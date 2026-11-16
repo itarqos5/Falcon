@@ -32,6 +32,68 @@
 
 namespace falcon {
 
+// The mobs of a singleplayer world and what they shoot, drawn from where they were a tick ago to where they are.
+void GameSession::renderLocalMobs(const std::array<double, 3>& camPos) {
+    if (!mobSim_ || !mobs_ || remote_) return;
+    const float partial = static_cast<float>(partialTick_);
+    const auto wrap = [](float d) {
+        d = std::fmod(d, 360.0f);
+        if (d >= 180.0f) d -= 360.0f;
+        if (d < -180.0f) d += 360.0f;
+        return d;
+    };
+    const Matrix4f viewProj = renderer_.viewProjection();
+    for (const Mob& m : mobSim_->mobs()) {
+        if (!MobRenderer::supports(m.species->id)) continue;
+        MobPose pose;
+        pose.position = {m.xo + (m.x - m.xo) * partialTick_, m.yo + (m.y - m.yo) * partialTick_, m.zo + (m.z - m.zo) * partialTick_};
+        pose.bodyYaw = m.yawo + wrap(m.yaw - m.yawo) * partial;
+        pose.headYaw = m.headYaw;
+        pose.headPitch = m.headPitch;
+        pose.walkPosition = m.limbPos - m.limbSpeed * (1.0f - partial);
+        pose.walkSpeed = std::min(1.0f, m.limbSpeedO + (m.limbSpeed - m.limbSpeedO) * partial);
+        pose.ageTicks = static_cast<double>(m.age) + partialTick_;
+        pose.hurt = m.hurtTime > 0 || m.dead() ? (static_cast<float>(m.hurtTime) - partial) / 10.0f : 0.0f;
+        if (m.dead()) pose.hurt = 1.0f;
+        pose.death = m.dead() ? static_cast<float>(m.deathTime) + partial + 1.0f : 0.0f;
+        pose.swell = m.fuse > 0 ? (static_cast<float>(m.fuse) + (m.fuseDir > 0 ? partial : -partial)) / 28.0f : 0.0f;
+        int sky = 15, block = 0;
+        renderer_.lightAtWithCarried(static_cast<int>(std::floor(pose.position[0])), static_cast<int>(std::floor(pose.position[1] + 1.0)), static_cast<int>(std::floor(pose.position[2])), sky, block);
+        pose.light = entityLightColor(sky, block, static_cast<float>(services_.options.gamma));
+        mobs_->render(viewProj, camPos, m.species->id, pose);
+    }
+    std::vector<ItemEntity> fireballs;  // (a fireball is drawn as the item of the fire charge, a sprite: the game has a model of its own)
+    for (const Projectile& p : mobSim_->projectiles()) {
+        if (p.kind == Projectile::Kind::Arrow) {
+            MobPose pose;
+            pose.position = {p.xo + (p.x - p.xo) * partialTick_, p.yo + (p.y - p.yo) * partialTick_, p.zo + (p.z - p.zo) * partialTick_};
+            const double horizontal = std::sqrt(p.vx * p.vx + p.vz * p.vz);
+            pose.bodyYaw = static_cast<float>(std::atan2(p.vx, p.vz) * 180.0 / 3.14159265358979);
+            pose.headPitch = static_cast<float>(std::atan2(p.vy, horizontal) * 180.0 / 3.14159265358979);
+            int sky = 15, block = 0;
+            renderer_.lightAtWithCarried(static_cast<int>(std::floor(pose.position[0])), static_cast<int>(std::floor(pose.position[1])), static_cast<int>(std::floor(pose.position[2])), sky, block);
+            pose.light = entityLightColor(sky, block, static_cast<float>(services_.options.gamma));
+            if (p.stuck > 0) pose.bodyYaw = pose.headPitch = 0.0f;  // (an arrow in a block keeps where it was pointing: the velocity is gone, so it stands up; hide that)
+            if (p.stuck == 0) mobs_->render(viewProj, camPos, "arrow", pose);
+        } else {
+            const auto charge = itemRegistry().find("fire_charge");
+            if (!charge) continue;
+            ItemEntity e;
+            e.stack = ItemStack(*charge, 1);
+            e.x = p.x;
+            e.y = p.y - 0.12;
+            e.z = p.z;
+            e.xo = p.xo;
+            e.yo = p.yo - 0.12;
+            e.zo = p.zo;
+            e.age = p.age;
+            e.pickupDelay = ItemEntity::kNeverPickUp;
+            fireballs.push_back(std::move(e));
+        }
+    }
+    if (!fireballs.empty()) hand_.renderGroundItems(renderer_, viewProj, camPos, fireballs, partialTick_);
+}
+
 void GameSession::renderWorld(int framebufferWidth, int framebufferHeight) {
     const Camera cam = camera();
     // A torch (or any light-giving block) in the hand lights the blocks round the player while it is held.
@@ -61,6 +123,7 @@ void GameSession::renderWorld(int framebufferWidth, int framebufferHeight) {
         const std::array<double, 3> camPos = {cam.x, cam.y, cam.z};
         hand_.renderGroundItems(renderer_, renderer_.viewProjection(), camPos, itemEntities_.items(), partialTick_);
         renderRemotePlayers(camPos);
+        renderLocalMobs(camPos);
         renderTestMobs(camPos);
         if (physics_) hand_.renderBlockEntities(renderer_, renderer_.viewProjection(), physics_->fallingBlocks(), physics_->primedTnt(), camPos, partialTick_);
         if (perspective_ != 0 && body_ && info_.gameType != 3) {  // F5: the player seen from outside
@@ -177,6 +240,7 @@ std::vector<std::string> GameSession::debugLines() const {
     lines.push_back(format("Quads: %zu / %zu", s.quadsDrawn, s.quadsTotal));
     lines.push_back(format("Jobs waiting: %d  uploads: %d", s.jobsWaiting, s.uploadsThisFrame));
     lines.push_back(format("Water: %zu waiting (tick %lld)", fluids_.pending(), fluids_.gameTime()));
+    if (mobSim_) lines.push_back(format("Mobs: %zu (%d hostile), shots: %zu", mobSim_->mobs().size(), mobSim_->count(MobKind::Hostile), mobSim_->projectiles().size()));
     lines.push_back(format("Time: %lld (day %lld), moon phase %d", dayTime_ % daycycle::kTicksPerDay, dayTime_ / daycycle::kTicksPerDay, daycycle::moonPhase(dayTime_)));
     lines.push_back(format("RAM: %.0f MB  block data %.1f MB", megabytes(processWorkingSetBytes()), megabytes(s.levelBytes)));
     lines.push_back(format("GPU: meshes %.1f MB, textures %.2f MB", megabytes(s.meshBytes), megabytes(s.textureBytes)));

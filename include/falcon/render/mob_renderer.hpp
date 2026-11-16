@@ -31,6 +31,9 @@ struct MobPose {
     int standFlags = 0;
     std::array<std::array<float, 3>, 6> standPose{{{0, 0, 0}, {0, 0, 0}, {-10, 0, -10}, {-10, 0, 10}, {-1, 0, -1}, {1, 0, 1}}};
     std::array<float, 3> light{1.0f, 1.0f, 1.0f};  // the light colour where the mob stands
+    float hurt = 0.0f;   // 0..1: how red the mob is from a blow (it fades in half a second)
+    float death = 0.0f;  // ticks since it died (0: alive): it falls over on its side
+    float swell = 0.0f;  // a creeper about to go off: how far its fuse has come, 0..1
 };
 
 // The mobs of a server, drawn from the game's own models (entity-models.json) and pictures (textures/entity): the mob types in the table of mob_renderer.cpp (about fifty of

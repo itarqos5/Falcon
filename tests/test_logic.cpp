@@ -5,6 +5,7 @@ int g_logicFailures = 0;
 int main() {
     std::printf("logic tests\n");
     testDayCycle();
+    testMobPath();
     if (g_logicFailures != 0) {
         std::fprintf(stderr, "%d check(s) failed\n", g_logicFailures);
         return 1;

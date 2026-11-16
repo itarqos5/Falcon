@@ -85,6 +85,7 @@ void GameSession::tickPlayer(double seconds, bool steering) {
         tickBurning();
         if (ready_ && !remote_) itemEntities_.tick(renderer_.level());  // (on a server the items are the server's: pumpRemote puts them there)
         if (ready_ && !remote_) tickTime();
+        if (ready_ && !remote_) tickMobs();
         // The water that flows: its updates that are due this tick.
         if (!remote_) fluids_.tick(renderer_.level(), [this](int bx, int by, int bz, Block b) { return renderer_.setBlock(bx, by, bz, b); });
         if (ready_ && physics_) physics_->tick();
@@ -105,6 +106,46 @@ void GameSession::tickPlayer(double seconds, bool steering) {
     }
 }
 
+
+void GameSession::tickMobs() {
+    ++sinceAttack_;
+    if (!mobSim_) return;
+    MobTick in;
+    in.level = &renderer_.level();
+    in.player = {player_.x, player_.y, player_.z};
+    in.playerEyeY = player_.eyeY();
+    in.playerYaw = player_.yaw;
+    in.playerPitch = player_.pitch;
+    in.playerTargetable = !dead_ && (info_.gameType == 0 || info_.gameType == 2);
+    in.difficulty = difficulty_;
+    in.dayTime = dayTime_;
+    in.darkSteps = (timeline_ ? timeline_->sky(static_cast<double>(dayTime_)) : daycycle::sky(static_cast<double>(dayTime_))).darkSteps;
+    in.spawnMobs = gameRuleOn("spawn_mobs");
+    in.spawnMonsters = gameRuleOn("spawn_monsters");
+    in.mobGriefing = gameRuleOn("mob_griefing");
+    mobSim_->tick(in);
+    static const bool log = std::getenv("FALCON_MOB_LOG") != nullptr;  // (a test aid: what every mob does, once a second)
+    if (log && gameTime_ % 20 == 0) {
+        for (const Mob& m : mobSim_->mobs()) {
+            std::printf("[mob] t=%lld %s #%d at %.1f %.1f %.1f hp %.1f %s%s%s path=%zu/%zu speed=%.2f fuse=%d\n", gameTime_, m.species->id, m.id, m.x, m.y, m.z, static_cast<double>(m.health),
+                        m.onGround ? "ground " : "air ", m.target != 0 ? "TARGET " : "", m.dead() ? "DEAD " : "", m.pathIndex, m.path.size(), static_cast<double>(m.moveSpeed), m.fuse);
+        }
+        std::printf("[mob] player %.1f %.1f %.1f health %.1f\n", player_.x, player_.y, player_.z, static_cast<double>(vitals_.health));
+    }
+}
+
+// A mob's blow lands on the player: the damage, the knock back from where it came, and the tilt of the view towards it (LivingEntity.hurt, knockback and hurtDir).
+void GameSession::mobHitsPlayer(float amount, double fromX, double fromZ, float knockback) {
+    if (!hurt(amount)) return;
+    const double dx = fromX - player_.x, dz = fromZ - player_.z;
+    const double length = std::sqrt(dx * dx + dz * dz);
+    if (length > 1.0e-4) {
+        player_.vx = player_.vx / 2.0 - dx / length * static_cast<double>(knockback);
+        player_.vz = player_.vz / 2.0 - dz / length * static_cast<double>(knockback);
+        if (player_.onGround) player_.vy = std::min(0.4, player_.vy / 2.0 + static_cast<double>(knockback));
+        hurtDirection_ = static_cast<float>(std::atan2(dz, dx) * 180.0 / 3.14159265358979 - static_cast<double>(player_.yaw));
+    }
+}
 
 void GameSession::tickTime() {
     ++gameTime_;

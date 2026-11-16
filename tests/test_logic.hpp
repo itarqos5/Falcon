@@ -14,3 +14,4 @@ extern int g_logicFailures;
     } while (false)
 
 void testDayCycle();
+void testMobPath();
