@@ -46,6 +46,7 @@ add_test(NAME falcon_lod_tests COMMAND falcon_lod_tests)
 add_executable(falcon_logic_tests EXCLUDE_FROM_ALL test_logic.cpp test_logic_day.cpp)
 target_sources(falcon_logic_tests PRIVATE test_logic_mob.cpp)
 target_sources(falcon_logic_tests PRIVATE test_logic_random.cpp)
+target_sources(falcon_logic_tests PRIVATE test_logic_end.cpp)
 target_link_libraries(falcon_logic_tests PRIVATE falcon::core falcon_warnings)
 add_test(NAME falcon_logic_tests COMMAND falcon_logic_tests)
 

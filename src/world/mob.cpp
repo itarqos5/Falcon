@@ -602,6 +602,7 @@ struct MobBrain {
             if (distSq < 64.0 && m.attackCooldown <= 0) {
                 m.attackCooldown = 40;
                 if (mobs.host_.hurtPlayer) mobs.host_.hurtPlayer(scaleForDifficulty(10.0f, in.difficulty), m.x, m.z, 1.6f);
+                if (mobs.host_.sound) mobs.host_.sound("entity.ender_dragon.growl", m.x, m.y, m.z, 5.0f, 0.8f + mobs.random() * 0.3f, true);
             }
             if (distSq < 16.0 || m.flyTimer > 140) {
                 m.burst = 0;
@@ -620,6 +621,7 @@ struct MobBrain {
                     const double vx = in.player[0] - m.x, vy = in.player[1] + 1.0 - (m.y - 2.0), vz = in.player[2] - m.z;
                     const double l = std::sqrt(vx * vx + vy * vy + vz * vz);
                     mobs.shoot(Projectile::Kind::LargeFireball, m.x, m.y - 2.0, m.z, vx / l * 1.0, vy / l * 1.0, vz / l * 1.0, 6.0f, m.id);
+                    if (mobs.host_.sound) mobs.host_.sound("entity.ender_dragon.shoot", m.x, m.y, m.z, 5.0f, 1.0f, true);
                 }
                 if (m.flyTimer > 300) {
                     m.burst = 0;
@@ -647,6 +649,7 @@ struct MobBrain {
                 }
             }
         }
+        if (m.age % 200 == 0 && mobs.host_.sound) mobs.host_.sound("entity.ender_dragon.ambient", m.x, m.y, m.z, 5.0f, 1.0f, true);
     }
 
     // ---- the ones that fly ----

@@ -89,7 +89,9 @@ void testMobPath() {
     }
     // The species table: the ones the game spawns have the game's health.
     const MobSpecies* zombie = mobSpecies("zombie");
+    const MobSpecies* dragon = mobSpecies("ender_dragon");
     LCHECK(zombie != nullptr && zombie->health == 20.0f && zombie->attack == 3.0f);
+    LCHECK(dragon != nullptr && dragon->health == 200.0f);
     LCHECK(mobSpecies("pig") != nullptr && mobSpecies("pig")->kind == MobKind::Passive);
     LCHECK(mobSpecies("not_a_mob") == nullptr);
 }

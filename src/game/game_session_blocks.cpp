@@ -392,6 +392,21 @@ void GameSession::interact(double dt, bool active) {
         if (!inventory_.selectedItem().isEmpty()) {
             const std::string& heldName = inventory_.selectedItem().type().name;
             if ((heldName == "flint_and_steel" || heldName == "fire_charge") && useFireStarter(heldName, *target_)) return;
+            if (heldName == "ender_eye" && !remote_) {  // EndPortalFrameBlock / EnderEyeItem: an eye of ender goes into a frame, and a ring of twelve filled frames opens the portal
+                const Block frame = renderer_.level().block(target_->x, target_->y, target_->z);
+                if (isBlockNamed(frame, "end_portal_frame") && registry_->get(frame, "eye") == "false") {
+                    setBlock(target_->x, target_->y, target_->z, registry_->with(frame, "eye", "true"));
+                    const std::array<double, 3> where = {target_->x + 0.5, target_->y + 0.5, target_->z + 0.5};
+                    playWorldSound("block.end_portal_frame.fill", SoundSource::Blocks, 1.0f, 1.0f, &where);
+                    swingArm();
+                    if (!creative()) {
+                        inventory_.selectedItem().shrink(1);
+                        if (inventory_.selectedItem().isEmpty()) inventory_.selectedItem() = ItemStack();
+                    }
+                    tryActivateEndPortal(target_->x, target_->y, target_->z);
+                    return;
+                }
+            }
         }
         // SlabBlock.canBeReplaced: a slab put on the open side of a half slab of the same kind makes the double slab.
         if (!inventory_.selectedItem().isEmpty() && inventory_.selectedItem().type().blockIndex >= 0) {

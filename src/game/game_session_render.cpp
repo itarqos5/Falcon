@@ -383,6 +383,7 @@ void GameSession::renderHud(GuiGraphics& g, int guiWidth, int guiHeight, bool ch
 
     drawFireOverlay(g, guiWidth, guiHeight);
     drawPortalOverlay(g, guiWidth, guiHeight);
+    drawBossBar(g, guiWidth, guiHeight);
 
     // F1 hides the crosshair and the hotbar (the debug screen stays, which is what people take screenshots with).
     if (!hudHidden_) {

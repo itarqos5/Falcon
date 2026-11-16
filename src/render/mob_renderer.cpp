@@ -115,6 +115,8 @@ constexpr MobSpec kMobs[] = {
     {"spawner_minecart", "spawner_minecart", "minecart/minecart", 'M', 1.0f, 0.98f, 0.7f},
     {"command_block_minecart", "command_block_minecart", "minecart/minecart", 'M', 1.0f, 0.98f, 0.7f},
     {"armor_stand", "armor_stand", "armorstand/armorstand", 'S', 1.0f, 0.5f, 1.975f},
+    {"ender_dragon", "ender_dragon", "enderdragon/dragon", 'D', 1.0f, 16.0f, 8.0f},
+    {"end_crystal", "end_crystal", "end_crystal/end_crystal", 'C', 1.0f, 2.0f, 2.0f},
     {"arrow", "arrow", "projectiles/arrow", 'A', 1.0f, 0.5f, 0.5f},
     {"spectral_arrow", "arrow", "projectiles/arrow_spectral", 'A', 1.0f, 0.5f, 0.5f},
 };
@@ -248,6 +250,28 @@ void MobRenderer::render(const Matrix4f& viewProj, const std::array<double, 3>& 
             head->rotation[0] = pose.headPitch * kDegrees;
         }
     }
+    if (loaded.kind == 'D') {  // EnderDragonModel.setupAnim: the wings beat about once a second and a half
+        const float f = static_cast<float>(pose.ageTicks) * 0.075f * 2.0f * kPi * 0.5f / 1.0f;
+        const float xr = 0.125f - std::cos(f) * 0.2f, wing = -(std::sin(f) + 0.125f) * 0.8f, tip = (std::sin(f + 2.0f) + 0.5f) * 0.75f;
+        if (EntityPart* part = model.find("left_wing")) part->rotation = {xr, -0.25f, wing};
+        if (EntityPart* part = model.find("left_wing_tip")) part->rotation[2] = tip;
+        if (EntityPart* part = model.find("right_wing")) part->rotation = {xr, 0.25f, -wing};
+        if (EntityPart* part = model.find("right_wing_tip")) part->rotation[2] = -tip;
+        if (EntityPart* part = model.find("head")) part->rotation[0] = pose.headPitch * kDegrees * 0.5f;
+        if (EntityPart* part = model.find("jaw")) part->rotation[0] = (std::sin(f * 0.5f) * 0.5f + 0.5f) * 0.4f;
+        for (int i = 0; i < 12; ++i) {  // the tail sways, the neck follows the head
+            if (EntityPart* part = model.find(("tail" + std::to_string(i)).c_str())) part->rotation[1] = std::sin(f * 0.5f - static_cast<float>(i) * 0.4f) * 0.08f;
+        }
+    }
+    if (loaded.kind == 'C') {  // EndCrystalRenderer: the glass cubes turn and bob over the base
+        const float t = static_cast<float>(pose.ageTicks);
+        if (EntityPart* part = model.find("outer_glass")) {
+            part->rotation[1] = t * 3.0f * kDegrees;
+            part->offset[1] = 24.0f + std::sin(t * 0.2f) * 2.0f;
+        }
+        if (EntityPart* part = model.find("inner_glass")) part->rotation = {0.6f * std::sin(t * 0.1f), t * 3.0f * kDegrees, 0.6f * std::cos(t * 0.1f)};
+        if (EntityPart* part = model.find("cube")) part->rotation = {0.6f * std::cos(t * 0.1f), t * 3.0f * kDegrees, 0.6f * std::sin(t * 0.1f)};
+    }
     const float swingA = std::cos(p) * 1.4f * s, swingB = std::cos(p + kPi) * 1.4f * s;
     if (loaded.kind == 'q') {  // QuadrupedModel.setupAnim: the legs on a diagonal go together
         if (EntityPart* leg = model.find("right_hind_leg")) leg->rotation[0] = swingA;
@@ -289,7 +313,19 @@ void MobRenderer::render(const Matrix4f& viewProj, const std::array<double, 3>& 
     } else if (loaded.kind == 'A') {  // ArrowRenderer: turned about Y (the yaw less a quarter turn) and tilted about Z (the pitch, up being positive): its length is along its flight
         entity = mul(rotY((static_cast<double>(pose.bodyYaw) - 90.0) * static_cast<double>(kDegrees)), rotZ(static_cast<double>(pose.headPitch) * static_cast<double>(kDegrees)));
     } else {  // LivingEntityRenderer: turned about Y, the model's y-down mirrored space flipped, dropped by 1.501 (and the size of the type)
-        entity = mul(scaling({-k, -k, k}), translation({0.0, -1.501, 0.0}));
+        double sx = 1.0, sy = 1.0;
+        if (pose.swell > 0.0f) {  // CreeperRenderer.scale: it swells and shivers
+            const float g = std::clamp(pose.swell, 0.0f, 1.0f);
+            const double shiver = 1.0 + static_cast<double>(std::sin(g * 100.0f) * g * 0.01f);
+            const double f = static_cast<double>(g * g * g * g);
+            sx = (1.0 + f * 0.4) * shiver;
+            sy = (1.0 + f * 0.1) / shiver;
+        }
+        entity = mul(scaling({-k * sx, -k * sy, k * sx}), translation({0.0, -1.501, 0.0}));
+        if (pose.death > 0.0f && loaded.kind != 'D') {  // LivingEntityRenderer.setupRotations: down on its side over the first second
+            const float f = std::min(std::sqrt(std::min((pose.death - 1.0f) / 20.0f * 1.6f, 1.6f)), 1.0f);
+            entity = mul(rotZ(static_cast<double>(f) * 90.0 * static_cast<double>(kDegrees)), entity);
+        }
         entity = mul(rotY((180.0 - static_cast<double>(pose.bodyYaw)) * static_cast<double>(kDegrees)), entity);
     }
     entity = mul(translation({pose.position[0] - cam[0], pose.position[1] - cam[1], pose.position[2] - cam[2]}), entity);

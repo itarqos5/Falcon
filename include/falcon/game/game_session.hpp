@@ -327,13 +327,16 @@ private:
     [[nodiscard]] bool playerInsideBlock(const char* name) const;
     bool tryLightPortal(int x, int y, int z);
     void checkPortalsAround(int x, int y, int z);
+    void tryActivateEndPortal(int x, int y, int z);
     void createPortalAt(double x, double yHint, double z, int dimension, PortalFrame& out);
     void arriveByPortal(double x, double y, double z);
     void placeEndPlatform();
     void liftOutOfBlocks();
     void returnFromEnd();
     void startDragonFight();
+    void makeExitPortal(bool active);
     void drawPortalOverlay(GuiGraphics& g, int guiWidth, int guiHeight);
+    void drawBossBar(GuiGraphics& g, int guiWidth, int guiHeight);
     void tickPortal();
     void tickDragonFight();
     void attackMob(int id);  // the player hits a mob: the damage the held item and the attack cooldown give, the knockback, the sounds

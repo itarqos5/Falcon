@@ -231,6 +231,34 @@ bool GameSession::findClosestPortal(double x, double z, int radius, PortalFrame&
     return findPortalFrame(found[0], y, found[2], axis, out);
 }
 
+// EnderEyeItem: twelve end portal frames in a ring round a 3 by 3 square, every one with its eye in, and the square fills with the portal into the End.
+void GameSession::tryActivateEndPortal(int x, int y, int z) {
+    const auto portal = registry_->find("end_portal");
+    if (!portal) return;
+    const Level& level = renderer_.level();
+    const auto filledFrame = [&](int px, int pz) {
+        const Block b = level.block(px, y, pz);
+        return isBlockNamed(b, "end_portal_frame") && registry_->get(b, "eye") == "true";
+    };
+    for (int cx = x - 3; cx <= x + 3; ++cx) {
+        for (int cz = z - 3; cz <= z + 3; ++cz) {
+            bool ring = true;
+            for (int i = -1; i <= 1 && ring; ++i) {
+                ring = filledFrame(cx + 2, cz + i) && filledFrame(cx - 2, cz + i) && filledFrame(cx + i, cz + 2) && filledFrame(cx + i, cz - 2);
+            }
+            if (!ring) continue;
+            portalEdit_ = true;
+            for (int dx = -1; dx <= 1; ++dx) {
+                for (int dz = -1; dz <= 1; ++dz) setBlock(cx + dx, y, cz + dz, *portal);
+            }
+            portalEdit_ = false;
+            const std::array<double, 3> at = {cx + 0.5, y + 0.5, cz + 0.5};
+            playWorldSound("block.end_portal.spawn", SoundSource::Blocks, 1.0f, 1.0f, &at);
+            return;
+        }
+    }
+}
+
 // PortalForcer.createPortal: a frame of obsidian four wide and five high with a platform of obsidian under and in front of it, at the best open place near the point.
 void GameSession::createPortalAt(double x, double yHint, double z, int dimension, PortalFrame& out) {
     const Level& level = renderer_.level();
