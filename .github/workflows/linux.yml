@@ -81,7 +81,7 @@ jobs:
       - name: Tests on the game's own data
         env:
           FALCON_ASSETS_DIR: ${{ runner.temp }}/game/26.3/assets
-        run: xvfb-run -a ctest --test-dir build --output-on-failure -V -R "falcon_(tests|worldgen_tests|worldgen_chunk_tests|item_tests|world_tests|net_tests)" | grep -E "skipped|Test +#|tests passed|tests failed|CHECK failed" || true
+        run: xvfb-run -a ctest --test-dir build --output-on-failure -V -R "falcon_(tests|worldgen_tests|worldgen_chunk_tests|item_tests|world_tests|net_tests|logic_tests)" | grep -E "skipped|Test +#|tests passed|tests failed|CHECK failed" || true
 
       - name: The game, in a hidden window, in a world
         env:

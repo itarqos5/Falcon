@@ -38,8 +38,8 @@ from your own installation: see "Game assets" below.</sub>
   the surface columns have the same height. The remaining gap (the game's exact trees, flowers, dripstone and structures) is listed in
   "Checking the terrain against the real game".
 
-Not built yet: joining servers, Realms, mobs, the game's exact feature placement (trees, flowers, dripstone) and structures, a day and
-night cycle. Vulkan is on the Graphics API button but only OpenGL draws (see `docs/RENDERING.md`).
+Not built yet: Realms, the game's exact feature placement (trees, flowers, dripstone), structures, weather, and most of the entities and the survival systems
+(see `docs/GAMEPLAY.md` for what the world, the mobs and the dimensions do today).
 
 ## Not affiliated, and nothing of Minecraft is in here
 
@@ -375,7 +375,7 @@ running next to it keeps the machine.
   veins, bedrock and deepslate, the surface rules, the 67 biomes). It was checked against the real game's own output for seed 12345:
   every block of 39 reference chunks (3.8 million blocks each) matches, so **the seed gives the same land, sea, rivers, mountains,
   badlands and deserts as Minecraft**, except in 18 columns where two biomes tie exactly. **Not built yet:** the game's own placed
-  features (the exact trees, flowers, dripstone and the rest), structures, and mobs. The classic caves and canyons are there (ported from the game's carver code with its own random numbers, but not yet checked against what the real game cuts for a seed, and what fills them is simplified) and so are the ores and the blobs of other rock (the game's veins, counts, sizes and heights, but NOT its random numbers: a seed does not give its exact ore positions); see `worldgen/underground.hpp`. On top of the exact
+  features (the exact trees, flowers, dripstone and the rest) and structures. The classic caves and canyons are there (ported from the game's carver code with its own random numbers, but not yet checked against what the real game cuts for a seed, and what fills them is simplified) and so are the ores and the blobs of other rock (the game's veins, counts, sizes and heights, but NOT its random numbers: a seed does not give its exact ore positions); see `worldgen/underground.hpp`. On top of the exact
   terrain Falcon adds **its own approximation** of the plants: the trees each biome grows (oak, birch, spruce, acacia, jungle, cherry,
   dark oak), grass, ferns, flowers, cacti, dead bushes, seagrass and kelp, and snow and ice in the cold biomes. These follow the
   game's biomes but are NOT the game's trees: a seed does not give the game's exact forests. They are laid down the way the game's
@@ -399,7 +399,7 @@ running next to it keeps the machine.
   out beside either side is light-permeable). `Falcon --audit-lighting` meshes every block beside stone pillars with Smooth Lighting
   on and off and lists any block that should vary but does not (none: 473 blocks are smooth, 282 are flat because their model says
   `"ambientocclusion": false`).
-  Not built: the day and night cycle (it is always day) and the exact transparency rules for stairs and slabs (their light uses
+  The sky follows the day and the night (the game's own timelines, read from its data: sun, moon and its phases, stars, sunrise and sunset glow, the fog and the light of the sky); not built: the exact transparency rules for stairs and slabs (their light uses
   full blocks' rules).
 - **What you aim at is the block's outline, not its cell**: the cursor, the breaking and placing and the black outline all use the
   game's per-state outline shapes (read from `gameplay-facts.json`, kept in `falcon_cache/outlines.cache`), so a torch is a thin post
@@ -489,8 +489,7 @@ running next to it keeps the machine.
   in `falcon_cache`). Elytra work: a jump in the air with them worn opens the wings (`LivingEntity.travelFallFlying`), and a firework rocket used while gliding pushes along. Not built: water currents, honey sliding, powder snow, scaffolding, bamboo, auto-jump.
 - **Health** is real: a fall hurts by the game's rule (`LivingEntity.causeFallDamage`: the cry for the size of the fall, the block's fall sound, then the hurt, with
   the half second of protection after a hit, the hearts blinking and the view tipping to one side), the void kills a survival player, a fed player heals half a heart
-  every four seconds, and at 0 the **You Died!** screen scatters everything the player carried where they died and offers Respawn or Title Screen. Food can be eaten (the time, the bites, the burp and the food and saturation of the game's data; a potion leaves its bottle), the experience bar fills when a furnace's output is taken, but nothing uses food up, the effects of a food or a potion (regeneration, hunger ...) are not applied, no crumbs fly, and there is no armor row or air bubbles. There is no day and
-  night, weather or clouds, and no mobs.
+  every four seconds, and at 0 the **You Died!** screen scatters everything the player carried where they died and offers Respawn or Title Screen. Food can be eaten (the time, the bites, the burp and the food and saturation of the game's data; a potion leaves its bottle), the experience bar fills when a furnace's output is taken, but nothing uses food up, the effects of a food or a potion (regeneration, hunger ...) are not applied, no crumbs fly, and there is no armor row or air bubbles. There are no weather or clouds. Mobs, the Nether, the End and the day are in `docs/GAMEPLAY.md`.
 - **Sounds of the world**: breaking and placing a block play the block's own sound (`block.<set>.break` / `.place`, with its SoundType volume and pitch, in the Blocks
   slider), walking makes a step on the pace the game uses (a step every 1.67 blocks; a landing counts; none while sneaking on the ground or flying; muffled steps and a
   swim sound in water), a fall plays the cry and the block's fall sound, and a splash, a hurt, a death and picking an item up have theirs. The sounds fade with the distance.
