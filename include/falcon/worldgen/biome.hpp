@@ -218,6 +218,10 @@ public:
     // Multi-noise source: `parameterFile` is biome-parameters/overworld.json. `router` must outlive the source.
     [[nodiscard]] static std::unique_ptr<BiomeSource> create(const std::filesystem::path& parameterFile, std::shared_ptr<const BiomeRegistry> registry,
                                                               const NoiseRouter& router, std::int64_t seed, std::string& error);
+    // The Nether's biomes (MultiNoiseBiomeSourceParameterList.Preset.NETHER: five points on the temperature and humidity noises of the router) and the End's (TheEndBiomeSource:
+    // the island in the middle, then highlands, midlands, small islands and barrens by the router's erosion).
+    [[nodiscard]] static std::unique_ptr<BiomeSource> createNether(std::shared_ptr<const BiomeRegistry> registry, const NoiseRouter& router, std::int64_t seed, std::string& error);
+    [[nodiscard]] static std::unique_ptr<BiomeSource> createEnd(std::shared_ptr<const BiomeRegistry> registry, const NoiseRouter& router, std::int64_t seed, std::string& error);
     // One biome everywhere (the "single biome" world type / minecraft:fixed).
     [[nodiscard]] static std::unique_ptr<BiomeSource> createFixed(std::shared_ptr<const BiomeRegistry> registry, BiomeId biome, std::int64_t seed);
 
@@ -261,6 +265,8 @@ private:
     climate::ParameterList list_;
     climate::RTree tree_;
     BiomeId fixed_ = kNoBiome;
+    bool end_ = false;  // TheEndBiomeSource
+    BiomeId endBiomes_[5] = {kNoBiome, kNoBiome, kNoBiome, kNoBiome, kNoBiome};  // the_end, end_highlands, end_midlands, small_end_islands, end_barrens
     std::int64_t seed_ = 0;
     std::int64_t zoomSeed_ = 0;
     std::uint64_t id_ = 0;

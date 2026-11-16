@@ -70,6 +70,9 @@ public:
     // NormalNoise.create(RandomSource): `random` is root.fromHashOf("minecraft:<name>") for a world's noise.
     // It forks two positional factories and builds, per octave, a first and a second PerlinNoise from "octave_<n>".
     [[nodiscard]] static NormalNoise create(RandomSource& random, const NoiseParameters& params);
+    // NormalNoise.createForLegacyNetherBiome: the old way of making a Perlin stack (one noise per octave drawn in turn from the same random source, 262 values skipped for an
+    // octave that is not used), twice, the second at 1.0181268882175227 times the frequency. The Nether's temperature and vegetation noises are made this way.
+    [[nodiscard]] static NormalNoise createForLegacyNetherBiome(RandomSource& random, const NoiseParameters& params);
 
     [[nodiscard]] float get(double x, double y, double z) const;
     [[nodiscard]] float get(double x, double z) const;

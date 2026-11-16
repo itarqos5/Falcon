@@ -253,7 +253,7 @@ private:
                 fail("bad vertical_gradient condition");
                 return -1;
             }
-            n.factory = m_.router->randomState()->randomFactory(name->text.find(':') == std::string::npos ? "minecraft:" + name->text : name->text);
+            n.factory = m_.router->randomState()->randomFactoryAny(name->text.find(':') == std::string::npos ? "minecraft:" + name->text : name->text);
         } else if (t == "noise_threshold") {
             n.kind = CondKind::NoiseThreshold;
             const JsonValue* noise = js.find("noise");
@@ -373,7 +373,7 @@ private:
                 fail("ore_vein without raw_ore_chance");
                 return -1;
             }
-            v.factory = m_.router->randomState()->randomFactory("minecraft:ore");
+            v.factory = m_.router->randomState()->randomFactoryAny("minecraft:ore");
             n.a = static_cast<std::int32_t>(m_.veins.size());
             m_.veins.push_back(std::move(v));
         } else {

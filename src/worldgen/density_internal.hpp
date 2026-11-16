@@ -3,6 +3,7 @@
 // The compiled form of a density-function graph (shared by the builder and the evaluators). Private to src/worldgen.
 
 #include "falcon/worldgen/density.hpp"
+#include "falcon/worldgen/legacy_noise.hpp"
 #include "falcon/worldgen/noise.hpp"
 
 #include <cstdint>
@@ -33,6 +34,9 @@ enum class Op : std::uint8_t {
     Spline,          // i0 = root multipoint, i2 = first coordinate node in `extra`, i3 = count
     FindTopSurface,  // a = density, b = upper bound, i0 = lower bound, i1 = cell height
     Interpolated,    // a = input, i0 = cell size xz, i1 = cell size y, f0 = 1 / cell xz, f1 = 1 / cell y
+    DistanceToPoint, // the End's island: i0 = metric (0 euclidean, 1 manhattan, 2 chebyshev), d0, d1, f0 = the point's x, y, z
+    Slice,           // a = input, i0 = axis, i1 = coordinate: the input as it is at that coordinate of the axis
+    EndOuterIslands, // i0 = slot in GraphData::simplex: the small islands out beyond the main one (EndIslandDensityFunction)
 };
 
 struct Node {
@@ -74,6 +78,7 @@ struct GraphData {
     std::vector<Node> nodes;
     std::vector<const NormalNoise*> noises;
     std::vector<std::unique_ptr<BlendedNoise>> blended;
+    std::vector<std::unique_ptr<SimplexNoise>> simplex;
     std::vector<SplineMulti> multis;
     std::vector<SplinePoint> points;
     std::vector<float> thresholds;
@@ -99,6 +104,8 @@ void forEachChild(const GraphData& g, const Node& n, F&& f) {
         case Op::ShiftB:
         case Op::Shift:
         case Op::BlendedNoise:
+        case Op::DistanceToPoint:
+        case Op::EndOuterIslands:
             break;
         case Op::Noise:
             if (n.a >= 0) f(n.a);

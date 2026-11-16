@@ -38,7 +38,7 @@ std::shared_ptr<AquiferShared> AquiferShared::create(const NoiseRouter& router, 
     s->seaLevel = router.settings().seaLevel;
     s->minY = router.settings().minY;
     s->height = router.settings().height;
-    s->defaultFluid = router.settings().defaultFluid == "minecraft:lava" ? Fluid::Lava : Fluid::Water;
+    s->defaultFluid = router.settings().defaultFluid == "minecraft:lava" ? Fluid::Lava : router.settings().defaultFluid == "minecraft:air" ? Fluid::Air : Fluid::Water;
     s->random = router.randomState()->randomFactory("minecraft:aquifer");
     if (router.hasAquifers()) {
         s->barrier = router.aquiferBarrier();
@@ -48,7 +48,7 @@ std::shared_ptr<AquiferShared> AquiferShared::create(const NoiseRouter& router, 
         s->exclusion = router.aquiferExclusion();
         s->surfaceLevel = router.aquiferSurfaceLevel();
         s->valid = true;
-    } else if (router.settings().defaultFluid != "minecraft:water" && router.settings().defaultFluid != "minecraft:lava") {
+    } else if (router.settings().defaultFluid != "minecraft:water" && router.settings().defaultFluid != "minecraft:lava" && router.settings().defaultFluid != "minecraft:air") {
         error = "aquifer: unsupported default fluid " + router.settings().defaultFluid;
         return nullptr;
     }

@@ -236,9 +236,9 @@ double parityNormalizationFactor(double baseAmplitude, int count, const std::vec
 
 }  // namespace
 
-NormalNoise NormalNoise::create(RandomSource& random, const NoiseParameters& p) {
-    NormalNoise n;
-
+namespace {
+// buildOctaves and the normalization factor of NormalNoise's constructor, shared by the ways of making the layers.
+void describeOctaves(const NoiseParameters& p, std::vector<NormalNoise::OctaveInfo>& octaves, double& nfOut) {
     // buildOctaves
     double freq = std::ldexp(1.0, p.baseOctave);
     double amp = p.baseAmplitude;
@@ -247,18 +247,18 @@ NormalNoise NormalNoise::create(RandomSource& random, const NoiseParameters& p) 
     }
     for (int i = 0; i < p.octaveCount; ++i) {
         const double m = p.amplitudeModifiers.empty() ? 1.0 : p.amplitudeModifiers[static_cast<std::size_t>(i)];
-        if (m != 0.0) n.octaves_.push_back({p.baseOctave + i, freq, amp * m});
+        if (m != 0.0) octaves.push_back({p.baseOctave + i, freq, amp * m});
         freq *= 2.0;
         amp *= 0.5;
     }
 
     // normalization factor
     std::vector<double> absAmps;
-    absAmps.reserve(n.octaves_.size());
-    for (const OctaveInfo& o : n.octaves_) absAmps.push_back(std::fabs(o.amplitude));
+    absAmps.reserve(octaves.size());
+    for (const NormalNoise::OctaveInfo& o : octaves) absAmps.push_back(std::fabs(o.amplitude));
     const double sumAbs = compensatedSum(absAmps);
     double devSq = 0.0;
-    for (const OctaveInfo& o : n.octaves_) {
+    for (const NormalNoise::OctaveInfo& o : octaves) {
         const double d = kStandardDeviation * std::fabs(o.amplitude);
         devSq += d * d;
     }
@@ -273,6 +273,60 @@ NormalNoise NormalNoise::create(RandomSource& random, const NoiseParameters& p) 
         const double pf = parityNormalizationFactor(p.baseAmplitude, p.octaveCount, p.amplitudeModifiers);
         nf = pf;
     }
+    nfOut = nf;
+}
+}  // namespace
+
+NormalNoise NormalNoise::createForLegacyNetherBiome(RandomSource& random, const NoiseParameters& p) {
+    NormalNoise n;
+    double nf = 0.0;
+    describeOctaves(p, n.octaves_, nf);
+    n.normalizationFactor_ = nf;
+    std::vector<double> amplitudes = p.amplitudeModifiers;
+    if (amplitudes.empty()) amplitudes.assign(static_cast<std::size_t>(p.octaveCount), 1.0);
+    // LegacyFbmInitializer.createForLegacyNetherBiome, twice: each is a list of (frequency, amplitude, noise) for the octaves that have one.
+    struct Octave {
+        PerlinNoise noise;
+        double frequency;
+        float amplitude;
+    };
+    const auto makeStack = [&](std::vector<Octave>& out) {
+        const int count = static_cast<int>(amplitudes.size());
+        const int j = -p.baseOctave;
+        std::vector<std::unique_ptr<PerlinNoise>> levels(static_cast<std::size_t>(count));
+        PerlinNoise first(random);
+        if (j >= 0 && j < count && amplitudes[static_cast<std::size_t>(j)] != 0.0) levels[static_cast<std::size_t>(j)] = std::make_unique<PerlinNoise>(first);
+        for (int k = j - 1; k >= 0; --k) {
+            if (k < count) {
+                if (amplitudes[static_cast<std::size_t>(k)] != 0.0) levels[static_cast<std::size_t>(k)] = std::make_unique<PerlinNoise>(random);
+                else random.consumeCount(262);
+            } else {
+                random.consumeCount(262);
+            }
+        }
+        double d = std::pow(2.0, static_cast<double>(-j));
+        double e = std::pow(2.0, static_cast<double>(count - 1)) / (std::pow(2.0, static_cast<double>(count)) - 1.0);
+        for (int k = 0; k < count; ++k) {
+            if (levels[static_cast<std::size_t>(k)]) out.push_back({*levels[static_cast<std::size_t>(k)], d, static_cast<float>(e * amplitudes[static_cast<std::size_t>(k)])});
+            d *= 2.0;
+            e /= 2.0;
+        }
+    };
+    std::vector<Octave> a, b;
+    makeStack(a);
+    makeStack(b);
+    const float f = static_cast<float>(nf * p.baseAmplitude);
+    // NoiseStack.Builder.addStack: the layers of each stack are copied over with their frequency and amplitude multiplied by the stack's.
+    for (const Octave& o : a) n.layers_.push_back({o.noise, o.frequency * 1.0, o.amplitude * f});
+    for (const Octave& o : b) n.layers_.push_back({o.noise, o.frequency * kInputFactor, o.amplitude * f});
+    return n;
+}
+
+NormalNoise NormalNoise::create(RandomSource& random, const NoiseParameters& p) {
+    NormalNoise n;
+
+    double nf = 0.0;
+    describeOctaves(p, n.octaves_, nf);
     n.normalizationFactor_ = nf;
 
     // create(RandomSource)

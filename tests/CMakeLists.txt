@@ -45,6 +45,7 @@ add_test(NAME falcon_lod_tests COMMAND falcon_lod_tests)
 # The game's rules that need no data and no graphics card: the clock, and what the mobs do.
 add_executable(falcon_logic_tests EXCLUDE_FROM_ALL test_logic.cpp test_logic_day.cpp)
 target_sources(falcon_logic_tests PRIVATE test_logic_mob.cpp)
+target_sources(falcon_logic_tests PRIVATE test_logic_random.cpp)
 target_link_libraries(falcon_logic_tests PRIVATE falcon::core falcon_warnings)
 add_test(NAME falcon_logic_tests COMMAND falcon_logic_tests)
 
@@ -80,3 +81,7 @@ endif()
 # How fast chunks are made, and a hash of them (tools/bench_chunks.cpp): for making generation faster without changing a block.
 add_executable(falcon_bench_chunks EXCLUDE_FROM_ALL ../tools/bench_chunks.cpp)
 target_link_libraries(falcon_bench_chunks PRIVATE falcon::core falcon_warnings)
+
+# What the Nether's and the End's generators make (a look at the terrain without starting the game): tools/dim_probe.cpp
+add_executable(falcon_dim_probe EXCLUDE_FROM_ALL ../tools/dim_probe.cpp)
+target_link_libraries(falcon_dim_probe PRIVATE falcon::core falcon_warnings)

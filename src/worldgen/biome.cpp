@@ -624,6 +624,53 @@ std::unique_ptr<BiomeSource> BiomeSource::create(const std::filesystem::path& pa
     return s;
 }
 
+std::unique_ptr<BiomeSource> BiomeSource::createNether(std::shared_ptr<const BiomeRegistry> registry, const NoiseRouter& router, std::int64_t seed, std::string& error) {
+    if (!registry) {
+        error = "biome source: no biome registry";
+        return nullptr;
+    }
+    static const char* const kNether = R"({"biomes": [
+        {"biome": "minecraft:nether_wastes",    "parameters": {"temperature": 0.0,  "humidity": 0.0,  "continentalness": 0, "erosion": 0, "depth": 0, "weirdness": 0, "offset": 0.0}},
+        {"biome": "minecraft:soul_sand_valley", "parameters": {"temperature": 0.0,  "humidity": -0.5, "continentalness": 0, "erosion": 0, "depth": 0, "weirdness": 0, "offset": 0.0}},
+        {"biome": "minecraft:crimson_forest",   "parameters": {"temperature": 0.4,  "humidity": 0.0,  "continentalness": 0, "erosion": 0, "depth": 0, "weirdness": 0, "offset": 0.0}},
+        {"biome": "minecraft:warped_forest",    "parameters": {"temperature": 0.0,  "humidity": 0.5,  "continentalness": 0, "erosion": 0, "depth": 0, "weirdness": 0, "offset": 0.375}},
+        {"biome": "minecraft:basalt_deltas",    "parameters": {"temperature": -0.5, "humidity": 0.0,  "continentalness": 0, "erosion": 0, "depth": 0, "weirdness": 0, "offset": 0.175}}]})";
+    JsonValue json;
+    if (!parseJson(kNether, json, error)) return nullptr;
+    std::unique_ptr<BiomeSource> s(new BiomeSource());
+    s->registry_ = std::move(registry);
+    s->router_ = &router;
+    if (!climate::parseParameterList(json, *s->registry_, s->list_, error)) return nullptr;
+    s->tree_ = climate::RTree(s->list_);
+    s->seed_ = seed;
+    s->zoomSeed_ = obfuscateSeed(seed);
+    s->id_ = g_nextSourceId.fetch_add(1);
+    return s;
+}
+
+std::unique_ptr<BiomeSource> BiomeSource::createEnd(std::shared_ptr<const BiomeRegistry> registry, const NoiseRouter& router, std::int64_t seed, std::string& error) {
+    if (!registry) {
+        error = "biome source: no biome registry";
+        return nullptr;
+    }
+    std::unique_ptr<BiomeSource> s(new BiomeSource());
+    s->registry_ = std::move(registry);
+    s->router_ = &router;
+    static const char* const kNames[5] = {"minecraft:the_end", "minecraft:end_highlands", "minecraft:end_midlands", "minecraft:small_end_islands", "minecraft:end_barrens"};
+    for (int i = 0; i < 5; ++i) {
+        s->endBiomes_[i] = s->registry_->find(kNames[i]);
+        if (s->endBiomes_[i] == kNoBiome) {
+            error = std::string("the biome ") + kNames[i] + " is missing";
+            return nullptr;
+        }
+    }
+    s->end_ = true;
+    s->seed_ = seed;
+    s->zoomSeed_ = obfuscateSeed(seed);
+    s->id_ = g_nextSourceId.fetch_add(1);
+    return s;
+}
+
 std::unique_ptr<BiomeSource> BiomeSource::createFixed(std::shared_ptr<const BiomeRegistry> registry, BiomeId biome, std::int64_t seed) {
     std::unique_ptr<BiomeSource> s(new BiomeSource());
     s->registry_ = std::move(registry);
@@ -651,6 +698,16 @@ climate::TargetPoint BiomeSource::sampleClimate(Context& ctx, int qx, int qy, in
 
 BiomeId BiomeSource::noiseBiome(Context& ctx, int qx, int qy, int qz) const {
     if (fixed_ != kNoBiome) return fixed_;
+    if (end_) {  // TheEndBiomeSource.getNoiseBiome
+        const int blockX = qx * 4, blockZ = qz * 4;
+        const long long chunkX = blockX >> 4, chunkZ = blockZ >> 4;
+        if (chunkX * chunkX + chunkZ * chunkZ <= 4096) return endBiomes_[0];
+        const int sx = ((blockX >> 4) * 2 + 1) * 8, sz = ((blockZ >> 4) * 2 + 1) * 8;
+        const double erosion = static_cast<double>(router_->erosion().compute(sx, qy * 4, sz));
+        if (erosion > 0.25) return endBiomes_[1];
+        if (erosion >= -0.0625) return endBiomes_[2];
+        return erosion < -0.21875 ? endBiomes_[3] : endBiomes_[4];
+    }
     qy = std::clamp(qy, ChunkBiomes::kMinQuartY, ChunkBiomes::kMinQuartY + ChunkBiomes::kQuartsY - 1);
     return tree_.searchCanonical(ctx.sampler_->sample(qx, qy, qz), ctx.cache_);
 }
@@ -660,6 +717,16 @@ BiomeId BiomeSource::noiseBiome(int qx, int qy, int qz) const { return noiseBiom
 void BiomeSource::fillChunk(Context& ctx, int chunkX, int chunkZ, ChunkBiomes& out) const {
     if (fixed_ != kNoBiome) {
         out.ids.fill(static_cast<std::uint8_t>(fixed_));
+        return;
+    }
+    if (end_) {
+        for (int qz = 0; qz < ChunkBiomes::kQuartsXZ; ++qz) {
+            for (int qx = 0; qx < ChunkBiomes::kQuartsXZ; ++qx) {
+                std::uint8_t* col = &out.ids[ChunkBiomes::index(qx, 0, qz)];
+                const BiomeId b = noiseBiome(ctx, chunkX * 4 + qx, 0, chunkZ * 4 + qz);
+                for (int i = 0; i < ChunkBiomes::kQuartsY; ++i) col[i] = static_cast<std::uint8_t>(b);
+            }
+        }
         return;
     }
     for (int qz = 0; qz < ChunkBiomes::kQuartsXZ; ++qz) {

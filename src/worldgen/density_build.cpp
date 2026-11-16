@@ -91,6 +91,9 @@ struct DensityGraphBuilder::Impl {
             case Op::ShiftA: case Op::ShiftB: axes = kAxisX | kAxisZ; break;
             case Op::Shift: case Op::BlendedNoise: case Op::Interpolated: axes = kAxisX | kAxisY | kAxisZ; break;
             case Op::FindTopSurface: axes &= ~static_cast<unsigned>(kAxisY); break;
+            case Op::DistanceToPoint: axes = kAxisX | kAxisY | kAxisZ; break;
+            case Op::EndOuterIslands: axes = kAxisX | kAxisZ; break;
+            case Op::Slice: axes &= ~(1u << static_cast<unsigned>(n.i0)); break;
             default: break;
         }
         n.axes = static_cast<std::uint8_t>(axes);
@@ -393,6 +396,44 @@ int DensityGraphBuilder::Impl::fromObject(const JsonValue& j, std::string_view t
         data->extra.insert(data->extra.end(), fnIds.begin(), fnIds.end());
         return add(n);
     }
+    if (type == "distance_to_point") {
+        const JsonValue* point = j.find("point");
+        if (!point || !point->isArray() || point->items.size() != 3) return fail("distance_to_point: bad 'point'");
+        Node n;
+        n.op = Op::DistanceToPoint;
+        const JsonValue* metric = j.find("metric");
+        n.i0 = 0;  // euclidean
+        if (metric && metric->isString()) n.i0 = metric->text == "manhattan" ? 1 : metric->text == "chebyshev" ? 2 : metric->text == "euclidean_squared" ? 3 : 0;
+        double px = 0.0, py = 0.0, pz = 0.0;
+        if (!point->items[0].toDouble(px) || !point->items[1].toDouble(py) || !point->items[2].toDouble(pz)) return fail("distance_to_point: bad 'point'");
+        n.d0 = px;
+        n.d1 = py;
+        n.f0 = static_cast<float>(pz);
+        return add(n);
+    }
+    if (type == "slice") {
+        const JsonValue* axis = j.find("axis");
+        if (!axis || !axis->isString() || (axis->text != "x" && axis->text != "y" && axis->text != "z")) return fail("slice: bad 'axis'");
+        std::int32_t coordinate = 0;
+        const JsonValue* c = j.find("coordinate");
+        if (!c || !c->toInt(coordinate)) return fail("slice: bad 'coordinate'");
+        const int input = child(j, "input", w);
+        if (input < 0) return -1;
+        Node n;
+        n.op = Op::Slice;
+        n.a = input;
+        n.i0 = axis->text == "x" ? 0 : axis->text == "y" ? 1 : 2;
+        n.i1 = coordinate;
+        return add(n);
+    }
+    if (type == "end_outer_islands") {
+        RandomState::SimplexSeed seed = state->legacyIslandSeed();  // (LegacyRandomSource(seed), 17292 values skipped)
+        Node n;
+        n.op = Op::EndOuterIslands;
+        n.i0 = static_cast<std::int32_t>(data->simplex.size());
+        data->simplex.push_back(std::make_unique<SimplexNoise>(*seed.random));
+        return add(n);
+    }
     if (type == "gradient") {
         Node n;
         n.op = Op::Gradient;
@@ -460,9 +501,9 @@ int DensityGraphBuilder::Impl::fromObject(const JsonValue& j, std::string_view t
         if (it != blendedSlot.end()) {
             slot = it->second;
         } else {
-            XoroshiroRandomSource rnd = state->terrainRandom();
+            const std::unique_ptr<RandomSource> rnd = state->createRandom("minecraft:terrain");
             slot = static_cast<int>(data->blended.size());
-            data->blended.push_back(std::make_unique<BlendedNoise>(p, rnd));
+            data->blended.push_back(std::make_unique<BlendedNoise>(p, *rnd));
             blendedSlot.emplace(key, slot);
         }
         Node n;

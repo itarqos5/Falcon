@@ -238,8 +238,8 @@ std::unique_ptr<OverworldGenerator> OverworldGenerator::create(const std::filesy
     g->router_ = NoiseRouter::create(wg, seed, error, options.noiseSettings, densityRefs);
     if (!g->router_) return nullptr;
     const NoiseSettings& ns = g->router_->settings();
-    if (ns.minY != kMinY || ns.height != kWorldHeight) {
-        error = "only worlds with min_y -64 and height 384 are supported";
+    if (ns.minY < kMinY || ns.minY + ns.height > kMaxY) {
+        error = "the noise settings reach outside the world (y -64 to 320)";
         return nullptr;
     }
 
@@ -252,6 +252,12 @@ std::unique_ptr<OverworldGenerator> OverworldGenerator::create(const std::filesy
             return nullptr;
         }
         g->biomeSource_ = BiomeSource::createFixed(g->biomeRegistry_, id, seed);
+    } else if (options.biomePreset == "minecraft:nether") {
+        g->biomeSource_ = BiomeSource::createNether(g->biomeRegistry_, *g->router_, seed, error);
+        if (!g->biomeSource_) return nullptr;
+    } else if (options.biomePreset == "minecraft:the_end") {
+        g->biomeSource_ = BiomeSource::createEnd(g->biomeRegistry_, *g->router_, seed, error);
+        if (!g->biomeSource_) return nullptr;
     } else {
         g->biomeSource_ = BiomeSource::create(findParameterFile(wg, options.biomePreset), g->biomeRegistry_, *g->router_, seed, error);
         if (!g->biomeSource_) return nullptr;
@@ -268,8 +274,10 @@ std::unique_ptr<OverworldGenerator> OverworldGenerator::create(const std::filesy
         return true;
     };
     if (!block(ns.defaultBlock, g->stone_) || !block(ns.defaultFluid, g->water_) || !block("minecraft:lava", g->lava_) || !block("minecraft:air", g->air_)) return nullptr;
-    if (ns.defaultFluid != "minecraft:water") {
-        error = "only water is supported as the default fluid";
+    if (ns.defaultFluid == "minecraft:lava") g->water_ = g->lava_;       // (the Nether's sea is lava, and the End's is air: what the fluid picker puts where the terrain is open)
+    else if (ns.defaultFluid == "minecraft:air") g->water_ = g->air_;
+    else if (ns.defaultFluid != "minecraft:water") {
+        error = "unsupported default fluid " + ns.defaultFluid;
         return nullptr;
     }
 
@@ -384,13 +392,21 @@ void OverworldGenerator::runStages(Workspace& w, int cx, int cz, Stage upTo) con
 
 void OverworldGenerator::buildChunk(Workspace& w, Chunk& chunk, ChunkExtras* extras) const {
     const int height = router_->settings().height;
+    const int noiseMinY = router_->settings().minY;
     const Block* blocks = w.blocks.data();
     auto& raw = w.sectionBuilder.raw();
     for (int s = 0; s < kSectionCount; ++s) {
-        const Block first = blocks[static_cast<std::size_t>(s) * 16u];
+        // The sections of the world that the generator's range covers (the Nether: y 0 to 127) have blocks; the rest is air.
+        const int worldY0 = kMinY + s * 16;
+        if (worldY0 < noiseMinY || worldY0 >= noiseMinY + height) {
+            chunk.sections[static_cast<std::size_t>(s)] = nullptr;
+            continue;
+        }
+        const std::size_t local = static_cast<std::size_t>(worldY0 - noiseMinY);  // (the column index of this section's first block)
+        const Block first = blocks[local];
         bool uniform = true;
         for (std::size_t c = 0; c < 256 && uniform; ++c) {
-            const Block* p = blocks + c * static_cast<std::size_t>(height) + static_cast<std::size_t>(s) * 16u;
+            const Block* p = blocks + c * static_cast<std::size_t>(height) + local;
             for (int ly = 0; ly < 16; ++ly) {
                 if (p[ly] != first) {
                     uniform = false;
@@ -404,7 +420,7 @@ void OverworldGenerator::buildChunk(Workspace& w, Chunk& chunk, ChunkExtras* ext
         }
         for (int z = 0; z < 16; ++z) {
             for (int x = 0; x < 16; ++x) {
-                const Block* p = blocks + static_cast<std::size_t>(height) * (static_cast<std::size_t>(x) + 16u * static_cast<std::size_t>(z)) + static_cast<std::size_t>(s) * 16u;
+                const Block* p = blocks + static_cast<std::size_t>(height) * (static_cast<std::size_t>(x) + 16u * static_cast<std::size_t>(z)) + local;
                 for (int ly = 0; ly < 16; ++ly) raw[static_cast<std::size_t>((ly << 8) | (z << 4) | x)] = p[ly];
             }
         }

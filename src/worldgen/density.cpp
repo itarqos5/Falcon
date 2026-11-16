@@ -228,6 +228,42 @@ float DensityEvaluator::compute(const Node& n) {
             return nz.get(static_cast<double>(x_) * 0.25, static_cast<double>(y_) * 0.25, static_cast<double>(z_) * 0.25) * 4.0f;
         }
         case Op::BlendedNoise: return g_->blended[static_cast<std::size_t>(n.i0)]->sample(x_, y_, z_);
+        case Op::DistanceToPoint: {
+            // DistanceMetric.compute(float, float, float) on the integer differences from the point
+            const float dx = static_cast<float>(x_ - static_cast<int>(n.d0)), dy = static_cast<float>(y_ - static_cast<int>(n.d1)), dz = static_cast<float>(z_ - static_cast<int>(n.f0));
+            if (n.i0 == 1) return std::fabs(dx) + std::fabs(dy) + std::fabs(dz);
+            if (n.i0 == 2) return std::max(std::max(std::fabs(dx), std::fabs(dy)), std::fabs(dz));
+            const float lengthSquared = dx * dx + dy * dy + dz * dz;
+            if (n.i0 == 3) return lengthSquared;
+            return static_cast<float>(std::sqrt(static_cast<double>(lengthSquared)));  // Mth.length: Mth.sqrt(lengthSquared)
+        }
+        case Op::Slice: {
+            const int sx = x_, sy = y_, sz = z_;
+            setPosition(n.i0 == 0 ? n.i1 : sx, n.i0 == 1 ? n.i1 : sy, n.i0 == 2 ? n.i1 : sz);
+            const float v = eval(n.a);
+            setPosition(sx, sy, sz);
+            return v;
+        }
+        case Op::EndOuterIslands: {
+            // EndIslandDensityFunction.getHeightValue without the main island (the distance function has it now): the best of the small islands round this spot.
+            const SimplexNoise& noise = *g_->simplex[static_cast<std::size_t>(n.i0)];
+            const int x = x_ / 8, z = z_ / 8;  // (Java's division: towards zero)
+            const int i = x / 2, j = z / 2, k = x % 2, l = z % 2;
+            float f = -100.0f;
+            for (int m = -12; m <= 12; ++m) {
+                for (int q = -12; q <= 12; ++q) {
+                    const long long o = static_cast<long long>(i) + m, p = static_cast<long long>(j) + q;
+                    if (o * o + p * p > 4096LL && static_cast<float>(noise.getValue(static_cast<double>(o), static_cast<double>(p))) < -0.9f) {
+                        const float g = std::fmod(std::fabs(static_cast<float>(o)) * 3439.0f + std::fabs(static_cast<float>(p)) * 147.0f, 13.0f) + 9.0f;
+                        const float h = static_cast<float>(k - m * 2), r2 = static_cast<float>(l - q * 2);
+                        float r = 100.0f - std::sqrt(h * h + r2 * r2) * g;
+                        r = std::clamp(r, -100.0f, 80.0f);
+                        f = std::max(f, r);
+                    }
+                }
+            }
+            return static_cast<float>((static_cast<double>(f) - 8.0) / 128.0);
+        }
         case Op::Spline: {
             auto coord = [this](int node) { return eval(node); };
             return splineSample(*g_, n.i0, coord);

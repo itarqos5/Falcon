@@ -262,4 +262,39 @@ private:
     std::int64_t seed_;
 };
 
+// A random source of either kind, by value: what a surface rule reads a few numbers from at a position (no allocation, unlike PositionalRandomFactory::at).
+class AnyRandom {
+public:
+    explicit AnyRandom(XoroshiroRandomSource r) : legacy_(false), x_(std::move(r)), l_(0) {}
+    explicit AnyRandom(LegacyRandomSource r) : legacy_(true), x_(0), l_(std::move(r)) {}
+    [[nodiscard]] float nextFloat() { return legacy_ ? l_.nextFloat() : x_.nextFloat(); }
+    [[nodiscard]] double nextDouble() { return legacy_ ? l_.nextDouble() : x_.nextDouble(); }
+    [[nodiscard]] std::int32_t nextInt(std::int32_t bound) { return legacy_ ? l_.nextInt(bound) : x_.nextInt(bound); }
+
+private:
+    bool legacy_;
+    XoroshiroRandomSource x_;
+    LegacyRandomSource l_;
+};
+
+// A positional factory of either kind, by value: the Xoroshiro one of the Overworld, or the legacy one (LegacyPositionalRandomFactory) of the Nether and the End.
+class AnyPositionalFactory {
+public:
+    AnyPositionalFactory() = default;
+    explicit AnyPositionalFactory(XoroshiroPositionalRandomFactory f) : x_(f) {}
+    explicit AnyPositionalFactory(std::int64_t legacySeed) : legacy_(true), legacySeed_(legacySeed) {}
+    [[nodiscard]] bool isLegacy() const { return legacy_; }
+    [[nodiscard]] AnyRandom makeAt(std::int32_t x, std::int32_t y, std::int32_t z) const {
+        return legacy_ ? AnyRandom(LegacyRandomSource(mthGetSeed(x, y, z) ^ legacySeed_)) : AnyRandom(x_.makeAt(x, y, z));
+    }
+    [[nodiscard]] AnyRandom makeFromHashOf(std::string_view name) const {
+        return legacy_ ? AnyRandom(LegacyRandomSource(static_cast<std::int64_t>(javaStringHashCode(name)) ^ legacySeed_)) : AnyRandom(x_.makeFromHashOf(name));
+    }
+
+private:
+    XoroshiroPositionalRandomFactory x_;
+    bool legacy_ = false;
+    std::int64_t legacySeed_ = 0;
+};
+
 }  // namespace falcon::worldgen

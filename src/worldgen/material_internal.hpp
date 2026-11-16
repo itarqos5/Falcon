@@ -38,7 +38,7 @@ struct CondNode {
     std::int32_t i0 = 0, i1 = 0;
     double d0 = 0.0, d1 = 0.0;
     const NormalNoise* noise = nullptr;
-    XoroshiroPositionalRandomFactory factory;
+    AnyPositionalFactory factory;
     std::array<std::uint64_t, 4> biomes{};
     std::int32_t child = -1;
 };
@@ -58,7 +58,7 @@ struct OreVein {
     DensityFunction gap;
     Block ore = Block::Air, raw = Block::Air, filler = Block::Air;
     float rawChance = 0.0f;
-    XoroshiroPositionalRandomFactory factory;
+    AnyPositionalFactory factory;
 };
 
 [[nodiscard]] inline double lerpD(double t, double a, double b) { return a + t * (b - a); }
@@ -94,7 +94,8 @@ struct MaterialSystem::Impl {
     std::filesystem::path worldgenDir;
 
     // ---- random sources and noises
-    XoroshiroPositionalRandomFactory root;
+    AnyPositionalFactory root;                 // RandomState.random, of whichever kind the settings use
+    XoroshiroPositionalRandomFactory rootX;    // (the clay bands of the badlands, which only the Overworld has, need the Xoroshiro one)
     const NormalNoise *surfaceNoise = nullptr, *secondaryNoise = nullptr, *clayOffsetNoise = nullptr;
     const NormalNoise *badlandsSurface = nullptr, *badlandsPillar = nullptr, *badlandsRoof = nullptr;
     const NormalNoise *icebergSurface = nullptr, *icebergPillar = nullptr, *icebergRoof = nullptr;
@@ -179,7 +180,7 @@ struct MaterialSystem::Impl {
                 if (c.y <= n.i0) return true;
                 if (c.y >= n.i1) return false;
                 const double t = mapD(static_cast<double>(c.y), static_cast<double>(n.i0), static_cast<double>(n.i1), 1.0, 0.0);
-                XoroshiroRandomSource r = n.factory.makeAt(c.x, c.y, c.z);
+                AnyRandom r = n.factory.makeAt(c.x, c.y, c.z);
                 return static_cast<double>(r.nextFloat()) < t;
             }
             case CondKind::NoiseThreshold: {
@@ -211,7 +212,7 @@ struct MaterialSystem::Impl {
         const std::size_t column = static_cast<std::size_t>(c.lx) + 16u * static_cast<std::size_t>(c.lz);
         const float solid = c.ws->volumes[static_cast<std::size_t>(v.densitySlot)][static_cast<std::size_t>(c.y - ds.base) + static_cast<std::size_t>(ds.size) * column];
         if (solid <= 0.0f) return kNone;
-        XoroshiroRandomSource r = v.factory.makeAt(c.x, c.y, c.z);
+        AnyRandom r = v.factory.makeAt(c.x, c.y, c.z);
         if (r.nextFloat() > solid) return kNone;
         const float rich = c.ws->volumes[static_cast<std::size_t>(v.richnessSlot)][static_cast<std::size_t>(c.y - rs.base) + static_cast<std::size_t>(rs.size) * column];
         if (r.nextFloat() < rich && v.gap.compute(c.x, c.y, c.z) < 0.0f) return r.nextFloat() < v.rawChance ? v.raw : v.ore;
@@ -302,7 +303,7 @@ struct MaterialSystem::Impl {
         const double water = static_cast<double>(seaLevel) - top - 7.0;
         top += static_cast<double>(seaLevel);
         const double topCopy = top;
-        XoroshiroRandomSource r = root.makeAt(x, 0, z);
+        AnyRandom r = root.makeAt(x, 0, z);
         const int snowRun = 2 + r.nextInt(4);
         const int snowStart = seaLevel + 18 + r.nextInt(10);
         int k = 0;

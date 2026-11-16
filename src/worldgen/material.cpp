@@ -65,7 +65,8 @@ std::unique_ptr<MaterialSystem> MaterialSystem::create(const Params& p, std::str
     m.minY = p.router->settings().minY;
     m.height = p.router->settings().height;
     m.seaLevel = p.router->settings().seaLevel;
-    m.root = p.router->randomState()->root();
+    m.rootX = p.router->randomState()->root();
+    m.root = p.router->randomState()->rootAny();
 
     const auto block = [&](const std::string& name, Block& out) {
         const auto b = p.blocks->parse(name);
@@ -109,7 +110,7 @@ std::unique_ptr<MaterialSystem> MaterialSystem::create(const Params& p, std::str
 
     // clay bands: MaterialSystem.generateBands(root.fromHashOf("minecraft:clay_bands"))
     {
-        XoroshiroRandomSource random = m.root.makeFromHashOf("minecraft:clay_bands");
+        XoroshiroRandomSource random = m.rootX.makeFromHashOf("minecraft:clay_bands");
         m.bands.fill(terracotta);
         for (int i = 0; i < kBandCount; ++i) {
             i += random.nextInt(5) + 1;
@@ -167,7 +168,7 @@ float MaterialSystem::biomeTemperature(BiomeId biome, int x, int y, int z) const
 int MaterialSystem::surfaceDepth(int x, int z) const {
     const Impl& m = *impl_;
     // (int)((double)surfaceNoise.get(x, 0, z) * 2.75 + 3.0 + ROOT.at(x, 0, z).nextDouble() * 0.25)
-    XoroshiroRandomSource r = m.root.makeAt(x, 0, z);
+    AnyRandom r = m.root.makeAt(x, 0, z);
     const double noise = static_cast<double>(m.surfaceNoise->get(static_cast<double>(x), 0.0, static_cast<double>(z)));
     const double a = noise * 2.75;
     const double b = a + 3.0;

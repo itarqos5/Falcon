@@ -67,10 +67,7 @@ std::unique_ptr<NoiseRouter> NoiseRouter::create(const std::filesystem::path& wo
     (void)blockName(js.find("default_block"), s.defaultBlock);
     (void)blockName(js.find("default_fluid"), s.defaultFluid);
     if (const JsonValue* lg = js.find("legacy_random_source")) s.legacyRandomSource = lg->kind == JsonValue::Kind::Bool && lg->boolean;
-    if (s.legacyRandomSource) {
-        error = "noise settings: legacy_random_source worlds are not supported";
-        return nullptr;
-    }
+    // (The Nether and the End say legacy_random_source: RandomState then seeds everything the way the game does for them, see random_state.hpp.)
 
     const JsonValue* router = js.find("noise_router");
     if (!router || !router->isObject()) {
@@ -78,7 +75,7 @@ std::unique_ptr<NoiseRouter> NoiseRouter::create(const std::filesystem::path& wo
         return nullptr;
     }
 
-    r->state_ = std::make_shared<RandomState>(seed, worldgenDir);
+    r->state_ = std::make_shared<RandomState>(seed, worldgenDir, s.legacyRandomSource);
     DensityGraphBuilder builder(r->state_);
     const auto add = [&](const JsonValue* v, const char* what, int& id) {
         if (!v) {
