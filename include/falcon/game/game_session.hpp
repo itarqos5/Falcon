@@ -295,6 +295,7 @@ private:
     void fluidReact(int x, int y, int z);
     void fizzAt(int x, int y, int z);
     void tickFluids();
+    void holdForLoading();  // the loading screen until the chunks round the player are there (a teleport far away)
     // ---- the dimensions (game_session_dimensions.cpp) and the portals (game_session_portals.cpp)
     struct DimensionState {
         std::shared_ptr<const worldgen::OverworldGenerator> generator;

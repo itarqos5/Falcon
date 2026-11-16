@@ -452,6 +452,8 @@ void CommandRunner::teleport() {
     if (target.y < kMinY - 64 || target.y > kMaxY + 64) return fail(tr("commands.teleport.invalidPosition"));
     s.player_.setPosition(target.x, target.y, target.z);
     s.player_.vx = s.player_.vy = s.player_.vz = 0.0;
+    s.player_.fallDistance = 0.0;
+    s.holdForLoading();
     if (const std::string* rotation = find("rotation")) {
         const std::size_t space = rotation->find(' ');
         const auto rel = [&](const std::string& w, float base) { return !w.empty() && w[0] == '~' ? base + static_cast<float>(w.size() > 1 ? std::atof(w.c_str() + 1) : 0.0) : static_cast<float>(std::atof(w.c_str())); };

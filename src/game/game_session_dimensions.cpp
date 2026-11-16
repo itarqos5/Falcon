@@ -110,6 +110,18 @@ void GameSession::travelTo(int dimension, double x, double y, double z, bool por
     std::printf("[falcon] travelling to the %s at %.1f %.1f %.1f\n", dimension == 0 ? "Overworld" : dimension == 1 ? "Nether" : "End", x, y, z);
 }
 
+// A teleport far from the loaded area (/tp): the loading screen holds the player, as the game waits for the chunks of a place it sends someone to, so that they do not fall through
+// what has not been made yet.
+void GameSession::holdForLoading() {
+    if (remote_ || !ready_) return;
+    const auto eye = player_.eye();
+    if (renderer_.sectionReady(static_cast<int>(std::floor(player_.x)), static_cast<int>(std::floor(eye[1])), static_cast<int>(std::floor(player_.z)))) return;
+    ready_ = false;
+    loadElapsed_ = 0.0;
+    progress_ = smoothedProgress_ = 0.0f;
+    renderer_.setActiveWorkers(loadWorkerCount());
+}
+
 // The new area has loaded: the player is put where they belong (at the portal that is there, or one made for them; on the End's platform).
 void GameSession::completeArrival() {
     if (!arrival_.pending) return;
