@@ -20,6 +20,7 @@
 #include <chrono>
 #include <cstdint>
 #include <deque>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <unordered_map>
@@ -108,6 +109,17 @@ public:
     WorldRenderer(const WorldRenderer&) = delete;
     WorldRenderer& operator=(const WorldRenderer&) = delete;
 
+    // Another dimension: every chunk of the one that was here goes, and the chunks that come next are made by this generator (null: the simple terrain), decorated by this
+    // decorator, with these edits put back. `skylight` false (the Nether) has no sky light at all. Main thread only; it waits for the workers to finish what they were doing.
+    struct DimensionWorld {
+        std::shared_ptr<const worldgen::OverworldGenerator> generator;
+        std::shared_ptr<const Decorator> decorator;  // (the Overworld's: what the LODs read the trees from)
+        std::function<void(Chunk&, int, int, const worldgen::ChunkExtras&)> decorate;  // what finishes a chunk after its terrain (null: the decorator's)
+        std::shared_ptr<WorldEdits> edits;
+        bool skylight = true;
+        bool lods = false;  // levels of detail beyond the chunks (only the Overworld has them)
+    };
+    void enterDimension(DimensionWorld world);
     [[nodiscard]] Level& level() { return level_; }
     [[nodiscard]] const Level& level() const { return level_; }
     [[nodiscard]] const TerrainGenerator& generator() const { return generator_; }
@@ -115,6 +127,12 @@ public:
     [[nodiscard]] TerrainGenerator::Spawn findSpawn() const;
     [[nodiscard]] int surfaceHeight(int x, int z) const;
     [[nodiscard]] const worldgen::OverworldGenerator* overworld() const { return overworld_.get(); }
+    [[nodiscard]] std::shared_ptr<const Decorator> decoratorPtr() const { return decorator_; }
+    // A thick fog of the dimension (the Nether: from 10 blocks to 96, whatever the render distance): blocks. Call every frame; a start beyond the end (or 0, 0) is none.
+    void setEnvironmentFog(float start, float end) {
+        envFogStart_ = start;
+        envFogEnd_ = end;
+    }
     // The Brightness option (0..1) that lifts the dark end of the light map.
     void setBrightness(float brightness) { brightness_ = brightness; }
     // The sky of this moment (world/day_cycle.hpp): its colours, the sun, the moon, the stars, and how much of the sky's light the night takes away. Call every frame.
@@ -279,6 +297,10 @@ private:
     std::shared_ptr<const worldgen::OverworldGenerator> overworld_;
     std::shared_ptr<WorldEdits> edits_;            // what the player changed (see setEdits)
     std::shared_ptr<const Decorator> decorator_;  // trees, plants and snow on the generated terrain (null without the generator)
+    bool skylight_ = true;                        // false in the Nether
+    std::function<void(Chunk&, int, int, const worldgen::ChunkExtras&)> decorate_;  // another dimension's decoration (see enterDimension)
+    float envFogStart_ = 1.0e9f, envFogEnd_ = 2.0e9f;
+    bool lodsAllowed_ = true;
     Level level_;
     std::unique_ptr<LodRenderer> lod_;  // (before the pool: the workers that make its tiles are joined first)
     LodSettings lodSettings_;

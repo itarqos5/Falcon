@@ -67,6 +67,8 @@ struct WorldSave {
     std::map<std::string, std::string> gameRules;  // the game rules that differ from their defaults (/gamerule)
     int difficulty = -1;                           // -1: not stored
     NbtTag mobs;                                   // the mobs and the chunks that had their animals (Mobs::toNbt); type End: none stored
+    int dragonState = 0;                           // 0 the Ender Dragon has not been met, 1 it is in the End, 2 it was killed
+    int dimension = 0;                             // the dimension the player is in: 0 Overworld, 1 Nether, 2 End
     long long dayTime = -1;                        // the time of day in ticks (world/day_cycle.hpp); -1: not stored (a world from before there was a clock)
     long long gameTime = 0;                        // the ticks the world has run
     NbtTag containers;                             // what the chests, furnaces ... hold (BlockStorages::toNbt); type End: none stored

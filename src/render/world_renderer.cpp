@@ -555,7 +555,8 @@ void WorldRenderer::requestChunk(ChunkPos pos, float priority) {
                 chunk = overworld_->generate(pos.x, pos.z, extras);
                 addStageTime(kStageTerrain, started);
                 started = std::chrono::steady_clock::now();
-                if (decorator_) decorator_->decorate(*chunk, pos.x, pos.z, extras);
+                if (decorate_) decorate_(*chunk, pos.x, pos.z, extras);
+                else if (decorator_) decorator_->decorate(*chunk, pos.x, pos.z, extras);
                 addStageTime(kStageDecorate, started);
                 auto grid = std::make_shared<BiomeGrid>();
                 std::copy(extras.biomes.ids.begin(), extras.biomes.ids.end(), grid->ids.begin());
@@ -595,7 +596,9 @@ void WorldRenderer::requestLight(ChunkPos pos, bool force) {
     const int dz = pos.z - playerChunkZ_.load();
     const float priority = static_cast<float>(dx * dx + dz * dz) - (force ? 1.0e6f : 0.5f);  // edits first; light before the meshes at its distance
     ++lighting_;
-    pool_.submit(priority, [this, pos, stamp, input = snapshotLightInput(level_, pos.x, pos.z)] {
+    LightInput snapshot = snapshotLightInput(level_, pos.x, pos.z);
+    snapshot.skylight = skylight_;
+    pool_.submit(priority, [this, pos, stamp, input = std::move(snapshot)] {
         const auto started = std::chrono::steady_clock::now();
         LightResult result{pos, stamp, computeChunkLight(input)};
         addStageTime(kStageLight, started);
@@ -838,7 +841,7 @@ void WorldRenderer::uploadMesh(MeshResult&& result) {
 
 void WorldRenderer::setLods(const LodSettings& settings) {
     lodSettings_ = settings;
-    lodSettings_.enabled = settings.enabled && overworld_ != nullptr && !remote_;
+    lodSettings_.enabled = settings.enabled && overworld_ != nullptr && !remote_ && lodsAllowed_;
     if (lodSettings_.enabled && !lod_) {
         std::vector<worldgen::LodTrees> trees;  // what each biome grows, so that the distant forests can be drawn
         if (decorator_) {
@@ -987,6 +990,50 @@ void WorldRenderer::update(double playerX, double playerZ, int renderDistance, d
 void WorldRenderer::receiveChunk(ChunkPos pos, std::shared_ptr<Chunk> chunk) {
     std::lock_guard<std::mutex> lock(remoteMutex_);
     remoteChunks_.emplace_back(pos, std::move(chunk));
+}
+
+void WorldRenderer::enterDimension(DimensionWorld world) {
+    pool_.clear();
+    pool_.waitIdle();
+    {  // what the workers made for the old dimension is no use now
+        std::lock_guard<std::mutex> lock(resultsMutex_);
+        chunkResults_.clear();
+        lightResults_.clear();
+        meshResults_.clear();
+    }
+    std::vector<ChunkPos> loaded;
+    loaded.reserve(level_.chunks().size());
+    for (const auto& entry : level_.chunks()) loaded.push_back(entry.first);
+    for (const ChunkPos pos : loaded) {
+        dropSections(pos);
+        level_.removeChunk(pos);
+    }
+    chunkRequested_.clear();
+    lightRequested_.clear();
+    lightStamps_.clear();
+    editStamps_.clear();
+    meshRequested_.clear();
+    meshPending_.clear();
+    meshGen_.clear();
+    chunkCache_.clear();
+    batchTouched_.clear();
+    batchLight_.clear();
+    batchDepth_ = 0;
+    generating_ = 0;
+    meshing_ = 0;
+    lighting_ = 0;
+    overworld_ = std::move(world.generator);
+    decorator_ = std::move(world.decorator);
+    decorate_ = std::move(world.decorate);
+    edits_ = std::move(world.edits);
+    skylight_ = world.skylight;
+    lodsAllowed_ = world.lods;
+    if (!lodsAllowed_) {
+        lod_.reset();
+        lodSettings_.enabled = false;
+    }
+    lastChunkX_ = 1 << 30;  // (the next update() loads round the player again)
+    lastChunkZ_ = 1 << 30;
 }
 
 void WorldRenderer::forgetAllChunks() {

@@ -57,11 +57,13 @@ int main(int argc, char** argv) {
         options.noiseSettings = "minecraft:end";
         options.biomePreset = "minecraft:the_end";
     }
+    const auto started = std::chrono::steady_clock::now();
     auto generator = falcon::worldgen::OverworldGenerator::create(root, *registry, seed, error, options);
     if (!generator) {
         std::fprintf(stderr, "generator: %s\n", error.c_str());
         return 1;
     }
+    std::printf("generator ready in %.0f ms\n", std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count());
 
     const auto glyph = [&](falcon::Block b) -> char {
         if (b == falcon::Block::Air) return ' ';
@@ -87,7 +89,9 @@ int main(int argc, char** argv) {
         return made;
     };
 
+    const auto t0 = std::chrono::steady_clock::now();
     auto chunk = chunkAt(cx, cz);
+    std::printf("chunk %d,%d made in %.1f ms\n", cx, cz, std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count());
     std::map<std::string, long> counts;
     for (int y = falcon::kMinY; y < falcon::kMaxY; ++y) {
         for (int z = 0; z < 16; ++z) {

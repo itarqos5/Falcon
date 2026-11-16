@@ -1,5 +1,7 @@
 #pragma once
 
+#include <chrono>
+
 #include "falcon/assets/resource_manager.hpp"
 #include "falcon/game/chat.hpp"
 #include "falcon/game/command_tree.hpp"
@@ -175,6 +177,13 @@ public:
     [[nodiscard]] ItemEntities& itemEntities() { return itemEntities_; }
     // The mobs of this world (null on a server: its mobs are the server's).
     [[nodiscard]] Mobs* mobSim() { return mobSim_.get(); }
+    // The dimension the player is in: 0 the Overworld, 1 the Nether, 2 the End.
+    [[nodiscard]] int dimension() const { return dimension_; }
+    // Goes to another dimension: its chunks are made behind the loading screen and the player is put at (x, y, z) -- or, with `portal`, at the portal that is near there (one is made if
+    // there is none).
+    void travelTo(int dimension, double x, double y, double z, bool portal);
+    // How purple the screen is from standing in a portal, 0 to 1 (between two ticks: the tick before, then this one).
+    [[nodiscard]] float portalOverlay(float partial) const { return portalOverlayO_ + (portalOverlay_ - portalOverlayO_) * partial; }
     // The time of day in ticks (0 sunrise, 6000 noon, 12000 sunset, 18000 midnight) and how many ticks the world has run; /time changes the first. `freeze` stops the clock (--time).
     [[nodiscard]] long long dayTime() const { return dayTime_; }
     [[nodiscard]] long long gameTime() const { return gameTime_; }
@@ -281,6 +290,52 @@ private:
     void applyGameRule(const std::string& rule, const std::string& value);
     void tickBurning();
     void tickMobs();
+    // ---- the dimensions (game_session_dimensions.cpp) and the portals (game_session_portals.cpp)
+    struct DimensionState {
+        std::shared_ptr<const worldgen::OverworldGenerator> generator;
+        std::shared_ptr<const Decorator> decorator;
+        std::function<void(Chunk&, int, int, const worldgen::ChunkExtras&)> decorate;
+        std::shared_ptr<WorldEdits> edits;
+        NbtTag mobs, containers;
+        std::vector<ItemEntity> items;
+        bool visited = false;
+    };
+    struct PortalFrame {
+        int x = 0, y = 0, z = 0;  // the lowest cell of the opening at the left end (looking along the axis)
+        int axis = 0;             // 0: the opening is in the plane of x, 1: of z
+        int width = 0, height = 0;
+    };
+    struct Arrival {
+        bool pending = false;
+        int dimension = 0;
+        bool portal = false;
+        double x = 0.0, y = 0.0, z = 0.0;
+    };
+    bool prepareDimension(int dimension);
+    void stashDimension();
+    void completeArrival();
+    [[nodiscard]] const worldgen::OverworldGenerator* activeGenerator() const;
+    [[nodiscard]] std::filesystem::path dimensionSavePath(int dimension) const;
+    [[nodiscard]] daycycle::Sky dimensionSky(const Camera& cam) const;
+    mutable std::array<float, 3> fogSmooth_{};  // the Nether's fog as it is now: it moves towards the fog of the biomes round the camera, it does not jump
+    mutable bool fogSmoothSet_ = false;
+    mutable std::chrono::steady_clock::time_point fogSmoothAt_;
+    [[nodiscard]] bool isBlockNamed(Block b, const char* name) const;
+    [[nodiscard]] bool portalEmpty(Block b) const;
+    [[nodiscard]] bool findPortalFrame(int x, int y, int z, int axis, PortalFrame& out) const;
+    [[nodiscard]] bool findClosestPortal(double x, double z, int radius, PortalFrame& out) const;
+    [[nodiscard]] bool playerInsideBlock(const char* name) const;
+    bool tryLightPortal(int x, int y, int z);
+    void checkPortalsAround(int x, int y, int z);
+    void createPortalAt(double x, double yHint, double z, int dimension, PortalFrame& out);
+    void arriveByPortal(double x, double y, double z);
+    void placeEndPlatform();
+    void liftOutOfBlocks();
+    void returnFromEnd();
+    void startDragonFight();
+    void drawPortalOverlay(GuiGraphics& g, int guiWidth, int guiHeight);
+    void tickPortal();
+    void tickDragonFight();
     void attackMob(int id);  // the player hits a mob: the damage the held item and the attack cooldown give, the knockback, the sounds
     void mobHitsPlayer(float amount, double fromX, double fromZ, float knockback);
     void renderLocalMobs(const std::array<double, 3>& camPos);
@@ -347,6 +402,15 @@ private:
     double lastSaveTicks_ = 0.0;
     std::mt19937 rng_{std::random_device{}()};
     ItemEntities itemEntities_;
+    std::array<DimensionState, 3> dims_;
+    int dimension_ = 0;
+    Arrival arrival_;
+    int portalTicks_ = 0;
+    float portalOverlay_ = 0.0f, portalOverlayO_ = 0.0f;
+    bool portalLocked_ = false;  // arrived through a portal: it does not work again until the player has stepped out
+    bool portalEdit_ = false;    // the portal code is changing blocks itself (their changes are not looked at again)
+    bool dragonDead_ = false;
+    bool dragonStarted_ = false;
     std::unique_ptr<Mobs> mobSim_;  // the mobs that live in this world (singleplayer)
     int sinceAttack_ = 100;         // ticks since the player last swung at a mob (the attack cooldown)
     StepClock stepClock_;

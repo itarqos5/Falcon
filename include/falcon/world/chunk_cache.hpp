@@ -31,6 +31,8 @@ public:
     // Forgets the chunks furthest from `center` until the packed ones fit the budget.
     void trim(ChunkPos center);
 
+    // Forgets everything (another dimension: none of it is of use there).
+    void clear();
     [[nodiscard]] std::size_t count() const;
     [[nodiscard]] std::size_t packedBytes() const;  // what the compressed copies take
     void setBudget(std::size_t bytes);

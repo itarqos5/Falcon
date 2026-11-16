@@ -205,6 +205,8 @@ std::string writeWorldSave(const std::filesystem::path& file, const WorldSave& s
         root.put("difficulty", integer(save.difficulty));
         if (save.mobs.type == NbtTag::Type::Compound) root.put("mobs", save.mobs);
         root.put("dayTime", NbtTag::ofInteger(NbtTag::Type::Long, save.dayTime));
+        root.put("dimension", integer(save.dimension));
+        root.put("dragonState", integer(save.dragonState));
         root.put("gameTime", NbtTag::ofInteger(NbtTag::Type::Long, save.gameTime));
     }
     root.put("edits", edits.toNbt(registry));
@@ -267,6 +269,8 @@ bool readWorldSave(const std::filesystem::path& file, WorldSave& save, WorldEdit
         }
         loaded.difficulty = static_cast<int>(root->getInt("difficulty", -1));
         loaded.dayTime = root->getInt("dayTime", -1);
+        loaded.dimension = static_cast<int>(root->getInt("dimension", 0));
+        loaded.dragonState = static_cast<int>(root->getInt("dragonState", 0));
         if (const NbtTag* mobs = root->get("mobs"); mobs != nullptr) loaded.mobs = *mobs;
         loaded.gameTime = root->getInt("gameTime", 0);
         if (const NbtTag* items = root->get("items"); items != nullptr) {

@@ -273,7 +273,15 @@ GameSession::GameSession(ScreenServices& services, const ResourceManager& resour
     // The world's own save: what the player changed comes back as the chunks are made, and the player stands where they left off.
     savePath_ = services.gameDir / "saves" / info.folder / "falcon_save.dat";
     renderer_.setEdits(edits_);
+    dims_[0].decorator = renderer_.decoratorPtr();
+    dims_[0].edits = edits_;
+    dims_[0].visited = true;
     if (info_.madeByFalcon) loadSave();
+    if (const char* start = std::getenv("FALCON_START_DIMENSION"); start != nullptr && !remote_) {  // (a test aid: begin in the Nether (1) or the End (2))
+        const int d = std::atoi(start);
+        if (d == 1) travelTo(1, spawn_[0] / 8.0, 70.0, spawn_[2] / 8.0, false);
+        else if (d == 2) travelTo(2, 100.5, 49.0, 0.5, false);
+    }
 }
 
 GameSession::~GameSession() {
@@ -320,6 +328,9 @@ void GameSession::loadSave() {
     if (mobSim_ && saved.mobs.type == NbtTag::Type::Compound) mobSim_->fromNbt(saved.mobs);
     dayTime_ = saved.dayTime >= 0 ? saved.dayTime : daycycle::kNoon;  // (a world from before there was a clock was always noon)
     gameTime_ = saved.gameTime;
+    dragonStarted_ = saved.dragonState >= 1;
+    dragonDead_ = saved.dragonState >= 2;
+    if ((saved.dimension == 1 || saved.dimension == 2) && saved.hasPlayer) travelTo(saved.dimension, saved.player.x, saved.player.y, saved.player.z, false);  // (back in the Nether or the End)
 }
 
 void GameSession::save() {
@@ -345,14 +356,30 @@ void GameSession::save() {
     for (int slot = 0; slot < Inventory::kSize; ++slot) {
         if (!inventory_.item(slot).isEmpty()) p.inventory.emplace_back(slot, inventory_.item(slot));
     }
-    out.items = itemEntities_.items();
-    out.containers = storages_.toNbt();
+    stashDimension();  // (what is lying about and walking now goes into its dimension's own part)
+    out.items = dims_[0].items;
+    out.containers = dims_[0].containers;
     for (int slot = 0; slot < enderChest_.size(); ++slot) {
         if (!enderChest_.item(slot).isEmpty()) out.enderChest.emplace_back(slot, enderChest_.item(slot));
     }
     out.gameRules = gameRules_;
     out.difficulty = difficulty_;
-    const std::string error = writeWorldSave(savePath_, out, *edits_, *registry_);
+    out.dayTime = dayTime_;
+    out.mobs = dims_[0].mobs;
+    out.dimension = dead_ ? 0 : dimension_;
+    out.dragonState = dragonDead_ ? 2 : dragonStarted_ ? 1 : 0;
+    out.gameTime = gameTime_;
+    const std::string error = writeWorldSave(savePath_, out, *dims_[0].edits, *registry_);
+    for (int d = 1; d <= 2; ++d) {  // the Nether and the End, if the player has been
+        const DimensionState& dim = dims_[static_cast<std::size_t>(d)];
+        if (!dim.visited || !dim.edits) continue;
+        WorldSave other;
+        other.items = dim.items;
+        other.containers = dim.containers;
+        other.mobs = dim.mobs;
+        const std::string otherError = writeWorldSave(dimensionSavePath(d), other, *dim.edits, *registry_);
+        if (!otherError.empty()) std::printf("[falcon] could not save the %s: %s\n", d == 1 ? "Nether" : "End", otherError.c_str());
+    }
     if (!error.empty()) {
         std::printf("[falcon] could not save the world: %s\n", error.c_str());
         return;
@@ -465,6 +492,10 @@ bool GameSession::setBlock(int x, int y, int z, Block block) {
     storageBlockReplaced(old, block, x, y, z);  // (a chest that goes spills what it held)  // on a server what happens to the neighbours is the server's to say (it sends the changes)
     fluids_.blockChanged(renderer_.level(), x, y, z);  // water next to it looks round again (flows into a hole, or loses its source)
     if (physics_) physics_->blockPlaced(x, y, z);  // sand may fall, fire starts to burn
+    if (!portalEdit_) {  // fire in a frame of obsidian lights a portal; a frame or a portal that is broken puts the portal out
+        if (isBlockNamed(block, "fire")) tryLightPortal(x, y, z);
+        else if (isBlockNamed(old, "obsidian") || isBlockNamed(old, "nether_portal")) checkPortalsAround(x, y, z);
+    }
     if (redstone_) redstone_->blockChanged(x, y, z);  // power runs through what is near
     if (support_ || physics_) {
         // The game's neighbour updates (updateShape): every block next to a change checks that it can still stand, and a plant that
@@ -545,6 +576,7 @@ void GameSession::update(double dt, bool active, int framebufferWidth, int frame
         const bool timedOut = loadElapsed_ >= kLoadTimeoutSeconds;
         if (loaded || timedOut) {
             ready_ = true;
+            completeArrival();
             renderer_.setActiveWorkers(workerCount());  // playing: about half of the PC (it all made the spawn area)
             progress_ = smoothedProgress_ = 1.0f;
             if (timedOut && !loaded) std::printf("[falcon] the spawn area did not finish loading in %.0f s: starting anyway\n", loadElapsed_);

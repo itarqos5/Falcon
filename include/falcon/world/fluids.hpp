@@ -27,6 +27,11 @@ public:
     // next one), so a flood never costs a whole frame. `setBlock` places the block in the world (and redraws it) and says if it did.
     void tick(const Level& level, const SetBlock& setBlock, int maxChanges = 48);
 
+    // Another dimension: the updates that were waiting were of the one that was left.
+    void reset() {
+        due_.clear();
+        scheduled_.clear();
+    }
     [[nodiscard]] std::size_t pending() const { return due_.size(); }
     [[nodiscard]] long long gameTime() const { return time_; }
 

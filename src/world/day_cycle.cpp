@@ -189,6 +189,7 @@ std::shared_ptr<const Timeline> Timeline::loadFromGameData(const std::filesystem
         error = "missing " + (root / "timeline" / "day.json").string();
         return nullptr;
     }
+    return fromJson(day, read(root / "dimension_type" / "overworld.json"), error);
 }
 
 std::optional<std::array<double, 4>> Timeline::evaluate(const std::string& name, double ticks) const {

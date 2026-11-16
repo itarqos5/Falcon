@@ -103,7 +103,7 @@ void GameSession::renderWorld(int framebufferWidth, int framebufferHeight) {
     // Under water the sky is gone and the world fades into the biome's water fog (see water_fog.hpp).
     const bool eyesInWater = ready_ && player_.isUnderWater();
     if (eyesInWater) {
-        const std::string_view biome = overworld_ ? overworld_->biomeNameAt(static_cast<int>(std::floor(cam.x)), static_cast<int>(std::floor(cam.y)), static_cast<int>(std::floor(cam.z)))
+        const std::string_view biome = activeGenerator() ? activeGenerator()->biomeNameAt(static_cast<int>(std::floor(cam.x)), static_cast<int>(std::floor(cam.y)), static_cast<int>(std::floor(cam.z)))
                                                   : std::string_view();
         const WaterFog& fog = waterFogs_.forBiome(biome);
         const float vision = waterVision(waterVisionTicks_, true);
@@ -113,7 +113,8 @@ void GameSession::renderWorld(int framebufferWidth, int framebufferHeight) {
     }
     // The sky of the time of day (a tick and the part of it that has passed, while the clock runs).
     const double skyTime = static_cast<double>(dayTime_) + (timeFrozen_ || timePaused_ || !gameRuleOn("advance_time") ? 0.0 : partialTick_ * timeRate_);
-    const daycycle::Sky skyNow = timeline_ ? timeline_->sky(skyTime) : daycycle::sky(skyTime);
+    const daycycle::Sky skyNow = dimension_ != 0 ? dimensionSky(cam) : timeline_ ? timeline_->sky(skyTime) : daycycle::sky(skyTime);
+    renderer_.setEnvironmentFog(dimension_ == 1 ? 10.0f : 1.0e9f, dimension_ == 1 ? 96.0f : 2.0e9f);
     renderer_.setSky(skyNow);
     setEntitySkyLight(skyNow.skyLightFactor, skyNow.skyLightColor, skyNow.ambient);
     renderer_.render(cam, framebufferWidth, framebufferHeight, renderDistance());
@@ -227,8 +228,8 @@ std::vector<std::string> GameSession::debugLines() const {
         lines.push_back(format("Block: %d %d %d   Chunk: %d %d in %d %d", bx, by, bz, bx & 15, bz & 15, chunkOf(bx), chunkOf(bz)));
         lines.push_back(format("Facing: %s (%.1f / %.1f)", facing(player_.yaw), static_cast<double>(player_.yaw), static_cast<double>(player_.pitch)));
     }
-    if (overworld_ && !services_.options.reducedDebugInfo) {
-        const std::string_view biome = overworld_->biomeNameAt(static_cast<int>(std::floor(player_.x)), static_cast<int>(std::floor(player_.y)), static_cast<int>(std::floor(player_.z)));
+    if (activeGenerator() && !services_.options.reducedDebugInfo) {
+        const std::string_view biome = activeGenerator()->biomeNameAt(static_cast<int>(std::floor(player_.x)), static_cast<int>(std::floor(player_.y)), static_cast<int>(std::floor(player_.z)));
         lines.push_back("Biome: " + std::string(biome));
     }
     lines.push_back(format("%s%s%s%s%s%s", player_.flying ? "flying " : "", player_.onGround ? "on ground " : "", player_.inWater ? "in water " : "",
@@ -381,6 +382,7 @@ void GameSession::renderHud(GuiGraphics& g, int guiWidth, int guiHeight, bool ch
     if (!ready_) return;  // the loading screen (renderLoading) takes the place of the HUD until the world is ready
 
     drawFireOverlay(g, guiWidth, guiHeight);
+    drawPortalOverlay(g, guiWidth, guiHeight);
 
     // F1 hides the crosshair and the hotbar (the debug screen stays, which is what people take screenshots with).
     if (!hudHidden_) {

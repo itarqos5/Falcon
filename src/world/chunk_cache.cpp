@@ -197,6 +197,12 @@ void ChunkCache::trim(ChunkPos center) {
     }
 }
 
+void ChunkCache::clear() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    entries_.clear();
+    packedBytes_ = 0;
+}
+
 std::size_t ChunkCache::count() const {
     std::lock_guard<std::mutex> lock(mutex_);
     return entries_.size();

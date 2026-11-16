@@ -320,6 +320,7 @@ add_library(falcon_core
     src/world/mob.cpp
     src/world/mob_path.cpp
     src/world/mob_spawn.cpp
+    src/world/nether_decoration.cpp
     src/world/world_save.cpp
     src/world/block_containers.cpp
     src/world/collision_shapes.cpp
@@ -408,6 +409,9 @@ add_library(falcon_core
     src/game/creative_inventory.cpp
     src/game/item_names.cpp
     src/game/game_session_player.cpp
+    src/game/game_session_dimensions.cpp
+    src/game/game_session_portals.cpp
+    src/game/game_session_dragon.cpp
     src/game/game_session_remote.cpp
     src/game/game_session_blocks.cpp
     src/game/game_session_containers.cpp

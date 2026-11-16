@@ -49,6 +49,11 @@ public:
         std::lock_guard<std::mutex> lock(mutex_);
         queue_ = {};
     }
+    // Blocks until no job is waiting and none is running (after clear(): what was started has finished).
+    void waitIdle() {
+        std::unique_lock<std::mutex> lock(mutex_);
+        idle_.wait(lock, [this] { return queue_.empty() && running_ == 0; });
+    }
     [[nodiscard]] std::size_t waiting() const {
         std::lock_guard<std::mutex> lock(mutex_);
         return queue_.size();
@@ -88,13 +93,21 @@ private:
                 if (stopping_) return;
                 task = std::move(const_cast<Task&>(queue_.top()));
                 queue_.pop();
+                ++running_;
             }
             task.job();
+            {
+                std::lock_guard<std::mutex> lock(mutex_);
+                --running_;
+            }
+            idle_.notify_all();
         }
     }
 
     mutable std::mutex mutex_;
     std::condition_variable wake_;
+    std::condition_variable idle_;
+    unsigned running_ = 0;  // jobs being run (under mutex_)
     std::priority_queue<Task> queue_;
     std::vector<std::thread> workers_;
     std::uint64_t next_ = 0;

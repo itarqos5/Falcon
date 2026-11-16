@@ -160,6 +160,11 @@ int Mobs::remove(const std::function<bool(const Mob&)>& which) {
     return static_cast<int>(before - mobs_.size());
 }
 
+void Mobs::clear() {
+    mobs_.clear();
+    shots_.clear();
+}
+
 int Mobs::pick(const std::array<double, 3>& eye, const std::array<double, 3>& look, double maxDistance, double* distance) const {
     int found = -1;
     double best = maxDistance;

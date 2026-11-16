@@ -84,6 +84,13 @@ public:
     // A TNT-sized explosion at a point (power 4 for TNT).
     void explode(double x, double y, double z, float radius);
 
+    // Another dimension: what was falling, burning or waiting to tick is of the one that was left.
+    void reset() {
+        falling_.clear();
+        tnt_.clear();
+        due_.clear();
+        queued_.clear();
+    }
     [[nodiscard]] const std::vector<FallingBlock>& fallingBlocks() const { return falling_; }
     [[nodiscard]] const std::vector<PrimedTnt>& primedTnt() const { return tnt_; }
     [[nodiscard]] bool isGravityBlock(Block b) const { return behaviours_->isFallable(blockRegistry().state(b).block); }

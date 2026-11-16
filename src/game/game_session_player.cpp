@@ -86,6 +86,8 @@ void GameSession::tickPlayer(double seconds, bool steering) {
         if (ready_ && !remote_) itemEntities_.tick(renderer_.level());  // (on a server the items are the server's: pumpRemote puts them there)
         if (ready_ && !remote_) tickTime();
         if (ready_ && !remote_) tickMobs();
+        if (ready_ && !remote_) tickPortal();
+        if (ready_ && !remote_) tickDragonFight();
         // The water that flows: its updates that are due this tick.
         if (!remote_) fluids_.tick(renderer_.level(), [this](int bx, int by, int bz, Block b) { return renderer_.setBlock(bx, by, bz, b); });
         if (ready_ && physics_) physics_->tick();
@@ -119,7 +121,8 @@ void GameSession::tickMobs() {
     in.playerTargetable = !dead_ && (info_.gameType == 0 || info_.gameType == 2);
     in.difficulty = difficulty_;
     in.dayTime = dayTime_;
-    in.darkSteps = (timeline_ ? timeline_->sky(static_cast<double>(dayTime_)) : daycycle::sky(static_cast<double>(dayTime_))).darkSteps;
+    in.dimension = dimension_;
+    in.darkSteps = dimension_ != 0 ? 0.0f : (timeline_ ? timeline_->sky(static_cast<double>(dayTime_)) : daycycle::sky(static_cast<double>(dayTime_))).darkSteps;
     in.spawnMobs = gameRuleOn("spawn_mobs");
     in.spawnMonsters = gameRuleOn("spawn_monsters");
     in.mobGriefing = gameRuleOn("mob_griefing");
@@ -346,6 +349,7 @@ void GameSession::respawn() {
     player_.fallDistance = 0.0;
     player_.lastFallDamage = 0;
     stepClock_ = StepClock();
+    if (dimension_ != 0) travelTo(0, spawn_[0], spawn_[1], spawn_[2], false);  // (home: the Overworld)
 }
 
 // The part of a game tick that is about health: the protection and the tilt run down, and a player who is fed (18 or more of food) heals half a

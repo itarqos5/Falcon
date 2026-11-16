@@ -46,6 +46,7 @@ struct ChunkLight {
 // blocks), index (dx+1) + 3*(dz+1). Sections are immutable and shared, so this is a cheap snapshot for a worker thread.
 struct LightInput {
     std::array<std::array<SectionPtr, kSectionCount>, 9> chunks;
+    bool skylight = true;  // false in a dimension with no sky (the Nether): only the blocks give light
 };
 
 [[nodiscard]] LightInput snapshotLightInput(const Level& level, int chunkX, int chunkZ);

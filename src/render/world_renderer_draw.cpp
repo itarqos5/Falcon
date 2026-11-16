@@ -86,8 +86,8 @@ void WorldRenderer::render(const Camera& camera, int framebufferWidth, int frame
     // The levels of detail beyond the loaded chunks, in a pass of their own; then the depth is cleared, so the chunks are drawn over them whatever the LODs predicted.
     const bool lodsOn = lod_ != nullptr && lodSettings_.enabled;
     if (lodsOn) {
-        const std::array<float, 3> fogColor = underwater_ ? waterFogColor_ : std::array<float, 3>{kHorizon[0], kHorizon[1], kHorizon[2]};
-        const std::array<float, 2> envFog = underwater_ ? std::array<float, 2>{waterFogStart_, waterFogEnd_} : std::array<float, 2>{1.0e9f, 2.0e9f};
+        const std::array<float, 3> fogColor = underwater_ ? waterFogColor_ : skyState_.horizon;
+        const std::array<float, 2> envFog = underwater_ ? std::array<float, 2>{waterFogStart_, waterFogEnd_} : std::array<float, 2>{envFogStart_, envFogEnd_};
         lod_->render(view, camera.fov, aspect, camera.x, camera.y, camera.z, renderDistance, fogColor, envFog);
         gl::DepthMask(1);
         gl::Clear(gl::DEPTH_BUFFER_BIT);
@@ -106,8 +106,8 @@ void WorldRenderer::render(const Camera& camera, int framebufferWidth, int frame
         gl::Uniform3f(uFogColor_, waterFogColor_[0], waterFogColor_[1], waterFogColor_[2]);
         gl::Uniform2f(uEnvFog_, waterFogStart_, waterFogEnd_);
     } else {
-        gl::Uniform3f(uFogColor_, kHorizon[0], kHorizon[1], kHorizon[2]);
-        gl::Uniform2f(uEnvFog_, 1.0e9f, 2.0e9f);  // no medium fog
+        gl::Uniform3f(uFogColor_, skyState_.horizon[0], skyState_.horizon[1], skyState_.horizon[2]);
+        gl::Uniform2f(uEnvFog_, envFogStart_, envFogEnd_);  // (the dimension's own fog, if it has one)
     }
     if (lodsOn) {  // the haze belongs to the far end of the LODs, not to the edge of the chunks
         const auto [lodFogStart, lodFogEnd] = LodRenderer::fogRange(lodSettings_.radiusChunks, renderDistance);

@@ -185,6 +185,7 @@ public:
     [[nodiscard]] int count(MobKind kind) const;
     // /kill and /gamemode peaceful: removes the mobs the test selects, returning how many.
     int remove(const std::function<bool(const Mob&)>& which);
+    void clear();
     // A shot from outside (the player's bow, a dispenser): not used yet.
     void shoot(Projectile::Kind kind, double x, double y, double z, double vx, double vy, double vz, float damage, int ownerId);
 

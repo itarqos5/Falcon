@@ -42,7 +42,7 @@ add_executable(falcon_lod_tests EXCLUDE_FROM_ALL test_lod.cpp)
 target_link_libraries(falcon_lod_tests PRIVATE falcon::core falcon_warnings)
 add_test(NAME falcon_lod_tests COMMAND falcon_lod_tests)
 
-# The game's rules that need no data and no graphics card: the clock, and what the mobs do.
+# The game's rules that need no data and no graphics card: the clock, and what the mobs and the portals do.
 add_executable(falcon_logic_tests EXCLUDE_FROM_ALL test_logic.cpp test_logic_day.cpp)
 target_sources(falcon_logic_tests PRIVATE test_logic_mob.cpp)
 target_sources(falcon_logic_tests PRIVATE test_logic_random.cpp)

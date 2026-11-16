@@ -173,7 +173,7 @@ std::shared_ptr<const ChunkLight> computeChunkLight(const LightInput& input) {
     }
 
     // 2. Sky light: full above the highest light-blocking cell of each column, then flooded into the shadows.
-    for (int col = 0; col < kColumns; ++col) {
+    for (int col = 0; col < kColumns && input.skylight; ++col) {
         const std::size_t base = static_cast<std::size_t>(col) * kStride;
         int top = kSectionCount * 16 - 1;
         while (top >= 0 && s.opacity[base + static_cast<std::size_t>(top)] == 0) --top;
@@ -181,7 +181,7 @@ std::shared_ptr<const ChunkLight> computeChunkLight(const LightInput& input) {
         std::memset(&s.sky[base + static_cast<std::size_t>(top + 1)], 15, static_cast<std::size_t>(kSectionCount * 16 - 1 - top));
     }
     s.queue.clear();
-    for (int col = 0; col < kColumns; ++col) {
+    for (int col = 0; col < kColumns && input.skylight; ++col) {
         const int cx = kTables.x[static_cast<std::size_t>(col)], cz = kTables.z[static_cast<std::size_t>(col)];
         const int top = s.top[static_cast<std::size_t>(col)];
         const std::uint32_t base = static_cast<std::uint32_t>(col) * kStride;
@@ -194,7 +194,7 @@ std::shared_ptr<const ChunkLight> computeChunkLight(const LightInput& input) {
         if (cz < kSpan - 1) highest = std::max<int>(highest, s.top[static_cast<std::size_t>(col + kSpan)]);
         for (int y = top + 1; y <= highest && y < kSectionCount * 16; ++y) s.queue.push_back(base + static_cast<std::uint32_t>(y));
     }
-    flood(s.sky, s.opacity, s.queue, true);
+    if (input.skylight) flood(s.sky, s.opacity, s.queue, true);
 
     // 3. Block light from the emitters.
     s.queue.assign(s.emitters.begin(), s.emitters.end());
