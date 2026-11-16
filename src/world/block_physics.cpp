@@ -77,7 +77,10 @@ void BlockPhysics::randomTicks() {
                 if (section->isUniform() && !registry_.state(section->uniform).has(kStateLava)) continue;
                 for (int i = 0; i < randomTickSpeed_; ++i) {
                     const int lx = nextInt(16), ly = nextInt(16), lz = nextInt(16);
-                    if (registry_.state(section->at(lx, ly, lz)).has(kStateLava)) lavaRandomTick((cx + dx) * 16 + lx, kMinY + s * 16 + ly, (cz + dz) * 16 + lz);
+                    const Block sampled = section->at(lx, ly, lz);
+                    const StateInfo& info = registry_.state(sampled);
+                    if (info.has(kStateLava)) lavaRandomTick((cx + dx) * 16 + lx, kMinY + s * 16 + ly, (cz + dz) * 16 + lz);
+                    else if (info.has(kStateRandomTicks)) growthRandomTick((cx + dx) * 16 + lx, kMinY + s * 16 + ly, (cz + dz) * 16 + lz, sampled);
                 }
             }
         }

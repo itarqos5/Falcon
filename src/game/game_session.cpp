@@ -175,6 +175,7 @@ GameSession::GameSession(ScreenServices& services, const ResourceManager& resour
                     return p;
                 };
                 host.hurtPlayer = [this](float amount) { hurt(amount); };
+                host.light = [this](int lx, int ly, int lz, int& sky, int& blockLight) { renderer_.lightAt(lx, ly, lz, sky, blockLight); };
                 host.pushPlayer = [this](double dx, double dy, double dz) {
                     player_.vx += dx;
                     player_.vy += dy;

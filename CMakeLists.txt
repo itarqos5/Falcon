@@ -320,6 +320,7 @@ add_library(falcon_core
     src/world/mob.cpp
     src/world/mob_path.cpp
     src/world/mob_spawn.cpp
+    src/world/random_ticks.cpp
     src/world/nether_decoration.cpp
     src/world/world_save.cpp
     src/world/block_containers.cpp

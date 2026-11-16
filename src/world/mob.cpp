@@ -432,6 +432,7 @@ struct MobBrain {
         if (has(kMobAngryWhenHurt)) return false;
         if (has(kMobNeutralInDaylight)) {  // a spider only hunts where it is dim (or once it was hit)
             int sky = 0, block = 0;
+            if (mobs.host_.light) mobs.host_.light(fl(m.x), fl(m.y + 0.5), fl(m.z), sky, block);
             const float brightness = static_cast<float>(std::max(block, static_cast<int>(std::max(0.0f, static_cast<float>(sky) - in.darkSteps)))) / 15.0f;
             if (brightness > 0.5f && mobs.randomInt(100) != 0) return false;
         }
@@ -798,6 +799,7 @@ void Mobs::tickMob(Mob& m, const MobTick& in) {
         }
         if ((sp.traits & kMobBurnsInDaylight) != 0 && in.daylightBurns && isDay(in.dayTime) && !m.inWater && host_.light) {
             int sky = 0, block = 0;
+            host_.light(fl(m.x), fl(m.y + static_cast<double>(m.height) - 0.1), fl(m.z), sky, block);
             if (sky >= 15) m.burn = std::max(m.burn, 160);  // (sunlight on its head: Zombie.isSunBurnTick)
         }
         if ((sp.traits & kMobHurtByWater) != 0 && m.inWater && m.age % 10 == 0) {

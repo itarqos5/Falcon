@@ -61,6 +61,7 @@ public:
         std::function<std::vector<ItemStack>(Block)> drops;                                       // what a block gives when it is destroyed
         std::function<PhysicsPlayer()> player;
         std::function<void(float)> hurtPlayer;
+        std::function<void(int, int, int, int&, int&)> light;                                      // the sky and block light of a cell (crops and grass need some)
         std::function<void(double, double, double)> pushPlayer;                                   // adds to the player's velocity
         std::function<void()> beginBatch, endBatch;                                               // many block changes at once (an explosion)
     };
@@ -118,6 +119,7 @@ private:
     void fireTick(int x, int y, int z);
     void checkBurnOut(int x, int y, int z, int chance, int age);
     void lavaRandomTick(int x, int y, int z);
+    void growthRandomTick(int x, int y, int z, Block b);  // grass, leaves, crops, cane, farmland, saplings (random_ticks.cpp)
     void randomTicks();
     [[nodiscard]] bool isFree(Block b) const;
     [[nodiscard]] bool canBurn(Block b) const;
