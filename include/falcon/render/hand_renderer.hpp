@@ -22,6 +22,8 @@ class WorldRenderer;
 
 // The game's light map colour for a sky and a block light level (0..15) and the Brightness option: what the world's shader multiplies a surface by.
 [[nodiscard]] std::array<float, 3> entityLightColor(int sky, int block, float gamma);
+// What the sky does to the light of everything drawn apart from the world meshes (its factor and colour, the ambient light): set each frame from the day cycle.
+void setEntitySkyLight(float factor, const std::array<float, 3>& color, const std::array<float, 3>& ambient);
 
 // What the hand needs to know about the frame.
 struct HandFrame {

@@ -395,6 +395,7 @@ int Client::run() {
     std::vector<std::string> pendingEdits = options_.edits;
     std::vector<std::string> pendingGives = options_.give;
     std::optional<std::array<float, 4>> pendingVitals = options_.vitals;
+    std::optional<long long> pendingTime = options_.dayTime;
     std::optional<double> pendingDropFrom = options_.dropFrom;
     navigator.setHoldShift(options_.holdShift);
     bool leftWorld = false;  // a world was played and then quit (a --capture run then no longer waits for one)
@@ -774,6 +775,10 @@ int Client::run() {
             vitals.progress = (*pendingVitals)[3];
             session->setVitals(vitals);
             pendingVitals.reset();
+        }
+        if (session != nullptr && session->ready() && pendingTime) {  // --time
+            session->setDayTime(*pendingTime, true);
+            pendingTime.reset();
         }
         if (session != nullptr && session->ready() && !pendingEdits.empty()) {  // --edit
             for (const std::string& edit : pendingEdits) {

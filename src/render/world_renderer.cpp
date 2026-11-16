@@ -146,11 +146,66 @@ uniform vec3 uUp;
 uniform vec2 uTan;
 uniform vec3 uHorizon;
 uniform vec3 uZenith;
+uniform vec3 uSunDir;                  // towards the sun, the moon is opposite; (0, 0, 0): neither
+uniform vec2 uAngle;                   // sin and cos of the sun's angle: the stars turn with it
+uniform float uStars;                  // how bright the stars are, 0..1
+uniform vec4 uGlow;                    // the sunrise or sunset at the horizon: colour, strength
+uniform float uMoon;                   // phase: 0 full ... 4 new
 out vec4 frag;
+float hash13(vec3 p) {
+    p = fract(p * 0.1031);
+    p += dot(p, p.zyx + 31.32);
+    return fract((p.x + p.y) * p.z);
+}
 void main() {
     vec3 d = normalize(uForward + uRight * (vNdc.x * uTan.x) + uUp * (vNdc.y * uTan.y));
     float t = clamp(d.y, 0.0, 1.0);
-    frag = vec4(mix(uHorizon, uZenith, pow(t, 0.55)), 1.0);
+    vec3 color = mix(uHorizon, uZenith, pow(t, 0.55));
+    // The stars turn with the sun round the east-west line.
+    if (uStars > 0.0 && d.y > -0.02) {
+        vec3 dr = vec3(d.x * uAngle.y + d.y * uAngle.x, -d.x * uAngle.x + d.y * uAngle.y, d.z);
+        vec3 cell = floor(dr * 160.0);
+        float h = hash13(cell);
+        if (h > 0.9955) color += vec3(clamp(uStars * 2.0 * (0.7 + 0.3 * fract(h * 531.0)), 0.0, 1.0));
+    }
+    float sunLength = length(uSunDir);
+    if (sunLength > 0.5) {  // (no sun or moon where there is no day: under water, in the Nether)
+        // The glow of the sunrise or the sunset: a disc 120 blocks across seen 100 blocks off, standing on the horizon towards the sun, fading out from its middle.
+        vec3 hs = vec3(uSunDir.x, 0.0, uSunDir.z);
+        float hl = length(hs);
+        if (uGlow.a > 0.0 && hl > 1.0e-4) {
+            vec3 s = hs / hl;
+            float ds = dot(d, s);
+            if (ds > 0.05) {
+                vec3 p = cross(vec3(0.0, 1.0, 0.0), s);
+                vec2 q = vec2(dot(d, p), d.y) * (100.0 / ds);
+                float k = clamp(1.0 - length(q) / 120.0, 0.0, 1.0);
+                color = mix(color, uGlow.rgb, uGlow.a * k);
+            }
+        }
+        // The sun is a square 30 blocks wide a hundred blocks away, the moon one of 20 with its phase (the lit part of a ball seen from one side).
+        vec3 across = vec3(0.0, 0.0, 1.0);
+        vec3 up = cross(uSunDir, across);
+        float toSun = dot(d, uSunDir);
+        if (toSun > 0.0) {
+            vec2 q = vec2(dot(d, across), dot(d, up)) / toSun / 0.15;
+            float edge = max(abs(q.x), abs(q.y));
+            if (edge < 1.0) color = mix(vec3(1.0, 0.97, 0.85), vec3(1.0, 0.86, 0.5), pow(edge, 3.0));
+        }
+        float toMoon = -toSun;
+        if (toMoon > 0.0) {
+            vec2 q = vec2(dot(d, across), -dot(d, up)) / toMoon / 0.1 / 0.75;
+            float r = length(q);
+            if (r < 1.0) {
+                vec3 n = vec3(q, sqrt(1.0 - r * r));
+                float a = uMoon * 0.7853982;
+                float lit = smoothstep(-0.04, 0.1, dot(n, vec3(sin(a), 0.0, cos(a))));
+                vec3 moon = vec3(0.92, 0.94, 1.0) * (0.93 + 0.07 * hash13(floor(vec3(q * 6.0, 1.0))));
+                color = mix(color, mix(moon * 0.07, moon, lit), 1.0);
+            }
+        }
+    }
+    frag = vec4(color, 1.0);
 }
 )";
 
@@ -240,6 +295,11 @@ WorldRenderer::WorldRenderer(BlockModels& models, std::int64_t seed, TerrainStyl
     skyTan_ = sky_.uniform("uTan");
     skyHorizon_ = sky_.uniform("uHorizon");
     skyZenith_ = sky_.uniform("uZenith");
+    skySunDir_ = sky_.uniform("uSunDir");
+    skyAngle_ = sky_.uniform("uAngle");
+    skyStars_ = sky_.uniform("uStars");
+    skyGlow_ = sky_.uniform("uGlow");
+    skyMoon_ = sky_.uniform("uMoon");
     lineViewProj_ = lines_.uniform("uViewProj");
     crackViewProj_ = cracks_.uniform("uViewProj");
     crackTex_ = cracks_.uniform("uTex");

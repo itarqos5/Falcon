@@ -101,18 +101,25 @@ M4 applyTransform(const DisplayTransform& t, bool leftHand) {
 
 // The game's own light map (assets/shaders/core/lightmap.fsh) for a sky and a block light level; the same formula the
 // world shader uses, see lightColor() there.
+struct EntitySkyLight {
+    float factor = 1.0f;
+    std::array<float, 3> color{1.0f, 1.0f, 1.0f};
+    std::array<float, 3> ambient{0.0f, 0.0f, 0.0f};
+};
+EntitySkyLight g_entitySky;
+
 std::array<float, 3> lightMapColor(int sky, int block, float gamma) {
     const auto curve = [](float l) { return l / (4.0f - 3.0f * l); };
     const float skyLevel = static_cast<float>(sky) / 15.0f;
     const float blockLevel = static_cast<float>(block) / 15.0f;
-    const float skyBrightness = curve(skyLevel);
+    const float skyBrightness = curve(skyLevel) * g_entitySky.factor;
     const float blockBrightness = curve(blockLevel) * 1.4f;
     const float parabolic = (2.0f * blockLevel - 1.0f) * (2.0f * blockLevel - 1.0f);
     constexpr std::array<float, 3> kTint = {1.0f, 0.84705883f, 0.54901963f};  // #FFD88C
     std::array<float, 3> c{};
     for (int i = 0; i < 3; ++i) {
         const float tint = kTint[static_cast<std::size_t>(i)] + (1.0f - kTint[static_cast<std::size_t>(i)]) * (0.9f * parabolic);
-        c[static_cast<std::size_t>(i)] = std::clamp(skyBrightness + tint * blockBrightness, 0.0f, 1.0f);
+        c[static_cast<std::size_t>(i)] = std::clamp(g_entitySky.ambient[static_cast<std::size_t>(i)] + g_entitySky.color[static_cast<std::size_t>(i)] * skyBrightness + tint * blockBrightness, 0.0f, 1.0f);
     }
     const float m = std::max({c[0], c[1], c[2]});
     if (m > 0.0f) {
@@ -638,5 +645,11 @@ void HandRenderer::renderBlockEntities(WorldRenderer& world, const Matrix4f& vie
 }
 
 std::array<float, 3> entityLightColor(int sky, int block, float gamma) { return lightMapColor(sky, block, gamma); }
+
+void setEntitySkyLight(float factor, const std::array<float, 3>& color, const std::array<float, 3>& ambient) {
+    g_entitySky.factor = factor;
+    g_entitySky.color = color;
+    g_entitySky.ambient = ambient;
+}
 
 }  // namespace falcon

@@ -84,6 +84,7 @@ void GameSession::tickPlayer(double seconds, bool steering) {
         tickHealth();
         tickBurning();
         if (ready_ && !remote_) itemEntities_.tick(renderer_.level());  // (on a server the items are the server's: pumpRemote puts them there)
+        if (ready_ && !remote_) tickTime();
         // The water that flows: its updates that are due this tick.
         if (!remote_) fluids_.tick(renderer_.level(), [this](int bx, int by, int bz, Block b) { return renderer_.setBlock(bx, by, bz, b); });
         if (ready_ && physics_) physics_->tick();
@@ -102,6 +103,16 @@ void GameSession::tickPlayer(double seconds, bool steering) {
             player_.lastFallDamage = 0;
         }
     }
+}
+
+
+void GameSession::tickTime() {
+    ++gameTime_;
+    if (timeFrozen_ || timePaused_ || !gameRuleOn("advance_time")) return;
+    timeFraction_ += timeRate_;
+    const long long whole = static_cast<long long>(timeFraction_);
+    dayTime_ += whole;
+    timeFraction_ -= static_cast<double>(whole);
 }
 
 void GameSession::tickHud(double seconds) {

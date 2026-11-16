@@ -111,6 +111,7 @@ std::string usageText() {
            "  --connect <host[:port]> join a server (one that does not check accounts) at start-up; --username <name> says who as\n"
            "  --drop-from <blocks>    Lift the player that far once the world is ready and let them fall (to test fall damage)\n"
            "  --vitals <h>,<f>,<l>,<p>  What the survival bars show: health (20 = full), food (20), level, progress 0..1 (for screenshots)\n"
+           "  --time <ticks>          The time of day once the world is ready (0 sunrise, 6000 noon, 18000 midnight); the clock stops there (for screenshots)\n"
            "  --click <X>,<Y>@<s>     Inject a left click at that window position after <s> seconds\n"
            "                          (repeatable; for scripted tests)\n"
            "  --help                  Show this message\n";
@@ -284,6 +285,8 @@ ClientOptions parseOptions(int argc, const char* const* argv) {
                 from = comma + 1;
             }
             o.vitals = values;
+        } else if (arg == "--time") {
+            o.dayTime = std::stoll(nextValue(i, argc, argv));
         } else if (arg == "--gamemode") {
             const std::string v = nextValue(i, argc, argv);
             if (v == "survival") {

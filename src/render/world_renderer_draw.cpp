@@ -63,12 +63,22 @@ void WorldRenderer::render(const Camera& camera, int framebufferWidth, int frame
     gl::Uniform3f(skyUp_, view.m[1], view.m[5], view.m[9]);
     gl::Uniform3f(skyForward_, -view.m[2], -view.m[6], -view.m[10]);
     gl::Uniform2f(skyTan_, tanHalf * aspect, tanHalf);
-    if (underwater_) {  // no sky from under water: the whole view is the water's fog colour
+    if (underwater_) {  // no sky from under water: the whole view is the water's fog colour, with no sun, moon or stars
         gl::Uniform3f(skyHorizon_, waterFogColor_[0], waterFogColor_[1], waterFogColor_[2]);
         gl::Uniform3f(skyZenith_, waterFogColor_[0], waterFogColor_[1], waterFogColor_[2]);
+        gl::Uniform3f(skySunDir_, 0.0f, 0.0f, 0.0f);
+        gl::Uniform2f(skyAngle_, 0.0f, 1.0f);
+        gl::Uniform1f(skyStars_, 0.0f);
+        gl::Uniform4f(skyGlow_, 0.0f, 0.0f, 0.0f, 0.0f);
+        gl::Uniform1f(skyMoon_, 0.0f);
     } else {
-        gl::Uniform3f(skyHorizon_, kHorizon[0], kHorizon[1], kHorizon[2]);
-        gl::Uniform3f(skyZenith_, kZenith[0], kZenith[1], kZenith[2]);
+        gl::Uniform3f(skyHorizon_, skyState_.horizon[0], skyState_.horizon[1], skyState_.horizon[2]);
+        gl::Uniform3f(skyZenith_, skyState_.zenith[0], skyState_.zenith[1], skyState_.zenith[2]);
+        gl::Uniform3f(skySunDir_, skyState_.sunDir[0], skyState_.sunDir[1], skyState_.sunDir[2]);
+        gl::Uniform2f(skyAngle_, skyState_.sinAngle, skyState_.cosAngle);
+        gl::Uniform1f(skyStars_, skyState_.stars);
+        gl::Uniform4f(skyGlow_, skyState_.glow[0], skyState_.glow[1], skyState_.glow[2], skyState_.glow[3]);
+        gl::Uniform1f(skyMoon_, skyState_.moonPhase);
     }
     gl::BindVertexArray(emptyVao_);
     gl::DrawArrays(gl::TRIANGLES, 0, 3);
@@ -118,7 +128,7 @@ void WorldRenderer::render(const Camera& camera, int framebufferWidth, int frame
                   static_cast<float>(heldLightZ_ - kHeldLightSize / 2 - camera.z));
 
     // The light map picture (texture unit 2); made again only when the Brightness option changed.
-    if (lightmapBrightness_ != brightness_) updateLightmap();
+    if (lightmapBrightness_ != brightness_ || lightmapSkyChanged()) updateLightmap();
     gl::ActiveTexture(gl::TEXTURE0 + 2);
     gl::BindTexture(gl::TEXTURE_2D, lightmapTex_);
     gl::ActiveTexture(gl::TEXTURE0);
@@ -426,12 +436,12 @@ void WorldRenderer::updateLightmap() {
             const float sky = static_cast<float>(s) / 15.0f;
             const float blk = static_cast<float>(b) / 15.0f;
             const float blockBrightness = (blk / (4.0f - 3.0f * blk)) * 1.4f;
-            const float skyBrightness = sky / (4.0f - 3.0f * sky);
+            const float skyBrightness = sky / (4.0f - 3.0f * sky) * skyState_.skyLightFactor;  // (the night does not take levels off: it dims the sky light)
             const float parabolic = (2.0f * blk - 1.0f) * (2.0f * blk - 1.0f);
             const float tint = 0.9f * parabolic;  // mix(vec3(1, 0.84705883, 0.54901963), vec3(1), tint)
             const float mixed[3] = {1.0f, 0.84705883f + (1.0f - 0.84705883f) * tint, 0.54901963f + (1.0f - 0.54901963f) * tint};
             float color[3];
-            for (int c = 0; c < 3; ++c) color[c] = std::clamp(skyBrightness + mixed[c] * blockBrightness, 0.0f, 1.0f);
+            for (int c = 0; c < 3; ++c) color[c] = std::clamp(skyState_.ambient[c] + skyState_.skyLightColor[c] * skyBrightness + mixed[c] * blockBrightness, 0.0f, 1.0f);
             const float m = std::max({color[0], color[1], color[2]});
             if (m > 0.0f) {
                 const float inverted = 1.0f - m;
@@ -450,6 +460,17 @@ void WorldRenderer::updateLightmap() {
     gl::TexImage2D(gl::TEXTURE_2D, 0, static_cast<gl::GLint>(gl::RGBA16F), 16, 16, 0, gl::RGBA, gl::FLOAT, texels);
     gl::ActiveTexture(gl::TEXTURE0);
     lightmapBrightness_ = brightness_;
+    lightmapSky_ = {skyState_.skyLightFactor, skyState_.skyLightColor[0], skyState_.skyLightColor[1], skyState_.skyLightColor[2],
+                    skyState_.ambient[0], skyState_.ambient[1], skyState_.ambient[2]};
+}
+
+bool WorldRenderer::lightmapSkyChanged() const {
+    const std::array<float, 7> now = {skyState_.skyLightFactor, skyState_.skyLightColor[0], skyState_.skyLightColor[1], skyState_.skyLightColor[2],
+                                      skyState_.ambient[0], skyState_.ambient[1], skyState_.ambient[2]};
+    for (std::size_t i = 0; i < now.size(); ++i) {
+        if (std::abs(now[i] - lightmapSky_[i]) > 0.004f) return true;
+    }
+    return false;
 }
 
 void WorldRenderer::drawSelection(const Camera& camera, int framebufferWidth, int framebufferHeight, int x, int y, int z) {
@@ -601,7 +622,7 @@ void WorldRenderer::drawHeld(const Matrix4f& mvp, const std::vector<MeshVertex>&
     gl::Uniform1i(uTex_, 0);
     gl::Uniform1i(uHeldLight_, 1);      // (the sampler must not share unit 0 with the block textures, used or not)
     gl::Uniform1f(uHeldOn_, 0.0f);      // the held item is lit by its own vertices, not by the volume (its positions are model space)
-    if (lightmapBrightness_ != brightness_) updateLightmap();
+    if (lightmapBrightness_ != brightness_ || lightmapSkyChanged()) updateLightmap();
     gl::ActiveTexture(gl::TEXTURE0 + 2);
     gl::BindTexture(gl::TEXTURE_2D, lightmapTex_);
     gl::ActiveTexture(gl::TEXTURE0);

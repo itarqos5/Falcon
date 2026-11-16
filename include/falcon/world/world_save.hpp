@@ -66,6 +66,8 @@ struct WorldSave {
     std::vector<ItemEntity> items;
     std::map<std::string, std::string> gameRules;  // the game rules that differ from their defaults (/gamerule)
     int difficulty = -1;                           // -1: not stored
+    long long dayTime = -1;                        // the time of day in ticks (world/day_cycle.hpp); -1: not stored (a world from before there was a clock)
+    long long gameTime = 0;                        // the ticks the world has run
     NbtTag containers;                             // what the chests, furnaces ... hold (BlockStorages::toNbt); type End: none stored
     std::vector<std::pair<int, ItemStack>> enderChest;  // (slot, stack) of the player's ender chest
 };

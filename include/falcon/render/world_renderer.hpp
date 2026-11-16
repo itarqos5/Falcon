@@ -5,6 +5,7 @@
 #include "falcon/render/block_models.hpp"
 #include "falcon/render/camera.hpp"
 #include "falcon/render/lod_renderer.hpp"
+#include "falcon/world/day_cycle.hpp"
 #include "falcon/util/priority_pool.hpp"
 #include "falcon/world/chunk.hpp"
 #include "falcon/world/chunk_cache.hpp"
@@ -116,6 +117,10 @@ public:
     [[nodiscard]] const worldgen::OverworldGenerator* overworld() const { return overworld_.get(); }
     // The Brightness option (0..1) that lifts the dark end of the light map.
     void setBrightness(float brightness) { brightness_ = brightness; }
+    // The sky of this moment (world/day_cycle.hpp): its colours, the sun, the moon, the stars, and how much of the sky's light the night takes away. Call every frame.
+    void setSky(const daycycle::Sky& sky) { skyState_ = sky; }
+    // How many levels of sky light the night takes away just now (0 by day): what the rules of the game (spawning, sleeping) subtract from the sky light they read.
+    [[nodiscard]] float skyDarkSteps() const { return skyState_.darkSteps; }
     // The light the player carries (a torch in the hand): `level` (0..15; 0 is none) shines from the block (x, y, z), spreading and
     // fading one level a block and stopping at walls like block light does, but follows the player without touching the chunks'
     // light. Cheap to call every frame: the light is only worked out again when the block, the level or the blocks around change.
@@ -300,6 +305,10 @@ private:
     int heldLightAge_ = 0;          // frames since it was last made (chunks load and change around the player)
     unsigned blockEdits_ = 0;       // counts setBlock calls
     gl::GLint skyForward_ = -1, skyRight_ = -1, skyUp_ = -1, skyTan_ = -1, skyHorizon_ = -1, skyZenith_ = -1;
+    gl::GLint skySunDir_ = -1, skyAngle_ = -1, skyStars_ = -1, skyGlow_ = -1, skyMoon_ = -1;
+    daycycle::Sky skyState_;
+    [[nodiscard]] bool lightmapSkyChanged() const;
+    std::array<float, 7> lightmapSky_{};  // the sky factor and colour and the ambient light the light map picture was made for
     gl::GLint lineViewProj_ = -1;
     gl::GLuint indexBuffer_ = 0;
     gl::GLuint emptyVao_ = 0;

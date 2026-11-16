@@ -211,6 +211,11 @@ GameSession::GameSession(ScreenServices& services, const ResourceManager& resour
             commands_ = CommandTree::loadFromGameData(resources.dataRoot(), commandError);
             if (!commands_) std::printf("[falcon] commands: %s (the chat cannot run commands)\n", commandError.c_str());
         }
+        {
+            std::string timelineError;
+            timeline_ = daycycle::Timeline::loadFromGameData(resources.dataRoot(), timelineError);
+            if (!timeline_) std::printf("[falcon] day cycle: %s (using the approximation)\n", timelineError.c_str());
+        }
         blockTags_ = std::make_unique<BlockTags>(resources.dataRoot() / "data" / "minecraft" / "tags" / "block", *registry_);
         mining_ = std::make_unique<MiningRules>(*registry_, *blockTags_);
         loot_ = std::make_unique<BlockLoot>(resources.dataRoot(), *registry_);
@@ -292,6 +297,8 @@ void GameSession::loadSave() {
         applyGameRule(rule, value);
     }
     if (saved.difficulty >= 0 && saved.difficulty <= 3) difficulty_ = saved.difficulty;
+    dayTime_ = saved.dayTime >= 0 ? saved.dayTime : daycycle::kNoon;  // (a world from before there was a clock was always noon)
+    gameTime_ = saved.gameTime;
 }
 
 void GameSession::save() {

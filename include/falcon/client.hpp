@@ -76,6 +76,7 @@ struct ClientOptions {
     bool cheats = false;                               // --cheats: commands allowed whatever the world says
     std::optional<int> gameType;                       // --gamemode survival|creative: overrides the world's game mode
     std::optional<double> dropFrom;                    // --drop-from BLOCKS: once the world is ready the player is lifted that far and falls (to test fall damage)
+    std::optional<long long> dayTime;                  // --time TICKS: the time of day (0 sunrise, 6000 noon, 18000 midnight), and the clock stops there (for screenshots)
     std::optional<std::array<float, 4>> vitals;        // --vitals HEALTH,FOOD,LEVEL,PROGRESS: what the survival bars show (health in half hearts: 20 is full)
     std::vector<ScriptedScroll> scrolls;               // --scroll X,Y,DY@S
     std::vector<ScriptedText> typed;                   // --type TEXT@S

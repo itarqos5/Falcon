@@ -49,6 +49,11 @@ void GameSession::renderWorld(int framebufferWidth, int framebufferHeight) {
     } else {
         renderer_.setUnderwater(false);
     }
+    // The sky of the time of day (a tick and the part of it that has passed, while the clock runs).
+    const double skyTime = static_cast<double>(dayTime_) + (timeFrozen_ || timePaused_ || !gameRuleOn("advance_time") ? 0.0 : partialTick_ * timeRate_);
+    const daycycle::Sky skyNow = timeline_ ? timeline_->sky(skyTime) : daycycle::sky(skyTime);
+    renderer_.setSky(skyNow);
+    setEntitySkyLight(skyNow.skyLightFactor, skyNow.skyLightColor, skyNow.ambient);
     renderer_.render(cam, framebufferWidth, framebufferHeight, renderDistance());
     if (ready_ && target_) renderer_.drawSelection(cam, framebufferWidth, framebufferHeight, target_->x, target_->y, target_->z);
     if (ready_ && digPos_ && destroyStage(digProgress_) >= 0) renderer_.drawBreakOverlay(cam, framebufferWidth, framebufferHeight, (*digPos_)[0], (*digPos_)[1], (*digPos_)[2], destroyStage(digProgress_));
@@ -172,6 +177,7 @@ std::vector<std::string> GameSession::debugLines() const {
     lines.push_back(format("Quads: %zu / %zu", s.quadsDrawn, s.quadsTotal));
     lines.push_back(format("Jobs waiting: %d  uploads: %d", s.jobsWaiting, s.uploadsThisFrame));
     lines.push_back(format("Water: %zu waiting (tick %lld)", fluids_.pending(), fluids_.gameTime()));
+    lines.push_back(format("Time: %lld (day %lld), moon phase %d", dayTime_ % daycycle::kTicksPerDay, dayTime_ / daycycle::kTicksPerDay, daycycle::moonPhase(dayTime_)));
     lines.push_back(format("RAM: %.0f MB  block data %.1f MB", megabytes(processWorkingSetBytes()), megabytes(s.levelBytes)));
     lines.push_back(format("GPU: meshes %.1f MB, textures %.2f MB", megabytes(s.meshBytes), megabytes(s.textureBytes)));
     if (services_.options.lodsEnabled && renderer_.lodStats().tilesLoaded + renderer_.lodStats().tilesBuilding > 0) {

@@ -7,6 +7,11 @@ layout(std140, set = 0, binding = 0) uniform Block {
     vec2 uTan;
     vec3 uHorizon;
     vec3 uZenith;
+    vec3 uSunDir;
+    vec2 uAngle;
+    float uStars;
+    vec4 uGlow;
+    float uMoon;
 } u;
 layout(location = 0) out vec2 vNdc;
 void main() {

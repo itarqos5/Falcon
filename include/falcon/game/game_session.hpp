@@ -172,6 +172,13 @@ public:
     [[nodiscard]] int droppedCount() const { return droppedCount_; }
     // The items lying in the world.
     [[nodiscard]] ItemEntities& itemEntities() { return itemEntities_; }
+    // The time of day in ticks (0 sunrise, 6000 noon, 12000 sunset, 18000 midnight) and how many ticks the world has run; /time changes the first. `freeze` stops the clock (--time).
+    [[nodiscard]] long long dayTime() const { return dayTime_; }
+    [[nodiscard]] long long gameTime() const { return gameTime_; }
+    void setDayTime(long long ticks, bool freeze = false) {
+        dayTime_ = ticks;
+        if (freeze) timeFrozen_ = true;
+    }
     // Player.drop: puts a stack in the world at the player's hands, thrown the way they look (or, for what is lost at death, scattered at random).
     void dropFromPlayer(const ItemStack& stack, bool scatter = false);
 
@@ -270,6 +277,7 @@ private:
     void runCommand(const std::string& text);  // a command typed in the chat, without its "/"
     void applyGameRule(const std::string& rule, const std::string& value);
     void tickBurning();
+    void tickTime();  // the clock: a tick of the day, unless the game rule advance_time is off
     void pumpRemote();
     // What LocalPlayer.sendChanges says each tick. A rider (`riding`) sends how it looks round and nothing of its position; one who steers a boat also sends the boat's place.
     void sendRemoteTick(const PlayerInput& input, bool riding = false, const BoatBody* steered = nullptr);
@@ -426,6 +434,13 @@ private:
     mutable std::map<std::string, std::vector<std::string>> registryNames_;  // the ids of a registry, for the argument checks and the suggestions
     std::map<std::string, std::string> gameRules_;                           // game rules set by /gamerule (the others have their defaults)
     int difficulty_ = 2;
+    long long dayTime_ = 0;   // a new world starts at sunrise, as the game's do
+    long long gameTime_ = 0;
+    bool timeFrozen_ = false;  // --time
+    bool timePaused_ = false;  // /time pause
+    double timeRate_ = 1.0;    // /time rate: how fast the day goes (1: normal)
+    double timeFraction_ = 0.0;  // the part of a tick a rate other than 1 has gathered
+    std::shared_ptr<const daycycle::Timeline> timeline_;  // the game's own day (null: the closed-form approximation)
     int burnTicks_ = 0;  // how long the player is still on fire
     std::unique_ptr<BlockTags> blockTags_;
     std::filesystem::path dataRoot_;

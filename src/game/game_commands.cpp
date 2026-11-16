@@ -276,6 +276,7 @@ struct CommandRunner {
     void setblock();
     void fillBlocks();
     void gamerule();
+    void timeCommand();
     void experience();
     void difficulty();
     void summon();
@@ -320,7 +321,8 @@ void CommandRunner::run() {
         say(tr("commands.save.success"));
         return;
     }
-    if (command == "time" || command == "weather") return unsupported("/" + command);
+    if (command == "time") return timeCommand();
+    if (command == "weather") return unsupported("/" + command);
     unsupported("/" + command);
 }
 
@@ -509,6 +511,56 @@ void CommandRunner::fillBlocks() {
     s.renderer_.endBatch();
     if (changed == 0) return fail(tr("commands.fill.failed"));
     say(tr("commands.fill.success", {std::to_string(changed)}));
+}
+
+// /time set <time|marker>, add <time>, query <time|gametime|timeline>, pause, resume, rate <factor> (and the same after `of <clock>`: the Overworld's clock is the only one that runs)
+void CommandRunner::timeCommand() {
+    const std::string clock = "minecraft:overworld";
+    if (has("pause")) {
+        if (s.timePaused_) return fail(tr("commands.time.pause.already_paused", {clock}));
+        s.timePaused_ = true;
+        return say(tr("commands.time.pause", {clock}));
+    }
+    if (has("resume")) {
+        if (!s.timePaused_) return fail(tr("commands.time.pause.already_running", {clock}));
+        s.timePaused_ = false;
+        return say(tr("commands.time.resume", {clock}));
+    }
+    if (has("rate")) {
+        const double rate = std::atof(arg("rate").c_str());
+        if (rate == s.timeRate_) return fail(tr("commands.time.rate.already_same", {clock, arg("rate")}));
+        s.timeRate_ = rate;
+        return say(tr("commands.time.rate", {clock, arg("rate")}));
+    }
+    if (has("query")) {
+        if (has("gametime")) return say(tr("commands.time.query.gametime", {std::to_string(s.gameTime_)}));
+        if (has("timeline")) {
+            if (has("repetition")) return say(tr("commands.time.query.timeline.repetitions", {arg("timeline"), std::to_string(s.dayTime_ / daycycle::kTicksPerDay)}));
+            return say(tr("commands.time.query.timeline", {arg("timeline"), std::to_string(s.dayTime_ % daycycle::kTicksPerDay)}));
+        }
+        return say(tr("commands.time.query", {std::to_string(s.dayTime_ % daycycle::kTicksPerDay)}));
+    }
+    long long ticks = 0;
+    if (find("timemarker") != nullptr) {
+        std::string marker = arg("timemarker");
+        if (marker.rfind("minecraft:", 0) == 0) marker.erase(0, 10);
+        if (marker == "day") ticks = 1000;
+        else if (marker == "noon") ticks = 6000;
+        else if (marker == "night") ticks = 13000;
+        else if (marker == "midnight" || marker == "roll_village_siege") ticks = 18000;
+        else if (marker == "wake_up_from_sleep") ticks = 0;
+        else return fail(tr("commands.time.no_time_marker_found", {arg("timemarker"), clock}));
+        // A marker is the next time of day that has it, not a day number: the day count stays.
+        s.dayTime_ = s.dayTime_ - s.dayTime_ % daycycle::kTicksPerDay + ticks;
+        if (s.dayTime_ < 0) s.dayTime_ = ticks;
+        return say(tr("commands.time.set", {std::to_string(s.dayTime_)}));
+    }
+    const auto parsed = daycycle::parseTime(arg("time"));
+    if (!parsed) return fail("Invalid time '" + arg("time") + "'");
+    ticks = *parsed;
+    if (has("add")) s.dayTime_ += ticks;
+    else s.dayTime_ = ticks;
+    say(tr("commands.time.set", {std::to_string(s.dayTime_)}));
 }
 
 void CommandRunner::gamerule() {
