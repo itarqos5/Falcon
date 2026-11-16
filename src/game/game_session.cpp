@@ -274,6 +274,8 @@ GameSession::GameSession(ScreenServices& services, const ResourceManager& resour
     // The world's own save: what the player changed comes back as the chunks are made, and the player stands where they left off.
     savePath_ = services.gameDir / "saves" / info.folder / "falcon_save.dat";
     renderer_.setEdits(edits_);
+    lavaFluids_.setFizz([this](int fx, int fy, int fz) { fizzAt(fx, fy, fz); });
+    dims_[0].generator = overworld_;
     dims_[0].decorator = renderer_.decoratorPtr();
     dims_[0].edits = edits_;
     dims_[0].visited = true;
@@ -492,6 +494,8 @@ bool GameSession::setBlock(int x, int y, int z, Block block) {
     if (remote_) return true;
     storageBlockReplaced(old, block, x, y, z);  // (a chest that goes spills what it held)  // on a server what happens to the neighbours is the server's to say (it sends the changes)
     fluids_.blockChanged(renderer_.level(), x, y, z);  // water next to it looks round again (flows into a hole, or loses its source)
+    lavaFluids_.blockChanged(renderer_.level(), x, y, z);
+    if (registry_->state(block).has(kStateLiquid)) fluidReact(x, y, z);  // (water in the Nether boils, lava next to water sets)
     if (physics_) physics_->blockPlaced(x, y, z);  // sand may fall, fire starts to burn
     if (!portalEdit_) {  // fire in a frame of obsidian lights a portal; a frame or a portal that is broken puts the portal out
         if (isBlockNamed(block, "fire")) tryLightPortal(x, y, z);
@@ -515,6 +519,7 @@ bool GameSession::setBlock(int x, int y, int z, Block block) {
                 if (physics_ && now == neighbour) now = physics_->afterNeighborChange(neighbour, nx, ny, nz, at);  // (a block over a hole falls, fire follows what burns)
                 if (now != neighbour && renderer_.setBlock(nx, ny, nz, now)) {
                     fluids_.blockChanged(renderer_.level(), nx, ny, nz);
+                    lavaFluids_.blockChanged(renderer_.level(), nx, ny, nz);
                     pending.push_back({nx, ny, nz});
                 }
             }

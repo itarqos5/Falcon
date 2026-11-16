@@ -77,6 +77,9 @@ void GameSession::travelTo(int dimension, double x, double y, double z, bool por
     for (const ItemEntity& item : dim.items) itemEntities_.items().push_back(item);
     if (physics_) physics_->reset();
     fluids_.reset();
+    lavaFluids_.reset();
+    lavaFluids_.setUltrawarm(dimension == 1);  // (the Nether's lava flows fast and far)
+    fluidTouched_.clear();
     if (mobSim_) {
         mobSim_->clear();
         if (dim.mobs.type == NbtTag::Type::Compound) mobSim_->fromNbt(dim.mobs);

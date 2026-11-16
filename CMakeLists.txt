@@ -413,6 +413,7 @@ add_library(falcon_core
     src/game/game_session_dimensions.cpp
     src/game/game_session_portals.cpp
     src/game/game_session_dragon.cpp
+    src/game/game_session_buckets.cpp
     src/game/game_session_remote.cpp
     src/game/game_session_blocks.cpp
     src/game/game_session_containers.cpp

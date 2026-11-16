@@ -16,8 +16,16 @@ namespace falcon {
 //
 // Nothing happens until something changes: blockChanged() is called when a block was placed or broken, and every water block next to
 // it looks at its surroundings again, five game ticks later, then those it changes look at theirs. tick() runs the updates that are due.
+enum class FluidKind : std::uint8_t { Water, Lava };
+
 class FluidSimulator {
 public:
+    // One simulator for each fluid. Lava flows more slowly and not as far (every 30 ticks, 2 blocks of spread, 2 levels lost a block), and in the Nether ("ultrawarm") as water does
+    // (10 ticks, 4 blocks, one level a block) (LavaFluid.getTickDelay, getSlopeFindDistance, getDropOff). Lava does not make new sources of its own.
+    explicit FluidSimulator(FluidKind kind = FluidKind::Water) : lava_(kind == FluidKind::Lava) {}
+    void setUltrawarm(bool on) { ultrawarm_ = on; }
+    // Called when flowing lava runs down onto water and turns it to stone (the sound of it).
+    void setFizz(std::function<void(int, int, int)> fizz) { fizz_ = std::move(fizz); }
     using SetBlock = std::function<bool(int x, int y, int z, Block block)>;
     static constexpr int kWaterDelay = 5;  // game ticks between a water block's update and the next ones (WaterFluid.getTickDelay)
 
@@ -44,6 +52,8 @@ public:
         bool operator==(const Water&) const = default;
     };
     [[nodiscard]] static Water waterAt(Block block);
+    // The same for lava (the block of lava: its level says what it is).
+    [[nodiscard]] static Water lavaAt(Block block);
     // The block of water with this state (flowing water at a level 1..7 of height, falling water, or a source).
     [[nodiscard]] static Block waterBlock(const Water& water);
     // The way the water at block (x, y, z) pulls whatever is in it (FlowingFluid.getFlow): a unit vector pointing towards where the
@@ -75,6 +85,14 @@ private:
     void spreadTo(const Level& level, const SetBlock& setBlock, const Pos& p, const Water& water, int& changes);
     [[nodiscard]] Block blockAt(const Level& level, const Pos& p) const;
 
+    [[nodiscard]] Water fluidAt(Block b) const { return lava_ ? lavaAt(b) : waterAt(b); }
+    [[nodiscard]] Block fluidBlock(const Water& water) const;
+    [[nodiscard]] int tickDelay() const { return lava_ ? (ultrawarm_ ? 10 : 30) : kWaterDelay; }
+    [[nodiscard]] int dropOff() const { return lava_ && !ultrawarm_ ? 2 : 1; }
+    [[nodiscard]] int slopeDistanceLimit() const { return lava_ && !ultrawarm_ ? 2 : 4; }
+    bool lava_ = false;
+    bool ultrawarm_ = false;
+    std::function<void(int, int, int)> fizz_;
     long long time_ = 0;
     std::multimap<long long, Pos> due_;       // when -> the block to update
     std::unordered_set<std::int64_t> scheduled_;  // the blocks in due_, so none is there twice

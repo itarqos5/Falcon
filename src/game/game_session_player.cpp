@@ -89,7 +89,7 @@ void GameSession::tickPlayer(double seconds, bool steering) {
         if (ready_ && !remote_) tickPortal();
         if (ready_ && !remote_) tickDragonFight();
         // The water that flows: its updates that are due this tick.
-        if (!remote_) fluids_.tick(renderer_.level(), [this](int bx, int by, int bz, Block b) { return renderer_.setBlock(bx, by, bz, b); });
+        if (!remote_) tickFluids();
         if (ready_ && physics_) physics_->tick();
         if (ready_ && redstone_) redstone_->tick();
         if (ready_) tickContainers();
@@ -108,6 +108,19 @@ void GameSession::tickPlayer(double seconds, bool steering) {
     }
 }
 
+// The mobs of a singleplayer world: what they need to know of the player and the day, then a tick of all of them.
+// The water and the lava that flow: the updates that are due this tick, and then what the blocks they changed do to their neighbours (lava meeting water sets, water in the Nether boils).
+void GameSession::tickFluids() {
+    const auto set = [this](int bx, int by, int bz, Block b) {
+        if (!renderer_.setBlock(bx, by, bz, b)) return false;
+        fluidTouched_.push_back({bx, by, bz});
+        return true;
+    };
+    fluids_.tick(renderer_.level(), set);
+    lavaFluids_.tick(renderer_.level(), set);
+    for (std::size_t i = 0; i < fluidTouched_.size() && i < 256; ++i) fluidReact(fluidTouched_[i][0], fluidTouched_[i][1], fluidTouched_[i][2]);
+    fluidTouched_.clear();
+}
 
 void GameSession::tickMobs() {
     ++sinceAttack_;

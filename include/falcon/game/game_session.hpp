@@ -290,6 +290,11 @@ private:
     void applyGameRule(const std::string& rule, const std::string& value);
     void tickBurning();
     void tickMobs();
+    // ---- buckets and what the fluids do to each other (game_session_buckets.cpp)
+    bool useBucket(const std::array<double, 3>& eye, const std::array<double, 3>& look);
+    void fluidReact(int x, int y, int z);
+    void fizzAt(int x, int y, int z);
+    void tickFluids();
     // ---- the dimensions (game_session_dimensions.cpp) and the portals (game_session_portals.cpp)
     struct DimensionState {
         std::shared_ptr<const worldgen::OverworldGenerator> generator;
@@ -488,6 +493,8 @@ private:
     bool sneakLatched_ = false;   // "toggle" mode for Sneak and Sprint
     bool sprintLatched_ = false;
     double tickAccumulator_ = 0.0;  // seconds not yet turned into game ticks
+    FluidSimulator lavaFluids_{FluidKind::Lava};  // the lava that flows (slower, and not as far, as water)
+    std::vector<std::array<int, 3>> fluidTouched_;  // the cells the two simulators changed this tick, for what water and lava do to each other
     FluidSimulator fluids_;         // the water that flows: wakes when a block next to it changes, runs once a game tick
     int waterVisionTicks_ = 0;      // ticks the eyes have been under water (0..600): the underwater fog clears as it grows
     WaterFogTable waterFogs_;       // each biome's water fog colour and reach

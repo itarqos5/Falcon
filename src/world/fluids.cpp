@@ -36,6 +36,21 @@ FluidSimulator::Water FluidSimulator::waterAt(Block block) {
     return {true, true, false, 8};  // a waterlogged block, kelp, seagrass: a source
 }
 
+FluidSimulator::Water FluidSimulator::lavaAt(Block block) {
+    const StateInfo& info = blockRegistry().state(block);
+    if (!info.has(kStateLava) || !info.has(kStateLiquid)) return {};
+    const int level = info.fluidLevel;
+    if (level == 0) return {true, true, false, 8};
+    if (level >= 8) return {true, false, true, 8};
+    return {true, false, false, 8 - level};
+}
+
+Block FluidSimulator::fluidBlock(const Water& water) const {
+    if (!lava_) return waterBlock(water);
+    const int level = water.source ? 0 : water.falling ? 8 : std::clamp(8 - water.amount, 1, 7);
+    return blockRegistry().with(commonBlocks().lava, "level", std::to_string(level));
+}
+
 Block FluidSimulator::waterBlock(const Water& water) {
     const BlockRegistry& registry = blockRegistry();
     const int level = water.source ? 0 : water.falling ? 8 : std::clamp(8 - water.amount, 1, 7);
@@ -109,13 +124,13 @@ void FluidSimulator::neighboursChanged(const Level& level, const Pos& p) {
     constexpr int kSides[6][3] = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
     for (const auto& s : kSides) {
         const Pos n{p.x + s[0], p.y + s[1], p.z + s[2]};
-        if (waterAt(blockAt(level, n)).water) schedule(n, kWaterDelay);
+        if (fluidAt(blockAt(level, n)).water) schedule(n, tickDelay());
     }
 }
 
 void FluidSimulator::blockChanged(const Level& level, int x, int y, int z) {
     const Pos p{x, y, z};
-    if (waterAt(blockAt(level, p)).water) schedule(p, kWaterDelay);
+    if (fluidAt(blockAt(level, p)).water) schedule(p, tickDelay());
     neighboursChanged(level, p);
 }
 
@@ -136,8 +151,8 @@ void FluidSimulator::tick(const Level& level, const SetBlock& setBlock, int maxC
 bool FluidSimulator::canHoldFluid(Block block) const {
     const BlockRegistry& registry = blockRegistry();
     const StateInfo& info = registry.state(block);
-    if (info.has(kStateLava)) return false;
-    if (info.has(kStateWater)) return info.has(kStateLiquid) && info.fluidLevel != 0;  // flowing water is replaced by what flows in
+    if (info.has(kStateLava)) return lava_ && info.has(kStateLiquid) && info.fluidLevel != 0;  // flowing lava is replaced by what flows in; water does not flow into lava
+    if (info.has(kStateWater)) return !lava_ && info.has(kStateLiquid) && info.fluidLevel != 0;  // flowing water is replaced by what flows in
     if (info.has(kStateAir)) return true;
     const std::string& name = registry.type(block).name;
     if (endsWith(name, "_door") || name.find("sign") != std::string::npos || name == "ladder" || name == "sugar_cane" || name == "bubble_column" ||
@@ -152,14 +167,14 @@ bool FluidSimulator::canHoldFluid(Block block) const {
 bool FluidSimulator::canPassThroughWall(Block to) const { return !blockRegistry().state(to).has(kStateFullCollision); }
 
 bool FluidSimulator::canPassThrough(const Level&, const Pos&, Block nb) const {
-    const Water w = waterAt(nb);
+    const Water w = fluidAt(nb);
     return !(w.water && w.source) && canPassThroughWall(nb) && canHoldFluid(nb);
 }
 
 int FluidSimulator::sourceNeighbours(const Level& level, const Pos& p) const {
     int count = 0;
     for (const auto& d : kHorizontal) {
-        const Water w = waterAt(blockAt(level, {p.x + d[0], p.y, p.z + d[1]}));
+        const Water w = fluidAt(blockAt(level, {p.x + d[0], p.y, p.z + d[1]}));
         if (w.water && w.source) ++count;
     }
     return count;
@@ -170,21 +185,21 @@ FluidSimulator::Water FluidSimulator::newLiquid(const Level& level, const Pos& p
     int highest = 0, sources = 0;
     for (const auto& d : kHorizontal) {
         const Block nb = blockAt(level, {p.x + d[0], p.y, p.z + d[1]});
-        const Water w = waterAt(nb);
+        const Water w = fluidAt(nb);
         if (w.water && canPassThroughWall(nb)) {
             if (w.source) ++sources;
             highest = std::max(highest, w.amount);
         }
     }
-    if (sources >= 2) {  // two sources side by side make a third: the infinite pool (over something solid, or another source)
+    if (sources >= 2 && !lava_) {  // two sources side by side make a third: the infinite pool (over something solid, or another source)
         const Block below = blockAt(level, {p.x, p.y - 1, p.z});
         const StateInfo& bi = blockRegistry().state(below);
-        const Water bw = waterAt(below);
+        const Water bw = fluidAt(below);
         if (bi.has(kStateFullCollision) || bi.has(kStateOpaqueCube) || (bw.water && bw.source)) return {true, true, false, 8};
     }
     const Block above = blockAt(level, {p.x, p.y + 1, p.z});
-    if (waterAt(above).water && canPassThroughWall(above)) return {true, false, true, 8};  // water above: this is a waterfall
-    const int amount = highest - 1;
+    if (fluidAt(above).water && canPassThroughWall(above)) return {true, false, true, 8};  // water above: this is a waterfall
+    const int amount = highest - dropOff();
     if (amount <= 0) return {};
     return {true, false, false, amount};
 }
@@ -192,7 +207,7 @@ FluidSimulator::Water FluidSimulator::newLiquid(const Level& level, const Pos& p
 // A hole the water would pour into: the block below it is water already, or can hold water.
 bool FluidSimulator::isWaterHole(const Level&, const Pos&, Block belowBlock, const Pos&) const {
     if (!canPassThroughWall(belowBlock)) return false;
-    return waterAt(belowBlock).water ? true : canHoldFluid(belowBlock);
+    return fluidAt(belowBlock).water ? true : canHoldFluid(belowBlock);
 }
 
 // FlowingFluid.getSlopeDistance: how many blocks sideways (searching up to 4) until the water could fall.
@@ -205,7 +220,7 @@ int FluidSimulator::slopeDistance(const Level& level, const Pos& p, int distance
         if (!canPassThrough(level, np, nb)) continue;
         const Pos below{np.x, np.y - 1, np.z};
         if (isWaterHole(level, below, blockAt(level, below), np)) return distance;
-        if (distance < kSlopeFindDistance) best = std::min(best, slopeDistance(level, np, distance + 1, opposite(d), nb));
+        if (distance < slopeDistanceLimit()) best = std::min(best, slopeDistance(level, np, distance + 1, opposite(d), nb));
     }
     return best;
 }
@@ -232,16 +247,16 @@ std::array<std::pair<bool, FluidSimulator::Water>, 4> FluidSimulator::getSpread(
 }
 
 void FluidSimulator::spreadTo(const Level& level, const SetBlock& setBlock, const Pos& p, const Water& water, int& changes) {
-    const Block wanted = waterBlock(water);
+    const Block wanted = fluidBlock(water);
     if (blockAt(level, p) == wanted) return;  // already so: setting the same state changes nothing (and wakes nothing)
     if (!setBlock(p.x, p.y, p.z, wanted)) return;
     ++changes;
-    schedule(p, kWaterDelay);  // the new water looks at its own surroundings in turn
+    schedule(p, tickDelay());  // the new water looks at its own surroundings in turn
     neighboursChanged(level, p);
 }
 
 void FluidSimulator::spreadToSides(const Level& level, const SetBlock& setBlock, const Pos& p, const Water& water, Block below, int& changes) {
-    const int newAmount = water.falling ? 7 : water.amount - 1;  // WaterFluid.getDropOff is 1; falling water spreads at 7
+    const int newAmount = water.falling ? 7 : water.amount - dropOff();  // (WaterFluid.getDropOff is 1; falling water spreads at 7)
     if (newAmount <= 0) return;
     const auto spreads = getSpread(level, p, below);
     for (int d = 0; d < 4; ++d) {
@@ -254,7 +269,14 @@ void FluidSimulator::spreadToSides(const Level& level, const SetBlock& setBlock,
 void FluidSimulator::spread(const Level& level, const SetBlock& setBlock, const Pos& p, const Water& water, int& changes) {
     const Pos below{p.x, p.y - 1, p.z};
     const Block belowBlock = blockAt(level, below);
-    const Water belowWater = waterAt(belowBlock);
+    const Water belowWater = fluidAt(belowBlock);
+    if (lava_ && waterAt(belowBlock).water) {  // LavaFluid.spreadTo: lava that runs down onto water turns it to stone
+        if (setBlock(below.x, below.y, below.z, commonBlocks().stone)) {
+            ++changes;
+            if (fizz_) fizz_(below.x, below.y, below.z);
+        }
+        return;
+    }
     if (!(belowWater.water && belowWater.source) && canPassThroughWall(belowBlock) && canHoldFluid(belowBlock)) {
         const Water newBelow = newLiquid(level, below, belowBlock);
         if (!belowWater.water && newBelow.water) {  // (water is never replaced by water coming down on it)
@@ -269,7 +291,7 @@ void FluidSimulator::spread(const Level& level, const SetBlock& setBlock, const 
 // FlowingFluid.tick: a flowing block works out what it should be now and changes into it (or dries up); then it spreads.
 void FluidSimulator::update(const Level& level, const SetBlock& setBlock, const Pos& p, int& changes) {
     const Block block = blockAt(level, p);
-    Water water = waterAt(block);
+    Water water = fluidAt(block);
     if (!water.water) return;
     const StateInfo& info = blockRegistry().state(block);
     if (!info.has(kStateLiquid)) return;  // a waterlogged block or kelp: a source that has nothing to do
@@ -283,9 +305,9 @@ void FluidSimulator::update(const Level& level, const SetBlock& setBlock, const 
             return;
         }
         if (!(next == water)) {
-            if (setBlock(p.x, p.y, p.z, waterBlock(next))) {
+            if (setBlock(p.x, p.y, p.z, fluidBlock(next))) {
                 ++changes;
-                schedule(p, kWaterDelay);
+                schedule(p, tickDelay());
                 neighboursChanged(level, p);
             }
             water = next;

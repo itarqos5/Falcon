@@ -365,6 +365,14 @@ void GameSession::interact(double dt, bool active) {
             return;
         }
     }
+    // BucketItem.use: an empty bucket scoops up a source of water or lava (or milks a cow), a full one puts its source down: aimed at the air or at a block, in range.
+    if (use && placeCooldown_ <= 0.0 && !remote_ && !usingItem_ && info_.gameType < 2 && !inventory_.selectedItem().isEmpty()) {
+        const std::string& bucketName = inventory_.selectedItem().type().name;
+        if ((bucketName == "bucket" || bucketName == "water_bucket" || bucketName == "lava_bucket") && useBucket(eye, look)) {
+            placeCooldown_ = kRepeatDelay;
+            return;
+        }
+    }
     if (!target_) return;
 
     if (attack && creative() && breakCooldown_ <= 0.0) {  // creative: every block goes at once, five ticks apart
