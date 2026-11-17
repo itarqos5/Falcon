@@ -171,6 +171,7 @@ std::unique_ptr<MobRenderer> MobRenderer::create(const ResourceManager& resource
     out->uLight_ = out->shader_.uniform("uLight");
     out->uSkin_ = out->shader_.uniform("uSkin");
     out->uTint_ = out->shader_.uniform("uTint");
+    out->uHurt_ = out->shader_.uniform("uHurt");
     gl::GenVertexArrays(1, &out->vao_);
     gl::GenBuffers(1, &out->vbo_);
     gl::BindVertexArray(out->vao_);
@@ -351,14 +352,15 @@ void MobRenderer::render(const Matrix4f& viewProj, const std::array<double, 3>& 
         gl::BufferData(gl::ARRAY_BUFFER, static_cast<gl::GLsizeiptr>(list.size() * sizeof(Vertex)), list.data(), gl::STREAM_DRAW);
         gl::DrawArrays(gl::TRIANGLES, 0, static_cast<gl::GLsizei>(list.size()));
     };
-    const float redness = std::clamp(pose.hurt, 0.0f, 1.0f) * 0.55f;  // (the game lays red over a mob that was hit)
-    draw(vertices, *loaded.texture, 1.0f, 1.0f - redness, 1.0f - redness);
+    // The game's red over a mob that was hit (OverlayTexture: 30% red, as long as its hurt time runs, and while it dies): the shader mixes it into what is lit.
+    gl::Uniform1f(uHurt_, pose.hurt > 0.0f ? 1.0f : 0.0f);
+    draw(vertices, *loaded.texture, 1.0f, 1.0f, 1.0f);
     if (loaded.wool && loaded.woolTexture) {
         EntityPart fleece = *loaded.wool;
         copyPose(fleece, model);
         std::vector<Vertex> list;
         collect(fleece, Xf{}, entity, all, list);
-        draw(list, *loaded.woolTexture, 0.976f, 1.0f - redness, 0.996f - redness);  // (white wool: DyeColor.WHITE's 0xF9FFFE)
+        draw(list, *loaded.woolTexture, 0.976f, 1.0f, 0.996f);  // (white wool: DyeColor.WHITE's 0xF9FFFE)
     }
     gl::BindVertexArray(0);
 }
@@ -447,6 +449,7 @@ void MobRenderer::renderItemFrame(const Matrix4f& viewProj, const std::array<dou
     gl::Uniform3f(uLight_, light[0], light[1], light[2]);
     gl::Uniform1i(uSkin_, 0);
     gl::Uniform3f(uTint_, 1.0f, 1.0f, 1.0f);
+    gl::Uniform1f(uHurt_, 0.0f);
     gl::BindVertexArray(vao_);
     gl::BindBuffer(gl::ARRAY_BUFFER, vbo_);
     const auto draw = [&](const std::vector<Vertex>& list, const Texture2D& texture) {
@@ -502,6 +505,7 @@ void MobRenderer::renderPainting(const Matrix4f& viewProj, const std::array<doub
     gl::Uniform3f(uLight_, light[0], light[1], light[2]);
     gl::Uniform1i(uSkin_, 0);
     gl::Uniform3f(uTint_, 1.0f, 1.0f, 1.0f);
+    gl::Uniform1f(uHurt_, 0.0f);
     gl::BindVertexArray(vao_);
     gl::BindBuffer(gl::ARRAY_BUFFER, vbo_);
     const auto draw = [&](const std::vector<Vertex>& list, const Texture2D& texture) {

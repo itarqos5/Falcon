@@ -96,7 +96,7 @@ private:
     FrameModel plainFrame_, glowFrame_;
     std::map<std::string, std::unique_ptr<Texture2D>> paintingTextures_;  // by file name; null for one the game does not have
     ShaderProgram shader_;
-    gl::GLint uProj_ = -1, uLight_ = -1, uSkin_ = -1, uTint_ = -1;
+    gl::GLint uProj_ = -1, uLight_ = -1, uSkin_ = -1, uTint_ = -1, uHurt_ = -1;
     gl::GLuint vao_ = 0, vbo_ = 0;
 };
 
