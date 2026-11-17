@@ -261,6 +261,7 @@ void GameSession::interact(double dt, bool active) {
     if (!active) {  // a screen open lets go of a toggled key
         attackLatched_ = useLatched_ = attackRawO_ = useRawO_ = false;
         useHeld_ = false;
+        if (usingSpyglass_) stopUsingSpyglass();
         return;
     }
     // Spectators do nothing; adventure players cannot break or place blocks (on a server they can still hit).
@@ -340,11 +341,21 @@ void GameSession::interact(double dt, bool active) {
             remote_->sendUseItem(player_.yaw, player_.pitch);
             usingRemote_ = true;
             placeCooldown_ = kRepeatDelay;
-            if (!usingItem_ && held.type().consumable && canConsume(held)) startUsingItem();  // (the bites are heard and the hand brings it up while the server counts)
+            if (heldName == "spyglass") startUsingSpyglass();
+            else if (!usingItem_ && held.type().consumable && canConsume(held)) startUsingItem();  // (the bites are heard and the hand brings it up while the server counts)
         }
         if (!use && usingRemote_) {
             remote_->sendAction(5);  // RELEASE_USE_ITEM
             usingRemote_ = false;
+            if (usingSpyglass_) stopUsingSpyglass();
+        }
+    }
+    if (usingSpyglass_) {
+        const ItemStack& held = inventory_.selectedItem();
+        if (!use || dead_ || info_.gameType == 3 || held.isEmpty() || held.type().name != "spyglass") {
+            stopUsingSpyglass();
+        } else {
+            return;
         }
     }
     if (usingItem_) return;  // (LocalPlayer.isHandsBusy: nothing is dug, hit or put down while something is eaten)
@@ -355,6 +366,20 @@ void GameSession::interact(double dt, bool active) {
     }
     if (attack && !creative()) digSurvival(dt, freshPress);
     if (use && placeCooldown_ <= 0.0 && !remote_ && !inventory_.selectedItem().isEmpty()) {  // (on a server the click goes to it)
+        if (!usingSpyglass_ && inventory_.selectedItem().type().name == "spyglass") {
+            if (target_ && !player_.sneaking && redstone_ && redstone_->use(target_->x, target_->y, target_->z)) {
+                swingArm();
+                placeCooldown_ = kRepeatDelay;
+                return;
+            }
+            if (target_ && !player_.sneaking && useBlockContainer(target_->x, target_->y, target_->z)) {
+                swingArm();
+                placeCooldown_ = kRepeatDelay;
+                return;
+            }
+            startUsingSpyglass();
+            return;
+        }
         // Food, a potion, milk ...: using it starts (a block item, a carrot say, is put down first when there is a place for it).
         if (!usingItem_ && inventory_.selectedItem().type().consumable && (!target_ || inventory_.selectedItem().type().blockIndex < 0) && canConsume(inventory_.selectedItem())) {
             startUsingItem();

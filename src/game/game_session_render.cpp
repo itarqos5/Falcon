@@ -177,8 +177,18 @@ void GameSession::renderWorld(int framebufferWidth, int framebufferHeight) {
             int sky = 15, block = 0;
             renderer_.lightAtWithCarried(static_cast<int>(std::floor(pose.position[0])), static_cast<int>(std::floor(pose.position[1] + 1.0)), static_cast<int>(std::floor(pose.position[2])), sky, block);
             pose.light = entityLightColor(sky, block, static_cast<float>(services_.options.gamma));
-            pose.rightArmPose = inventory_.selectedItem().isEmpty() ? ArmPose::Empty : ArmPose::Item;
-            pose.leftArmPose = inventory_.offhand().isEmpty() ? ArmPose::Empty : ArmPose::Item;
+            if (usingSpyglass_) {
+                if (services_.options.mainHandRight) {
+                    pose.rightArmPose = ArmPose::Spyglass;
+                    pose.leftArmPose = inventory_.offhand().isEmpty() ? ArmPose::Empty : ArmPose::Item;
+                } else {
+                    pose.leftArmPose = ArmPose::Spyglass;
+                    pose.rightArmPose = inventory_.selectedItem().isEmpty() ? ArmPose::Empty : ArmPose::Item;
+                }
+            } else {
+                pose.rightArmPose = inventory_.selectedItem().isEmpty() ? ArmPose::Empty : ArmPose::Item;
+                pose.leftArmPose = inventory_.offhand().isEmpty() ? ArmPose::Empty : ArmPose::Item;
+            }
             BodyHands hands;
             body_->render(renderer_.viewProjection(), camPos, pose, &hands);
             if (hands.valid) {
@@ -187,7 +197,7 @@ void GameSession::renderWorld(int framebufferWidth, int framebufferHeight) {
             }
         }
     }
-    if (ready_ && perspective_ == 0 && !hudHidden_ && info_.gameType != 3) {  // the hand (F1 hides it, and spectators have none)
+    if (ready_ && perspective_ == 0 && !hudHidden_ && info_.gameType != 3 && !usingSpyglass_) {  // the hand (F1 hides it, and spectators have none; spyglass view hides hand)
         HandFrame frame;
         frame.width = framebufferWidth;
         frame.height = framebufferHeight;
@@ -383,10 +393,11 @@ void GameSession::renderHud(GuiGraphics& g, int guiWidth, int guiHeight, bool ch
 
     drawFireOverlay(g, guiWidth, guiHeight);
     drawPortalOverlay(g, guiWidth, guiHeight);
+    drawSpyglassOverlay(g, guiWidth, guiHeight);
     drawBossBar(g, guiWidth, guiHeight);
 
     // F1 hides the crosshair and the hotbar (the debug screen stays, which is what people take screenshots with).
-    if (!hudHidden_) {
+    if (!hudHidden_ && !usingSpyglass_) {
         // Crosshair: 15x15 in the middle (only in first person).
         if (perspective_ == 0) g.blitSprite("hud/crosshair", (guiWidth - 15) / 2, (guiHeight - 15) / 2, 15, 15);
         if (info_.gameType != 3) drawHotbar(g, guiWidth, guiHeight);  // (a spectator has no hotbar: no inventory)
@@ -399,6 +410,57 @@ void GameSession::renderHud(GuiGraphics& g, int guiWidth, int guiHeight, bool ch
 
     // The chat: faded on the HUD, full and scrollable when its screen is open (F1 hides it unless it is open).
     if (!hudHidden_ || chatFocused) chat_.render(g, guiWidth, guiHeight, services_.options, chatFocused);
+}
+
+void GameSession::drawSpyglassOverlay(GuiGraphics& g, int guiWidth, int guiHeight) {
+    if (!usingSpyglass_ || perspective_ != 0 || info_.gameType == 3 || guiHeight <= 0 || guiWidth <= 0) return;
+
+    const int scopeSize = std::min(guiWidth, guiHeight);
+    const int x0 = (guiWidth - scopeSize) / 2;
+    const int y0 = (guiHeight - scopeSize) / 2;
+    const int x1 = x0 + scopeSize;
+    const int y1 = y0 + scopeSize;
+
+    // Solid black outer borders covering pillarboxes / letterboxes
+    if (x0 > 0) {
+        g.fill(0, 0, x0, guiHeight, 0xFF000000u);
+        g.fill(x1, 0, guiWidth, guiHeight, 0xFF000000u);
+    }
+    if (y0 > 0) {
+        g.fill(0, 0, guiWidth, y0, 0xFF000000u);
+        g.fill(0, y1, guiWidth, guiHeight, 0xFF000000u);
+    }
+
+    static bool checked = false;
+    static bool hasTexture = false;
+    if (!checked) {
+        checked = true;
+        hasTexture = resources_.readBytes(TextureManager::locationOf("misc/spyglass_scope.png")).has_value();
+    }
+
+    if (hasTexture) {
+        const Texture2D& scope = g.textures().get("misc/spyglass_scope.png");
+        g.blit(scope, x0, y0, 0.0f, 0.0f, scopeSize, scopeSize, scope.width(), scope.height(), scope.width(), scope.height(), 0xFFFFFFFFu);
+    } else {
+        // Fallback: draw circular aperture vignette
+        const double cx = static_cast<double>(guiWidth) * 0.5;
+        const double cy = static_cast<double>(guiHeight) * 0.5;
+        const double radius = static_cast<double>(scopeSize) * 0.5;
+        const double r2 = radius * radius;
+        for (int y = y0; y < y1; ++y) {
+            const double dy = static_cast<double>(y) + 0.5 - cy;
+            const double dy2 = dy * dy;
+            if (dy2 >= r2) {
+                g.fill(x0, y, x1, y + 1, 0xFF000000u);
+            } else {
+                const double dx = std::sqrt(r2 - dy2);
+                const int left = static_cast<int>(std::round(cx - dx));
+                const int right = static_cast<int>(std::round(cx + dx));
+                if (left > x0) g.fill(x0, y, left, y + 1, 0xFF000000u);
+                if (right < x1) g.fill(right, y, x1, y + 1, 0xFF000000u);
+            }
+        }
+    }
 }
 
 // ScreenEffectRenderer.renderFire: while the player burns, two quads of the fire picture (block/fire_1, its frames played one a tick) stand half a block in front

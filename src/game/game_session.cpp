@@ -123,6 +123,7 @@ std::shared_ptr<const worldgen::OverworldGenerator> makeOverworld(const Resource
 
 GameSession::GameSession(ScreenServices& services, const ResourceManager& resources, Window& window, const LevelInfo& info)
     : services_(services),
+      resources_(resources),
       window_(window),
       info_(info),
       registry_(loadRegistry(services, resources)),
@@ -477,7 +478,8 @@ void GameSession::applyLook(bool active) {
     // mouse movement, and Player::turn applies the 0.15 degrees: 0.5 ("Sensitivity: 100%") is 0.15 degrees per pixel.
     const double f = services_.options.mouseSensitivity * 0.6000000238418579 + 0.20000000298023224;
     const double f3x8 = f * f * f * 8.0;
-    player_.turn(dx * f3x8 * (services_.options.invertXMouse ? -1.0 : 1.0), dy * f3x8 * (services_.options.invertYMouse ? -1.0 : 1.0));
+    const double lookScale = usingSpyglass_ ? static_cast<double>(fovModifier_) : 1.0;
+    player_.turn(dx * f3x8 * lookScale * (services_.options.invertXMouse ? -1.0 : 1.0), dy * f3x8 * lookScale * (services_.options.invertYMouse ? -1.0 : 1.0));
     if (boat_ && riding()) clampRiderYaw(boat_->yaw);  // (Entity.turn: the vehicle is told, and a boat holds the rider's head within 105 degrees)
 }
 
@@ -819,6 +821,19 @@ void GameSession::chatInput(const std::string& text) {
     } else {
         addChatMessage("<" + services_.playerName + "> " + text);
     }
+}
+
+void GameSession::startUsingSpyglass() {
+    if (usingSpyglass_) return;
+    usingSpyglass_ = true;
+    playWorldSound("item.spyglass.use", SoundSource::Players, 1.0f, 1.0f);
+    addStat("used/spyglass");
+}
+
+void GameSession::stopUsingSpyglass() {
+    if (!usingSpyglass_) return;
+    usingSpyglass_ = false;
+    playWorldSound("item.spyglass.stop_using", SoundSource::Players, 1.0f, 1.0f);
 }
 
 std::vector<std::string> GameSession::benchmarkReport() const {

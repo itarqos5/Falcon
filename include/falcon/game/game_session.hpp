@@ -368,6 +368,7 @@ private:
     void startDragonFight();
     void makeExitPortal(bool active);
     void drawPortalOverlay(GuiGraphics& g, int guiWidth, int guiHeight);
+    void drawSpyglassOverlay(GuiGraphics& g, int guiWidth, int guiHeight);
     void drawBossBar(GuiGraphics& g, int guiWidth, int guiHeight);
     void tickPortal();
     void tickDragonFight();
@@ -414,6 +415,7 @@ private:
     };
 
     ScreenServices& services_;
+    const ResourceManager& resources_;
     Window& window_;
     LevelInfo info_;
     std::shared_ptr<const BlockRegistry> registry_;
@@ -477,6 +479,10 @@ private:
     void wearTestItem();                       // FALCON_TEST_WEAR=item: puts it on once the world is ready (a test aid, for looking at armor and elytra)
     // ---- eating and drinking (game_session_use.cpp): LivingEntity.startUsingItem / updatingUsingItem / completeUsingItem and Consumable ----
     bool usingItem_ = false;
+    bool usingSpyglass_ = false;
+    [[nodiscard]] bool usingSpyglass() const { return usingSpyglass_; }
+    void startUsingSpyglass();
+    void stopUsingSpyglass();
     int useTicksLeft_ = 0;       // ticks of the use that are left
     int useDuration_ = 0;        // the whole use
     int usedSlot_ = -1;          // the hotbar slot of the item that is used
