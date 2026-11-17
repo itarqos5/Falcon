@@ -5,9 +5,13 @@ own log (`launcher.log`) in the same folder; nothing of the launcher is in the c
 
 | file | what it is |
 | --- | --- |
-| `client.log` | this run, a line to a line, flushed as it is written (so it is all there after a crash) |
-| `client-<date>.log` | the runs before it, the last 15; one that did not end cleanly (a crash, or closed from outside) is `client-<date>-unclean.log` |
-| `crash-<date>.log` | a crash or a fatal error: what happened and where, the stack, what the game was doing, the last 80 lines of the log; the last 15 |
+| `latest.log` | this run, a line to a line, flushed as it is written (so it is all there after a crash) |
+| `<date>_<time>.log` | the runs before it, named by the time the run was started (`2026-11-17_22-40-57.log`), the last 15; when the run ends, `latest.log` takes this name |
+| `<date>_<time>-crash.log` | the log of a run that ended in a crash or a fatal error |
+| `<date>_<time>-unclean.log` | the log of a run that stopped without a word (it was killed, or the PC lost power): found as `latest.log` by the next run, which renames it |
+| `crash-<date>_<time>.log` | a crash or a fatal error: what happened and where, the stack, what the game was doing, the last 80 lines of the log; the last 15 |
+
+The launcher's Logs tab shows the client's log: `latest.log` while the game runs, and the newest dated log when it does not.
 
 A line reads `2026-11-17 22:40:09.945 INFO  [render] 40 fps (25.2 ms); chunks 1474, sections 645 of 7569 drawn, ...`: the time, the level (DEBUG, INFO, WARN, ERROR), the category and the
 message. The console gets the same lines as it always did (`[falcon] ...`): the launcher and the test scripts read those.
@@ -43,4 +47,4 @@ shows the names the same way).
 * `FALCON_TEST_CRASH=null|abort|throw|thread` makes the client fail four seconds after it starts (a null pointer, `abort()`, an exception in `run`, an exception on a worker thread), to
   see a report.
 * The code: `include/falcon/util/log.hpp` (`log::info("render", "...")` and the like, `log::line` for the old console lines, `log::addContext` for what a crash report says the game was
-  doing); `tests/test_log.cpp` covers the file, the rotation and marking of an unclean run, the levels and categories, and the report.
+  doing); `tests/test_log.cpp` covers the file, the renaming at the start and at the end, the marking of an unclean run, the levels and categories, and the report.

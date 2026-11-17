@@ -55,6 +55,7 @@ struct State {
     std::deque<std::string> recent;
     std::chrono::steady_clock::time_point started = std::chrono::steady_clock::now();
     std::string version, commandLine;
+    std::string launchStamp;  // when this run started, as it is in a file name: 2026-11-17_22-40-57
     std::map<std::string, std::function<std::string()>> context;
     std::function<void(const std::filesystem::path&)> notify;
     std::atomic<bool> crashing{false};
@@ -200,6 +201,55 @@ bool endsCleanly(const std::filesystem::path& file) {
     return tail.find("end of log") != std::string::npos;
 }
 
+// "2026-11-17_22-40-57" for the time a log was started: the one its first line says ("2026-11-17 22:40:57.051 INFO ..."), else the time it was last written.
+std::string stampOfLog(const std::filesystem::path& file) {
+    {
+        std::ifstream in(file, std::ios::binary);
+        std::string first(19, '\0');
+        if (in.read(first.data(), 19) && first[4] == '-' && first[7] == '-' && first[10] == ' ' && first[13] == ':' && first[16] == ':') {
+            first[10] = '_';
+            first[13] = first[16] = '-';
+            return first;
+        }
+    }
+    std::error_code ec;
+    const auto modified = std::filesystem::last_write_time(file, ec);
+    if (ec) return nowText("%Y-%m-%d_%H-%M-%S", false);
+    const std::time_t t = std::chrono::system_clock::to_time_t(std::chrono::clock_cast<std::chrono::system_clock>(modified));
+    std::tm tm{};
+#ifdef _WIN32
+    localtime_s(&tm, &t);
+#else
+    localtime_r(&t, &tm);
+#endif
+    char buffer[32];
+    std::strftime(buffer, sizeof(buffer), "%Y-%m-%d_%H-%M-%S", &tm);
+    return buffer;
+}
+
+// A file name that is free: <dir>/<stamp><suffix>.log, or <stamp><suffix>-2.log ...
+std::filesystem::path freeName(const std::filesystem::path& dir, const std::string& stamp, const std::string& suffix) {
+    std::error_code ec;
+    std::filesystem::path target = dir / (stamp + suffix + ".log");
+    for (int i = 2; std::filesystem::exists(target, ec) && i < 100; ++i) target = dir / (stamp + suffix + "-" + std::to_string(i) + ".log");
+    return target;
+}
+
+// A finished log is named by the time it was started: 2026-11-17_22-40-57.log (the dated ones only; launcher.log and the crash reports are other files).
+bool isDatedLog(const std::string& name) {
+    return name.size() >= 23 && name.compare(name.size() - 4, 4, ".log") == 0 && name[4] == '-' && name[7] == '-' && name[10] == '_' && name[13] == '-' && name[16] == '-' && std::isdigit(static_cast<unsigned char>(name[0])) != 0;
+}
+
+void pruneDated(const std::filesystem::path& dir, int keep) {
+    std::vector<std::filesystem::path> found;
+    std::error_code ec;
+    for (const auto& entry : std::filesystem::directory_iterator(dir, ec)) {
+        if (isDatedLog(entry.path().filename().string())) found.push_back(entry.path());
+    }
+    std::sort(found.begin(), found.end());
+    for (std::size_t i = 0; i + static_cast<std::size_t>(std::max(keep, 1)) < found.size(); ++i) std::filesystem::remove(found[i], ec);
+}
+
 // The newest `keep` files named <prefix>*<suffix> stay.
 void prune(const std::filesystem::path& dir, const std::string& prefix, const std::string& suffix, int keep) {
     std::vector<std::filesystem::path> found;
@@ -290,7 +340,7 @@ std::filesystem::path writeReport(const std::string& what, const std::string& wh
         for (std::size_t i = from; i < lines.size(); ++i) out << "  " << lines[i] << "\n";
         if (lines.empty()) out << "  (none)\n";
     }
-    const std::filesystem::path path = reportDirectory() / ("crash-" + nowText("%Y%m%d-%H%M%S", false) + ".log");
+    const std::filesystem::path path = reportDirectory() / ("crash-" + nowText("%Y-%m-%d_%H-%M-%S", false) + ".log");
     std::FILE* f = openForWriting(path);
     if (f == nullptr) return {};
     const std::string text = out.str();
@@ -299,16 +349,32 @@ std::filesystem::path writeReport(const std::string& what, const std::string& wh
     return path;
 }
 
+// The log of this run is closed and takes the time the run was started as its name (2026-11-17_22-40-57.log; a crash adds -crash). False when the lock was held (a crash in the middle of
+// a line) or there was nothing to rename.
+bool archive(const std::string& suffix) {
+    State& s = state();
+    if (!s.mutex.try_lock()) return false;
+    std::filesystem::path from = s.current, dir = s.dir;
+    if (s.file != nullptr) {
+        std::fflush(s.file);
+        std::fclose(s.file);
+        s.file = nullptr;
+    }
+    s.mutex.unlock();
+    if (from.empty() || dir.empty()) return false;
+    std::error_code ec;
+    if (!std::filesystem::exists(from, ec)) return false;
+    std::filesystem::rename(from, freeName(dir, s.launchStamp, suffix), ec);
+    return !ec;
+}
+
 // Everything a crash does after the stack is known: the report, a line in the log, a word to the console, and a window if one was asked for.
 void finishCrash(const std::string& what, const std::string& where, const std::vector<std::string>& stack, const std::string& extra) {
     const std::filesystem::path report = writeReport(what, where, stack, extra);
     emit(Level::Error, "crash", "CRASH: " + what + (where.empty() ? "" : " at " + where) + (report.empty() ? "; the report could not be written" : "; report: " + report.string()),
          "crash: " + what + (where.empty() ? "" : " at " + where) + (report.empty() ? "" : " (report: " + report.string() + ")"));
     State& s = state();
-    {
-        std::lock_guard<std::mutex> lock(s.mutex);
-        if (s.file != nullptr) std::fflush(s.file);
-    }
+    archive("-crash");  // (the log of the run that crashed is kept under its start time, marked)
     if (s.notify && !report.empty()) {
         try {
             s.notify(report);
@@ -568,6 +634,7 @@ bool init(const Settings& settings) {
     s.keep = settings.keep;
     s.version = settings.version;
     s.commandLine = settings.commandLine;
+    s.launchStamp = nowText("%Y-%m-%d_%H-%M-%S", false);
     if (const char* level = std::getenv("FALCON_LOG_LEVEL"); level != nullptr && lower(level) == "debug") s.fileLevel = Level::Debug;
 
     std::filesystem::path dir;
@@ -583,31 +650,19 @@ bool init(const Settings& settings) {
         std::error_code ec;
         std::filesystem::create_directories(dir, ec);
         if (!ec) {
-            const std::filesystem::path current = dir / "client.log";
-            if (std::filesystem::exists(current, ec)) {
-                const bool clean = endsCleanly(current);
-                std::string stamp = nowText("%Y%m%d-%H%M%S", false);
-                const auto modified = std::filesystem::last_write_time(current, ec);
-                if (!ec) {
-                    previousTime = modified;
-                    const auto sysTime = std::chrono::clock_cast<std::chrono::system_clock>(modified);
-                    const std::time_t t = std::chrono::system_clock::to_time_t(sysTime);
-                    std::tm tm{};
-#ifdef _WIN32
-                    localtime_s(&tm, &t);
-#else
-                    localtime_r(&t, &tm);
-#endif
-                    char buffer[32];
-                    std::strftime(buffer, sizeof(buffer), "%Y%m%d-%H%M%S", &tm);
-                    stamp = buffer;
-                }
-                std::filesystem::path target = dir / ("client-" + stamp + (clean ? "" : "-unclean") + ".log");
-                for (int i = 2; std::filesystem::exists(target, ec) && i < 100; ++i) target = dir / ("client-" + stamp + "-" + std::to_string(i) + (clean ? "" : "-unclean") + ".log");
-                std::filesystem::rename(current, target, ec);
+            // This run's log is latest.log; when the run ends it takes the time it was started as its name. A latest.log that is still there is the run before's that did not end (it
+            // was killed, or the PC lost power): it is kept under its own start time and marked. (client.log is what an earlier build called it.)
+            const std::filesystem::path current = dir / "latest.log";
+            for (const char* name : {"latest.log", "client.log"}) {
+                const std::filesystem::path old = dir / name;
+                if (!std::filesystem::exists(old, ec)) continue;
+                const bool clean = endsCleanly(old);
+                previousTime = std::filesystem::last_write_time(old, ec);
+                const std::filesystem::path target = freeName(dir, stampOfLog(old), clean ? "" : "-unclean");
+                std::filesystem::rename(old, target, ec);
                 if (!clean) previous = target.filename().string();
             }
-            prune(dir, "client-", ".log", settings.keep);
+            pruneDated(dir, settings.keep);
             prune(dir, "crash-", ".log", settings.keep);
             if (std::FILE* f = openForWriting(current)) {
                 std::lock_guard<std::mutex> lock(s.mutex);
@@ -649,11 +704,7 @@ bool init(const Settings& settings) {
 void shutdown(int exitCode) {
     State& s = state();
     writef(Level::Info, "log", "end of log (exit code %d, ran %.1f s)", exitCode, uptimeSeconds());
-    std::lock_guard<std::mutex> lock(s.mutex);
-    if (s.file != nullptr) {
-        std::fclose(s.file);
-        s.file = nullptr;
-    }
+    archive("");
 }
 
 std::filesystem::path directory() {

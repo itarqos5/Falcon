@@ -1,5 +1,5 @@
-// The client's log (util/log.hpp): the file it writes, the levels and categories of the old console lines, the rotation of the run before (and its being marked when it did not end
-// cleanly), the crash report, and the end-of-log line.
+// The client's log (util/log.hpp): latest.log while it runs, the levels and categories of the old console lines, the run before kept under its start time (and marked when it did not end
+// cleanly), the crash report, and the end of the log: latest.log takes the time the run was started as its name.
 #include "falcon/util/log.hpp"
 
 #include <cstdio>
@@ -41,10 +41,10 @@ int main() {
 #else
     setenv("FALCON_LOG_DIR", dir.c_str(), 1);
 #endif
-    // The run before this one: a log that stopped without its last line (a crash), and the crash report it left.
+    // The run before this one: a latest.log that stopped without its last line (it was killed), and a crash report from about then.
     {
-        std::ofstream((dir / "client.log").string(), std::ios::binary) <<"2026-01-01 10:00:00.000 INFO  [client] it was running\n";
-        std::ofstream((dir / "crash-20260101-100001.log").string(), std::ios::binary) << "Falcon crash report\n";
+        std::ofstream((dir / "latest.log").string(), std::ios::binary) << "2026-01-01 10:00:00.000 INFO  [client] it was running\n";
+        std::ofstream((dir / "crash-2026-01-01_10-00-01.log").string(), std::ios::binary) << "Falcon crash report\n";
     }
 
     log::Settings settings;
@@ -52,15 +52,10 @@ int main() {
     settings.echo = false;
     CHECK(log::init(settings));
     CHECK(log::directory() == dir);
-    CHECK(log::currentFile() == dir / "client.log");
+    CHECK(log::currentFile() == dir / "latest.log");
 
-    // The run before is kept, marked, and the new log says so (and where its crash report is).
-    bool markedUnclean = false;
-    for (const auto& entry : std::filesystem::directory_iterator(dir)) {
-        const std::string name = entry.path().filename().string();
-        if (name.rfind("client-", 0) == 0 && name.find("-unclean.log") != std::string::npos) markedUnclean = true;
-    }
-    CHECK(markedUnclean);
+    // The run before is kept under the time it started (its first line says: 10:00:00), marked, and the new log says so (and where its crash report is).
+    CHECK(std::filesystem::exists(dir / "2026-01-01_10-00-00-unclean.log"));
 
     // The old console lines: a level and a category from what they say.
     log::line("audio: muted\n");
@@ -79,7 +74,7 @@ int main() {
     CHECK(has(live, "INFO  [render] 60 fps, 12 chunks"));
     CHECK(!has(live, "a debug line"));
     CHECK(has(live, "the run before this one did not end cleanly"));
-    CHECK(has(live, "crash-20260101-100001.log"));
+    CHECK(has(live, "crash-2026-01-01_10-00-01.log"));
     CHECK(!log::recentLines(3).empty());
 
     // A crash report: what, the stack, what the game was doing, the last lines.
@@ -93,7 +88,14 @@ int main() {
     CHECK(has(text, "[audio] muted"));
 
     log::shutdown(0);
-    const std::string finished = slurp(dir / "client.log");
+    // The run is over: latest.log is gone and its text is in a file named by the time the run was started (2026-11-17_22-40-57.log).
+    CHECK(!std::filesystem::exists(dir / "latest.log"));
+    std::string finished;
+    for (const auto& entry : std::filesystem::directory_iterator(dir)) {
+        const std::string name = entry.path().filename().string();
+        const bool dated = name.size() == 23 && name[4] == '-' && name[7] == '-' && name[10] == '_' && name.find("unclean") == std::string::npos;
+        if (dated && name.rfind("crash-", 0) != 0) finished = slurp(entry.path());
+    }
     CHECK(has(finished, "end of log (exit code 0"));
     CHECK(has(finished, "FATAL: fatal error: std::runtime_error"));
 
