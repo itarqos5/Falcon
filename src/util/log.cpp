@@ -215,7 +215,9 @@ std::string stampOfLog(const std::filesystem::path& file) {
     std::error_code ec;
     const auto modified = std::filesystem::last_write_time(file, ec);
     if (ec) return nowText("%Y-%m-%d_%H-%M-%S", false);
-    const std::time_t t = std::chrono::system_clock::to_time_t(std::chrono::clock_cast<std::chrono::system_clock>(modified));
+    // (std::chrono::clock_cast is C++20 but not in every standard library yet: the file clock's distance from now, added to the system clock's now, is the same.)
+    const auto sinceModified = std::filesystem::file_time_type::clock::now() - modified;
+    const std::time_t t = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now() - std::chrono::duration_cast<std::chrono::system_clock::duration>(sinceModified));
     std::tm tm{};
 #ifdef _WIN32
     localtime_s(&tm, &t);
@@ -551,7 +553,8 @@ void signalHandler(int signal) {
             if (open != std::string::npos && plus != std::string::npos && plus > open + 1) {
                 int status = 0;
                 const std::string mangled = line.substr(open + 1, plus - open - 1);
-                if (char* demangled = abi::__cxa_demangle(mangled.c_str(), nullptr, nullptr, &status); demangled != nullptr && status == 0) line = line.substr(0, open + 1) + demangled + line.substr(plus);
+                char* demangled = abi::__cxa_demangle(mangled.c_str(), nullptr, nullptr, &status);
+                if (demangled != nullptr && status == 0) line = line.substr(0, open + 1) + demangled + line.substr(plus);
                 std::free(demangled);
             }
             stack.push_back(line);
@@ -702,7 +705,6 @@ bool init(const Settings& settings) {
 }
 
 void shutdown(int exitCode) {
-    State& s = state();
     writef(Level::Info, "log", "end of log (exit code %d, ran %.1f s)", exitCode, uptimeSeconds());
     archive("");
 }
