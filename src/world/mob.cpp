@@ -72,7 +72,9 @@ bool lineClear(const Level& level, double x0, double y0, double z0, double x1, d
 void moveBody(const Level& level, Mob& m, double dx, double dy, double dz, bool step) {
     const Aabb box = m.box();
     std::array<double, 3> actual = collideAabb(level, box, dx, dy, dz);
-    const bool hitX = std::abs(dx - actual[0]) > 1.0e-9, hitZ = std::abs(dz - actual[2]) > 1.0e-9;
+    // (Entity.move: a difference under 1.0E-5 is no collision, Mth.equal. A leftover sideways speed of a billionth, which the collision routine rounds away on the ground, was one before,
+    // and a mob walking in a straight line hopped over nothing every few steps.)
+    const bool hitX = std::abs(dx - actual[0]) > 1.0e-5, hitZ = std::abs(dz - actual[2]) > 1.0e-5;
     const bool groundedAfter = m.onGround || (dy < 0.0 && std::abs(dy - actual[1]) > 1.0e-9);
     if (step && groundedAfter && (hitX || hitZ)) {
         const double up = collideAabb(level, box, 0.0, 0.6, 0.0)[1];
@@ -198,6 +200,18 @@ int Mobs::pick(const std::array<double, 3>& eye, const std::array<double, 3>& lo
 // ---------------------------------------------------------------------------------------------------------------
 // Hurting and dying
 
+// LivingEntity.knockback: half of what it moved at is kept, and it is pushed away from (towardX, towardZ), the direction of what pushes it; up too, when it stands on the ground.
+void Mobs::push(int id, float strength, double towardX, double towardZ) {
+    Mob* m = find(id);
+    if (m == nullptr || strength <= 0.0f) return;
+    const double length = std::sqrt(towardX * towardX + towardZ * towardZ);
+    if (length <= 1.0e-4) return;
+    const double dx = towardX / length, dz = towardZ / length;
+    m->vx = m->vx / 2.0 - dx * static_cast<double>(strength);
+    m->vz = m->vz / 2.0 - dz * static_cast<double>(strength);
+    if (m->onGround) m->vy = std::min(0.4, m->vy / 2.0 + static_cast<double>(strength));
+}
+
 bool Mobs::hurt(int id, float amount, double fromX, double fromZ, float knockback, bool byPlayer) {
     Mob* m = find(id);
     if (m == nullptr || m->dead() || amount <= 0.0f) return false;
@@ -212,18 +226,7 @@ bool Mobs::hurt(int id, float amount, double fromX, double fromZ, float knockbac
         m->hurtTime = 10;
     }
     m->health -= applied;
-    // LivingEntity.knockback: pushed away from where the blow came from.
-    if (knockback > 0.0f) {
-        double dx = fromX - m->x, dz = fromZ - m->z;
-        const double length = std::sqrt(dx * dx + dz * dz);
-        if (length > 1.0e-4) {
-            dx /= length;
-            dz /= length;
-            m->vx = m->vx / 2.0 - dx * static_cast<double>(knockback);
-            m->vz = m->vz / 2.0 - dz * static_cast<double>(knockback);
-            if (m->onGround) m->vy = std::min(0.4, m->vy / 2.0 + static_cast<double>(knockback));
-        }
-    }
+    if (knockback > 0.0f) push(id, knockback, fromX - m->x, fromZ - m->z);  // (pushed away from where the blow came from)
     const bool hostile = m->species->kind != MobKind::Passive;
     const std::string base = std::string("entity.") + m->species->id + ".";
     if (host_.sound && !m->dead()) host_.sound(base + "hurt", m->x, m->y + 0.5, m->z, 1.0f, 1.0f + (random() - random()) * 0.2f, hostile);
@@ -840,8 +843,11 @@ void Mobs::tickMob(Mob& m, const MobTick& in) {
         }
         if ((sp.traits & kMobClimbs) != 0 && m.horizontalCollision && m.target != 0) m.vy = std::max(m.vy, 0.2);  // a spider climbs a wall
         const float speed = sp.speed * m.moveSpeed;
+        // What a walking mob pushes itself with: Mob.setSpeed makes its forward input its speed too, and the input is 0.98 of that, so it speeds up by its speed times itself (a player's
+        // input is 1, so a player speeds up by the speed alone): a zombie (0.23) walks at about 2.3 blocks a second, a panicking pig at about 4.
+        const double input = static_cast<double>(speed) * 0.98;
         if (m.inWater) {
-            if (m.moveSpeed > 0.0f) { m.vx += fx * 0.02 * static_cast<double>(m.moveSpeed); m.vz += fz * 0.02 * static_cast<double>(m.moveSpeed); }
+            if (m.moveSpeed > 0.0f) { m.vx += fx * 0.02 * input; m.vz += fz * 0.02 * input; }
             if (m.moveSpeed > 0.0f && m.horizontalCollision) m.vy += 0.04;
             moveBody(level, m, m.vx, m.vy, m.vz, true);
             m.vx *= 0.8;
@@ -849,7 +855,7 @@ void Mobs::tickMob(Mob& m, const MobTick& in) {
             m.vy = m.vy * 0.8 - 0.02;
             m.fallDistance = 0.0;
         } else if (m.inLava) {
-            if (m.moveSpeed > 0.0f) { m.vx += fx * 0.02 * static_cast<double>(m.moveSpeed); m.vz += fz * 0.02 * static_cast<double>(m.moveSpeed); }
+            if (m.moveSpeed > 0.0f) { m.vx += fx * 0.02 * input; m.vz += fz * 0.02 * input; }
             moveBody(level, m, m.vx, m.vy, m.vz, true);
             m.vx *= 0.5;
             m.vz *= 0.5;
@@ -858,7 +864,9 @@ void Mobs::tickMob(Mob& m, const MobTick& in) {
         } else {
             const float blockFriction = m.onGround ? registry.state(level.block(fl(m.x), fl(m.y - 0.500001), fl(m.z))).friction : 1.0f;
             const double friction = static_cast<double>(blockFriction) * 0.91;
-            const double accel = m.onGround ? static_cast<double>(speed) * (0.21600002 / (friction * friction * friction)) : 0.02 * static_cast<double>(m.moveSpeed);
+            // LivingEntity.getFrictionInfluencedSpeed: on slippery ground (more than 0.6) the speed is cut by the cube of the BLOCK's friction (not of the block's times 0.91); in the air 0.02.
+            const double groundSpeed = blockFriction > 0.6f ? static_cast<double>(speed) * (0.21600002 / (static_cast<double>(blockFriction) * blockFriction * blockFriction)) : static_cast<double>(speed);
+            const double accel = (m.onGround ? groundSpeed : 0.02) * input;
             m.vx += fx * accel;
             m.vz += fz * accel;
             const bool wasGround = m.onGround;

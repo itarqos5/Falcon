@@ -60,8 +60,7 @@ void GameSession::attackMob(int id) {
     const bool strong = strength > 0.9f;
     const bool crit = strong && player_.fallDistance > 0.0 && !player_.onGround && !player_.inWater && !player_.sprinting;
     if (crit) damage *= 1.5f;
-    float knockback = 0.4f;
-    if (strong && player_.sprinting) knockback += 0.5f;
+    const bool sprintHit = strong && player_.sprinting;
     const std::string sound = crit ? "entity.player.attack.crit" : strong ? (player_.sprinting ? "entity.player.attack.knockback" : "entity.player.attack.strong") : "entity.player.attack.weak";
     playWorldSound(sound, SoundSource::Players, 1.0f, 1.0f);
     if (mobSim_) {
@@ -73,7 +72,11 @@ void GameSession::attackMob(int id) {
                 species = m.species->id;
             }
         }
-        mobSim_->hurt(id, damage, player_.x, player_.z, knockback, true);
+        // Two pushes, as the game does (LivingEntity.hurtServer: 0.4 away from the player; Player.attack: another 0.5 along where they look when they sprint): the second keeps only half of the first.
+        if (mobSim_->hurt(id, damage, player_.x, player_.z, 0.4f, true) && sprintHit) {
+            const double yaw = static_cast<double>(player_.yaw) * 3.14159265358979 / 180.0;
+            mobSim_->push(id, 0.5f, std::sin(yaw), -std::cos(yaw));
+        }
         stats_["custom/damage_dealt"] += static_cast<std::int64_t>(std::lround(damage * 10.0f));
         if (wasAlive) {
             for (const Mob& m : mobSim_->mobs()) {

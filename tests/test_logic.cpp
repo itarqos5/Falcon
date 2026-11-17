@@ -6,6 +6,7 @@ int main() {
     std::printf("logic tests\n");
     testDayCycle();
     testMobPath();
+    testMobMovement();
     testEndSpikes();
     testLegacyRandom();
     if (g_logicFailures != 0) {

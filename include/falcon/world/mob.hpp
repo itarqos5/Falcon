@@ -184,6 +184,8 @@ public:
     [[nodiscard]] int pick(const std::array<double, 3>& eye, const std::array<double, 3>& look, double maxDistance, double* distance = nullptr) const;
     // The player hits a mob (or an explosion or a fall does): damage after armor, the knockback's strength, and where it came from. True when it counted.
     bool hurt(int id, float amount, double fromX, double fromZ, float knockback, bool byPlayer);
+    // LivingEntity.knockback on its own: a push of this strength away from the direction (towardX, towardZ) (the blow of a sprinting player pushes a second time, along where they look).
+    void push(int id, float strength, double towardX, double towardZ);
     [[nodiscard]] Mob* find(int id);
     [[nodiscard]] int count(MobKind kind) const;
     // /kill and /gamemode peaceful: removes the mobs the test selects, returning how many.

@@ -95,3 +95,71 @@ void testMobPath() {
     LCHECK(mobSpecies("pig") != nullptr && mobSpecies("pig")->kind == MobKind::Passive);
     LCHECK(mobSpecies("not_a_mob") == nullptr);
 }
+
+// How fast a mob walks and how far a blow throws it, measured on flat stone tick by tick against what the game does. A walking mob speeds itself up by its speed attribute times its own
+// forward input (Mob.setSpeed makes that the attribute too, times 0.98): a zombie (0.23) gets 0.23 * 0.23 * 0.98 = 0.052 a tick, and the ground's 0.546 a tick holds it back, which
+// ends at 0.114 blocks a tick: 2.3 blocks a second. A blow throws a mob 0.4 a tick from rest (LivingEntity.knockback), which the air (0.91 a tick) takes down slowly.
+void testMobMovement() {
+    installBlockRegistry(BlockRegistry::makeMinimal());
+    const auto stone = blockRegistry().find("stone");
+    LCHECK(stone.has_value());
+    if (!stone) return;
+    const auto makeTick = [&](const Level& level) {
+        MobTick in;
+        in.level = &level;
+        in.player = {20.5, 0.0, 0.5};
+        in.playerEyeY = 1.62;
+        in.playerTargetable = true;
+        in.difficulty = 2;
+        in.dayTime = 18000;
+        in.daylightBurns = false;
+        in.spawnMobs = false;
+        in.spawnMonsters = false;
+        return in;
+    };
+    // A zombie after the player: its speed once it has got going.
+    {
+        Level level = flatWorld(*stone);
+        MobsHost host;
+        Mobs mobs(host, 7);
+        Mob* zombie = mobs.spawn("zombie", 0.5, 0.0, 0.5, true);
+        LCHECK(zombie != nullptr);
+        if (zombie == nullptr) return;
+        const int id = zombie->id;
+        const MobTick in = makeTick(level);
+        double at40 = 0.0, at100 = 0.0;
+        for (int t = 1; t <= 100; ++t) {
+            mobs.tick(in);
+            if (t == 20) at40 = mobs.find(id)->x;
+            if (t == 80) at100 = mobs.find(id)->x;
+        }
+        const double perSecond = (at100 - at40) / 3.0;  // (60 ticks)
+        std::printf("  a zombie chasing: %.2f blocks a second\n", perSecond);
+        LCHECK(perSecond > 2.0 && perSecond < 2.6);
+    }
+    // A blow on a pig standing still, from the west: it goes east, a metre or so in the first half second.
+    {
+        Level level = flatWorld(*stone);
+        MobsHost host;
+        Mobs mobs(host, 7);
+        Mob* pig = mobs.spawn("pig", 0.5, 0.0, 0.5, true);
+        LCHECK(pig != nullptr);
+        if (pig == nullptr) return;
+        const int id = pig->id;
+        MobTick in = makeTick(level);
+        in.player = {-3.0, 0.0, 0.5};
+        for (int t = 0; t < 5; ++t) mobs.tick(in);  // (it lands and settles)
+        const double before = mobs.find(id)->x;
+        LCHECK(mobs.hurt(id, 1.0f, -3.0, 0.5, 0.4f, true));
+        double at10 = 0.0, at30 = 0.0, fastest = 0.0;
+        for (int t = 1; t <= 30; ++t) {
+            mobs.tick(in);
+            fastest = std::max(fastest, std::abs(mobs.find(id)->x - mobs.find(id)->xo));
+            if (t == 10) at10 = mobs.find(id)->x - before;
+            if (t == 30) at30 = mobs.find(id)->x - before;
+        }
+        std::printf("  a pig hit: %.2f blocks away after 10 ticks, %.2f after 30 (fastest tick %.2f blocks)\n", at10, at30, fastest);
+        LCHECK(at10 > 1.0 && at10 < 3.0);  // (after that it runs off the way it chooses, in panic: no more to say about where it is)
+        LCHECK(fastest < 0.6);
+    }
+}
