@@ -310,6 +310,7 @@ private:
     ShaderProgram lines_;
     ShaderProgram cracks_;
     std::vector<Texture2D> breakTextures_;
+    Texture2D celestial_;  // the sun and the eight faces of the moon, one under another (each 32 x 32): the sky draws them from it
     gl::GLint crackViewProj_ = -1, crackTex_ = -1;
     gl::GLuint crackVao_ = 0, crackVbo_ = 0;
     gl::GLint uViewProj_ = -1, uOffset_ = -1, uFogColor_ = -1, uFogRange_ = -1, uAlphaCut_ = -1, uTex_ = -1, uGamma_ = -1;
@@ -327,7 +328,7 @@ private:
     int heldLightAge_ = 0;          // frames since it was last made (chunks load and change around the player)
     unsigned blockEdits_ = 0;       // counts setBlock calls
     gl::GLint skyForward_ = -1, skyRight_ = -1, skyUp_ = -1, skyTan_ = -1, skyHorizon_ = -1, skyZenith_ = -1;
-    gl::GLint skySunDir_ = -1, skyAngle_ = -1, skyStars_ = -1, skyGlow_ = -1, skyMoon_ = -1;
+    gl::GLint skySunDir_ = -1, skyAngle_ = -1, skyStars_ = -1, skyGlow_ = -1, skyMoon_ = -1, skyCelestial_ = -1;
     daycycle::Sky skyState_;
     [[nodiscard]] bool lightmapSkyChanged() const;
     std::array<float, 7> lightmapSky_{};  // the sky factor and colour and the ambient light the light map picture was made for

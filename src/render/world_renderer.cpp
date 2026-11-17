@@ -1,6 +1,8 @@
 #include "falcon/render/world_renderer.hpp"
 #include "world_renderer_internal.hpp"
 
+#include "falcon/assets/image.hpp"
+#include "falcon/assets/resource_manager.hpp"
 #include "falcon/world/block_outlines.hpp"
 #include "falcon/world/block_position.hpp"
 
@@ -9,6 +11,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <optional>
 #include <string>
 
 namespace falcon {
@@ -151,6 +154,7 @@ uniform vec2 uAngle;                   // sin and cos of the sun's angle: the st
 uniform float uStars;                  // how bright the stars are, 0..1
 uniform vec4 uGlow;                    // the sunrise or sunset at the horizon: colour, strength
 uniform float uMoon;                   // phase: 0 full ... 4 new
+uniform sampler2D uCelestial;          // the sun (slot 0) and the moon's eight faces (slots 1..8, by phase), 32 x 32 each, one under another
 out vec4 frag;
 float hash13(vec3 p) {
     p = fract(p * 0.1031);
@@ -183,25 +187,24 @@ void main() {
                 color = mix(color, uGlow.rgb, uGlow.a * k);
             }
         }
-        // The sun is a square 30 blocks wide a hundred blocks away, the moon one of 20 with its phase (the lit part of a ball seen from one side).
+        // The sun and the moon are the game's own pictures (SkyRenderer): a square in the sky a hundred blocks off, the sun 60 blocks wide (it spans -30..30), the moon 40 wide with the
+        // face of its phase, each added to the sky by its alpha (the game's OVERLAY blend). The squares lie across the east-west turn of the sky: their x axis is world z, their z axis
+        // is x cross y with y towards the body, and the moon's picture is turned half round (so is its uv).
         vec3 across = vec3(0.0, 0.0, 1.0);
-        vec3 up = cross(uSunDir, across);
         float toSun = dot(d, uSunDir);
         if (toSun > 0.0) {
-            vec2 q = vec2(dot(d, across), dot(d, up)) / toSun / 0.15;
-            float edge = max(abs(q.x), abs(q.y));
-            if (edge < 1.0) color = mix(vec3(1.0, 0.97, 0.85), vec3(1.0, 0.86, 0.5), pow(edge, 3.0));
+            vec2 q = vec2(dot(d, across), dot(d, cross(across, uSunDir))) * (100.0 / toSun) / 30.0;
+            if (abs(q.x) < 1.0 && abs(q.y) < 1.0) {
+                vec4 t = textureLod(uCelestial, vec2(q.x * 0.5 + 0.5, (q.y * 0.5 + 0.5) / 9.0), 0.0);  // (inside an if: no derivatives wanted)
+                color += t.rgb * t.a;
+            }
         }
         float toMoon = -toSun;
         if (toMoon > 0.0) {
-            vec2 q = vec2(dot(d, across), -dot(d, up)) / toMoon / 0.1 / 0.75;
-            float r = length(q);
-            if (r < 1.0) {
-                vec3 n = vec3(q, sqrt(1.0 - r * r));
-                float a = uMoon * 0.7853982;
-                float lit = smoothstep(-0.04, 0.1, dot(n, vec3(sin(a), 0.0, cos(a))));
-                vec3 moon = vec3(0.92, 0.94, 1.0) * (0.93 + 0.07 * hash13(floor(vec3(q * 6.0, 1.0))));
-                color = mix(color, mix(moon * 0.07, moon, lit), 1.0);
+            vec2 q = vec2(dot(d, across), dot(d, cross(across, -uSunDir))) * (100.0 / toMoon) / 20.0;
+            if (abs(q.x) < 1.0 && abs(q.y) < 1.0) {
+                vec4 t = textureLod(uCelestial, vec2(0.5 - q.x * 0.5, (0.5 - q.y * 0.5 + 1.0 + uMoon) / 9.0), 0.0);
+                color += t.rgb * t.a;
             }
         }
     }
@@ -265,6 +268,33 @@ const std::vector<Offset>& offsetsByDistance() {
 
 }  // namespace
 
+namespace {
+
+// The sun and the eight faces of the moon (the game's own pictures, environment/celestial/sun.png and moon/*.png), one under another in a texture: slot 0 the sun, slot 1 + the phase
+// the moon (0 full, then waning gibbous, third quarter, waning crescent, new, waxing crescent, first quarter, waxing gibbous). A picture that is missing leaves its slot clear.
+Texture2D makeCelestialAtlas(const ResourceManager& resources) {
+    static constexpr const char* kMoonFaces[8] = {"full_moon", "waning_gibbous", "third_quarter", "waning_crescent", "new_moon", "waxing_crescent", "first_quarter", "waxing_gibbous"};
+    const auto load = [&](const std::string& path) -> std::optional<Image> {
+        const auto bytes = resources.readBytes(ResourceLocation("minecraft", path));
+        return bytes ? decodePng(*bytes) : std::nullopt;
+    };
+    std::vector<std::optional<Image>> pictures;
+    pictures.push_back(load("textures/environment/celestial/sun.png"));
+    for (const char* face : kMoonFaces) pictures.push_back(load(std::string("textures/environment/celestial/moon/") + face + ".png"));
+    const int size = pictures[0] ? std::max(1, pictures[0]->width) : 32;
+    Image atlas;
+    atlas.width = size;
+    atlas.height = size * 9;
+    atlas.rgba.assign(static_cast<std::size_t>(size) * static_cast<std::size_t>(size) * 9u * 4u, 0);
+    for (std::size_t slot = 0; slot < pictures.size(); ++slot) {
+        if (!pictures[slot] || pictures[slot]->width != size || pictures[slot]->height != size) continue;
+        std::copy(pictures[slot]->rgba.begin(), pictures[slot]->rgba.end(), atlas.rgba.begin() + static_cast<std::ptrdiff_t>(slot * static_cast<std::size_t>(size) * static_cast<std::size_t>(size) * 4u));
+    }
+    return Texture2D(atlas, FilterMode::Nearest);
+}
+
+}  // namespace
+
 WorldRenderer::WorldRenderer(BlockModels& models, std::int64_t seed, TerrainStyle style, unsigned workerThreads,
                              std::shared_ptr<const worldgen::OverworldGenerator> overworld)
     : models_(models),
@@ -300,6 +330,8 @@ WorldRenderer::WorldRenderer(BlockModels& models, std::int64_t seed, TerrainStyl
     skyStars_ = sky_.uniform("uStars");
     skyGlow_ = sky_.uniform("uGlow");
     skyMoon_ = sky_.uniform("uMoon");
+    skyCelestial_ = sky_.uniform("uCelestial");
+    celestial_ = makeCelestialAtlas(models.resources());
     lineViewProj_ = lines_.uniform("uViewProj");
     crackViewProj_ = cracks_.uniform("uViewProj");
     crackTex_ = cracks_.uniform("uTex");

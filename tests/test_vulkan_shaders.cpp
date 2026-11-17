@@ -51,7 +51,7 @@ const SpirvBlob* find(const std::string& name) {
 const std::vector<Expected>& programs() {
     static const std::vector<Expected> list = {
         {"gui", {"uProjection", "uCutoff"}, {{"uTexture", 0, 0}}, {{0, 2}, {1, 2}, {2, 4}}},
-        {"sky", {"uForward", "uRight", "uUp", "uTan", "uHorizon", "uZenith", "uSunDir", "uAngle", "uStars", "uGlow", "uMoon"}, {}, {}},
+        {"sky", {"uForward", "uRight", "uUp", "uTan", "uHorizon", "uZenith", "uSunDir", "uAngle", "uStars", "uGlow", "uMoon"}, {{"uCelestial", 0, 0}}, {}},
         {"lines", {"uViewProj"}, {}, {{0, 3}}},
         {"lod", {"uViewProj", "uOffset", "uCell", "uFogColor", "uFogRange", "uEnvFog"}, {{"uTex", 1, 0}, {"uLightmap", 0, 2}}, {{0, 4}, {1, 4}}},
         {"cracks", {"uViewProj"}, {{"uTex", 0, 0}}, {{0, 3}, {1, 2}}},

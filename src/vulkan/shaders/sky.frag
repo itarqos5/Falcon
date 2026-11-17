@@ -13,6 +13,7 @@ layout(std140, set = 0, binding = 0) uniform Block {
     vec4 uGlow;
     float uMoon;
 } u;
+layout(set = 1, binding = 0) uniform sampler2D uCelestial;
 layout(location = 0) in vec2 vNdc;
 layout(location = 0) out vec4 frag;
 float hash13(vec3 p) {
@@ -46,25 +47,22 @@ void main() {
                 color = mix(color, u.uGlow.rgb, u.uGlow.a * k);
             }
         }
-        // The sun is a square 30 blocks wide a hundred blocks away, the moon one of 20 with its phase (the lit part of a ball seen from one side).
+        // The sun and the moon are the game's own pictures on squares in the sky (see the OpenGL shader).
         vec3 across = vec3(0.0, 0.0, 1.0);
-        vec3 up = cross(u.uSunDir, across);
         float toSun = dot(d, u.uSunDir);
         if (toSun > 0.0) {
-            vec2 q = vec2(dot(d, across), dot(d, up)) / toSun / 0.15;
-            float edge = max(abs(q.x), abs(q.y));
-            if (edge < 1.0) color = mix(vec3(1.0, 0.97, 0.85), vec3(1.0, 0.86, 0.5), pow(edge, 3.0));
+            vec2 q = vec2(dot(d, across), dot(d, cross(across, u.uSunDir))) * (100.0 / toSun) / 30.0;
+            if (abs(q.x) < 1.0 && abs(q.y) < 1.0) {
+                vec4 t = textureLod(uCelestial, vec2(q.x * 0.5 + 0.5, (q.y * 0.5 + 0.5) / 9.0), 0.0);
+                color += t.rgb * t.a;
+            }
         }
         float toMoon = -toSun;
         if (toMoon > 0.0) {
-            vec2 q = vec2(dot(d, across), -dot(d, up)) / toMoon / 0.1 / 0.75;
-            float r = length(q);
-            if (r < 1.0) {
-                vec3 n = vec3(q, sqrt(1.0 - r * r));
-                float a = u.uMoon * 0.7853982;
-                float lit = smoothstep(-0.04, 0.1, dot(n, vec3(sin(a), 0.0, cos(a))));
-                vec3 moon = vec3(0.92, 0.94, 1.0) * (0.93 + 0.07 * hash13(floor(vec3(q * 6.0, 1.0))));
-                color = mix(color, mix(moon * 0.07, moon, lit), 1.0);
+            vec2 q = vec2(dot(d, across), dot(d, cross(across, -u.uSunDir))) * (100.0 / toMoon) / 20.0;
+            if (abs(q.x) < 1.0 && abs(q.y) < 1.0) {
+                vec4 t = textureLod(uCelestial, vec2(0.5 - q.x * 0.5, (0.5 - q.y * 0.5 + 1.0 + u.uMoon) / 9.0), 0.0);
+                color += t.rgb * t.a;
             }
         }
     }

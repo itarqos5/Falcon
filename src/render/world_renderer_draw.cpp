@@ -80,6 +80,8 @@ void WorldRenderer::render(const Camera& camera, int framebufferWidth, int frame
         gl::Uniform4f(skyGlow_, skyState_.glow[0], skyState_.glow[1], skyState_.glow[2], skyState_.glow[3]);
         gl::Uniform1f(skyMoon_, skyState_.moonPhase);
     }
+    celestial_.bind(0);  // the sun and the moon
+    gl::Uniform1i(skyCelestial_, 0);
     gl::BindVertexArray(emptyVao_);
     gl::DrawArrays(gl::TRIANGLES, 0, 3);
 
