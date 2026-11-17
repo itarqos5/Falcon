@@ -81,16 +81,44 @@ objects), there is no transfer queue, and it is only measured on one GPU (see ab
 
 ## Levels of detail (LODs): src/render/lod_renderer.*, src/worldgen/lod_surface.*
 
-Beyond the chunks that are loaded, the world is drawn as columns, the way Distant Horizons draws it: every cell is a block-shaped column with a flat top and a flat colour, with a wall where
-the next cell is lower. Video Settings > LODs: a checkbox (on or off), **LOD Distance** (a slider, 64 to 8192 chunks, every doubling the same width) and **LOD View Strength** (Low,
+Beyond the chunks that are loaded, the world is drawn as columns, the way Distant Horizons and Voxy draw it (both draw their distant blocks with the real block textures, lit with the game's
+light map, which is what makes them look like the world and not like a map): every cell is a block-shaped column with a flat top, with a wall where the next cell is lower, and every
+face carries the picture of its block. Only the surface is ever made: no caves, no underground, no chunk (see below). Video Settings > LODs: a checkbox (on or off), **LOD Distance** (a slider, 64 to 8192 chunks, every doubling the same width) and **LOD View Strength** (Low,
 Medium or Full Detail). The three are saved as lodsEnabled, lodChunkRadius and lodDetail, and the presets set them (Fast: off; Fancy: 128 chunks, Medium; Fabulous!: 256, Full).
 
 * **Where the heights come from: no chunk is generated for a LOD.** *Chunk* mode (the cells next to the loaded chunks, 1 or 2 blocks wide) reads the generator's own final density of whole
   chunks and takes the top solid block of each column (OverworldGenerator::surfaceHeights): 16 microseconds a column, and the chunk's own ground (mean error 0.26 blocks against the real
-  chunks, 100% within 4). Further out the *preliminary surface* (the game's aquifer surface level, one evaluation of a function of x and z: 3 microseconds a column) is corrected by the
-  real height on a sparse grid, 100 samples a tile (*Residual*: 20 microseconds a column, 3.3 blocks off where the bare preliminary surface is 10). Low Detail uses the preliminary
-  surface alone. The colour is the biome's (grass tint from its climate, sand, snow where it is cold at that height, rock above the trees, the water's own colour and depth), with a few
-  percent of lightness varying from cell to cell, and where the decorator would grow trees (Decorator::treeFacts) a share of the columns is the colour of leaves and as tall as a tree.
+  chunks, 100% within 4). Further out the real height of every column is probed one column at a time (*Direct*, OverworldGenerator::surfaceHeightNear: the full search on every 4th
+  column, every other column searched from the interpolation of those corrected by the two columns just made, so a probe is usually two or three density evaluations: 77 to 113
+  microseconds a column, mean error 0.75 to 0.82 blocks, 98% within 4). The *preliminary surface* (the game's aquifer surface level) is NOT used for the picture any more: it is
+  quantised to 8 blocks and has no jagged detail (mean error 8.5 blocks, 44% within 4), which drowned low land (a peninsula showed only its highest tip). Every detail level, Low
+  included, reads real heights. The colour is the biome's (grass tint from its climate, sand, snow where it is cold at that height, rock above the trees, the water's own colour and depth), with a few
+  percent of lightness varying from cell to cell. Trees generate in natural clusters forming rounded 5x5 crowns that merge into continuous forest canopies (rather than noisy isolated 1-block spikes).
+* **No cracks.** Quads of different sizes meet along T-junctions, and the rounding of their edges left pinholes through which the sky showed. Every vertex says which corner of its quad it is (Vertex::face, from bit 3) and the vertex shader grows the quad by a sub-pixel margin (`min(0.04, 0.005 + 0.00002 * dist)`) in its own plane without distorting mountain silhouettes.
+* **Ambient occlusion & cliff shading.** The vertex shader darkens the base of cliff walls (corners 0 and 3) by an ambient occlusion factor (0.82), producing smooth vertical shading and depth in mountain valleys like Distant Horizons.
+* **Atmospheric exponential fog.** Fog uses an exponential-squared curve (`1.0 - exp(-fogNorm^2 * 3.5)`) beginning right past the loaded chunk border, giving distant terrain realistic atmospheric haze without a harsh linear fog wall. Water features subtle horizon fresnel reflections and vibrant biome water coloring.
+* **Zoom: a spyglass makes the chunks it looks at.** What is far is a LOD, and a spyglass (field of view x 0.1) shows it ten times as big, where the LOD's flat columns and the
+  haze are all there is to see. While the spyglass is up (GameSession::update, singleplayer only) WorldRenderer::setZoom is told where the camera looks and how wide the view is,
+  and the chunks beyond the render distance whose middle lies in that cone (the view's half-angle plus 5 degrees, plus a chunk's own width) out to 10 x the render distance (at most
+  60 chunks) are generated, lit, meshed and drawn as real chunks, exactly like the near ones (the LODs under them are drawn over by the chunks). A ring of two chunks round the cone
+  is generated too, so that the light and the faces at the edge have their neighbours, but only the cone itself is drawn (WorldRenderer::drawable). The fog, the far plane and the
+  reach of the section search follow the cone (WorldRenderer::drawRadius), the LODs' haze starts where the cone ends, and entities in the cone's chunks count as rendered
+  (isChunkRendered). When the spyglass goes down the chunks go to the cache like any chunk out of range. Test aids: FALCON_TEST_ZOOM=1 holds a spyglass to a pinned camera
+  (--cam), FALCON_NO_ZOOM_CHUNKS=1 leaves the cone out (to compare), FALCON_TEST_CONE="16,25" draws a cone of real chunks 16 degrees either side, turned 25 degrees from where the
+  camera looks, with the normal view (real chunks beside LODs).
+* **Textures, sharper.** The picture is sampled one mip level sharper than the hardware would choose (a bias of -1): a block of the far terrain is a pixel or three wide, and the plain
+  choice melts every picture into its average colour, which looks like flat colour. This keeps the grain of grass, stone and leaves (with a little shimmer). Leaf cutout holes are preserved without darkening water.
+* **The five types.** A cell is 1, 2, 4, 8 or 16 blocks wide (a block, two blocks, four blocks, half a chunk, a whole chunk), the finest next to the loaded chunks (Distant Horizons'
+  own list). Past the fifth the cells keep doubling (32, 64, ...) only so that a radius of thousands of chunks can be reached; they look like the fifth. Low Detail starts at 8 blocks
+  (types 4 and 5), Medium and Full at 1. Coarse stand-in tiles remain at true world elevation (`bias = 0.05f`) so distant sea level and mountains never drop into trenches.
+* **What a face looks like.** Every quad is drawn with the picture (a layer of the chunks' own block texture array, BlockModels::layerFor) of the block it shows, laid on once a block
+  (the shader makes the coordinates from the position in blocks and the array repeats, so a 16-block cell shows 16 x 16 tiles) and mip-mapped, so far away a block is its average colour;
+  tinted by the biome (grass, leaves, water: the game's own colour maps), shaded by the way it looks (up 1, north and south 0.8, east and west 0.6) and multiplied by the sky light of the
+  world's light map (so LODs follow the time of day and the brightness option like the chunks). Leaf holes are the dark inside of the tree. Vertex: x, y, z, picture, tint, face (12 bytes).
+* **What a cliff shows.** The wall of a column is cut into bands by what the ground is made of (LodColumn::ground, from the biome and the height), each its own block's picture: the
+  topmost block (a grass block's side), three blocks of earth (dirt; sand over sandstone; terracotta; snow over rock or over earth), then stone and, under y 4, deepslate; bare rock is stone
+  all the way. A forest column stands on its ground: its leaves are the first band (LodColumn::canopy, ::tree). A wall costs a quad a band (at most kMaxBands = 6), about a third more
+  video memory than flat walls (95 MB for 900 tiles at Medium, 256 chunks).
 * **Which cells where.** Tiles are 32 x 32 cells. A quadtree splits a tile while its cell would be more than k times its distance wide: Low Detail k = 1/40 (cells from 8 blocks), Medium
   k = 1/100 (from 2), Full k = 1/200 (from 1: the cells next to the chunks are blocks). So the cells double in width each time the distance doubles, and a radius of 8192 chunks is
   nine levels of detail and a few hundred tiles (23 MB at Low).
