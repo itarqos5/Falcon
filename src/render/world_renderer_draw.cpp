@@ -45,11 +45,19 @@ void WorldRenderer::measureGpu(bool begin) {
     }
 }
 
+float WorldRenderer::farPlaneFor(int radiusChunks, double cameraY) {
+    const float across = static_cast<float>(radiusChunks + 4) * 16.0f * 1.5f;  // (what it was before the height counted)
+    const float acrossToTheEdge = static_cast<float>(radiusChunks + 3) * 16.0f;  // (the farthest section column that is drawn, to its far corner)
+    const double vertical = std::max(std::fabs(cameraY - static_cast<double>(kMinY)), std::fabs(cameraY - static_cast<double>(kMaxY)));
+    const float diagonal = std::hypot(acrossToTheEdge, static_cast<float>(vertical)) + 16.0f;
+    return std::max({256.0f, across, diagonal});
+}
+
 void WorldRenderer::render(const Camera& camera, int framebufferWidth, int framebufferHeight, int renderDistance) {
     measureGpu(true);
     models_.animate(std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count() * 20.0);  // water, lava and fire move
     const float aspect = static_cast<float>(framebufferWidth) / static_cast<float>(std::max(1, framebufferHeight));
-    const float farPlane = std::max(256.0f, static_cast<float>(drawRadius(renderDistance) + 4) * 16.0f * 1.5f);
+    const float farPlane = farPlaneFor(drawRadius(renderDistance), camera.y);
     const Matrix4f view = cameraView(camera);
     const Matrix4f viewProj = perspective(camera.fov, aspect, 0.05f, farPlane) * view;
     lastViewProj_ = viewProj;
@@ -497,7 +505,7 @@ bool WorldRenderer::lightmapSkyChanged() const {
 
 void WorldRenderer::drawSelection(const Camera& camera, int framebufferWidth, int framebufferHeight, int x, int y, int z) {
     const float aspect = static_cast<float>(framebufferWidth) / static_cast<float>(std::max(1, framebufferHeight));
-    const float farPlane = std::max(256.0f, static_cast<float>(std::max(lastRadius_, zoomReach_) + 4) * 16.0f * 1.5f);
+    const float farPlane = farPlaneFor(std::max(lastRadius_, zoomReach_), camera.y);
     const Matrix4f viewProj = perspective(camera.fov, aspect, 0.05f, farPlane) * cameraView(camera);
     // The lines round the block's OUTLINE shape (a torch's small post, a slab's half block, a fence's posts and rails), shifted the
     // way the block is drawn when it is a plant, and a hair bigger so the block's own faces do not hide them.
@@ -563,7 +571,7 @@ void WorldRenderer::drawBreakOverlay(const Camera& camera, int framebufferWidth,
     const OutlineShape& outline = blockOutlines().shape(block);
     if (outline.boxes.empty()) return;
     const float aspect = static_cast<float>(framebufferWidth) / static_cast<float>(std::max(1, framebufferHeight));
-    const float farPlane = std::max(256.0f, static_cast<float>(std::max(lastRadius_, zoomReach_) + 4) * 16.0f * 1.5f);
+    const float farPlane = farPlaneFor(std::max(lastRadius_, zoomReach_), camera.y);
     const Matrix4f viewProj = perspective(camera.fov, aspect, 0.05f, farPlane) * cameraView(camera);
     double offsetX = 0.0, offsetZ = 0.0;
     if (blockRegistry().state(block).has(kStateHasOffset)) {

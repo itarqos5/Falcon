@@ -183,6 +183,9 @@ public:
     void setZoom(double x, double z, float dirX, float dirZ, float halfAngleDegrees, int reachChunks);
     // How far, in chunks, the world is drawn as chunks now: the render distance, or the reach of the zoom's cone when that is further.
     [[nodiscard]] int drawRadius(int renderDistance) const { return renderDistance > zoomReach_ ? renderDistance : zoomReach_; }
+    // The far plane of the chunks' pictures: across, the render distance (and a bit more); up and down, the farthest the world goes from the eyes. A camera at y 430 looks at chunks
+    // 360 blocks below it, which a far plane of the render distance alone cut off (with LODs on, a hole in the ground under the player).
+    [[nodiscard]] static float farPlaneFor(int radiusChunks, double cameraY);
     // 0..1: how much of the area within `radius` chunks is generated and meshed. 1 means everything is on screen.
     [[nodiscard]] float loadProgress(int radius) const;
     // How far one chunk is, for the loading screen's chunk map (main thread).
