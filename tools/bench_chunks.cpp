@@ -82,6 +82,7 @@ std::uint64_t hashLight(int cx, int cz, const falcon::ChunkLight& light) {
 }  // namespace
 
 int main(int argc, char** argv) {
+    std::setvbuf(stdout, nullptr, _IONBF, 0);  // (the lines show up as they are made, also into a file)
     int size = 12;
     unsigned threads = 1;
     std::int64_t seed = 12345;
@@ -201,26 +202,31 @@ int main(int argc, char** argv) {
                 }
             }
         }
-        for (const int cell : {1, 2, 8}) {
+        for (const int cell : {8, 2, 1}) {
             const int cells = (span - cell / 2) / cell - 1;  // the whole square
             for (const falcon::worldgen::LodMode mode : {falcon::worldgen::LodMode::Preliminary, falcon::worldgen::LodMode::Residual, falcon::worldgen::LodMode::Direct, falcon::worldgen::LodMode::Chunk}) {
                 const auto t = Clock::now();
                 const falcon::worldgen::LodGrid grid = lod.grid((cx0 - radius) * 16, (cz0 - radius) * 16, cell, cells, mode);
                 const double ms = millisSince(t);
                 double absolute = 0.0;
-                long within4 = 0, total = 0;
+                long within4 = 0, total = 0, land = 0, landLost = 0;
                 for (int j = 0; j < cells; ++j) {
                     for (int i = 0; i < cells; ++i) {
-                        const int off = std::abs(grid.at(i, j).height - realTop[static_cast<std::size_t>((j * cell + cell / 2) * span + i * cell + cell / 2)]);
+                        const int real = realTop[static_cast<std::size_t>((j * cell + cell / 2) * span + i * cell + cell / 2)];
+                        const int off = std::abs(grid.at(i, j).height - real);
                         absolute += off;
                         within4 += off <= 4;
                         ++total;
+                        if (real >= 63) {  // dry land: does the LOD keep it out of the sea?
+                            ++land;
+                            landLost += grid.at(i, j).water;
+                        }
                     }
                 }
-                std::printf("grid, cell %2d, %-11s: %7.1f ms for %ld columns (%.1f microseconds each), mean error %.2f blocks, within 4 blocks %.0f%%\n", cell,
+                std::printf("grid, cell %2d, %-11s: %7.1f ms for %ld columns (%.1f microseconds each), mean error %.2f blocks, within 4 blocks %.0f%%, land drowned %.1f%% of %ld\n", cell,
                             mode == falcon::worldgen::LodMode::Preliminary ? "preliminary" : mode == falcon::worldgen::LodMode::Residual ? "residual" : mode == falcon::worldgen::LodMode::Direct ? "direct" : "chunk", ms,
                             static_cast<long>(grid.columns.size()), ms * 1000.0 / static_cast<double>(grid.columns.size()), absolute / static_cast<double>(total),
-                            100.0 * static_cast<double>(within4) / static_cast<double>(total));
+                            100.0 * static_cast<double>(within4) / static_cast<double>(total), 100.0 * static_cast<double>(landLost) / static_cast<double>(std::max(1L, land)), land);
             }
         }
         return 0;

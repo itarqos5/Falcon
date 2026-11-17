@@ -1,7 +1,10 @@
 #pragma once
 
-// Levels of detail for the terrain beyond the chunks that are really loaded: the ground only, from the seed's noise (worldgen/lod_surface.hpp), drawn the way Distant Horizons
-// draws it: every cell of a tile is a column like a block, with a flat top and one flat colour, and a wall where the next cell is lower; coarser the further away it is.
+// Levels of detail for the terrain beyond the chunks that are really loaded: the ground only, from the seed's noise (worldgen/lod_surface.hpp), drawn the way Distant Horizons and
+// Voxy draw it: every cell of a tile is a column like a block, with a flat top and a wall where the next cell is lower, and every face is drawn with the texture of the block it is
+// (grass, earth, stone, leaves ...), tiled once a block, tinted by the biome, shaded by its direction and lit with the game's own light map, so it blends into the chunks; the wall is
+// banded like the ground it shows (grass, earth, stone, deepslate). Coarser the further away it is, in five types of cell (1, 2, 4, 8 and 16 blocks, then still coarser only for a far
+// radius), the textures mip-mapped down to their average where a block is smaller than a pixel.
 //
 // The world is cut into tiles of 32 x 32 cells. A tile of level L has cells of cmin * 2^L blocks, so the tiles of the next level are twice as wide, and which level a place gets
 // is decided by a quadtree: a tile is split into its four halves while its cells would look too coarse from the camera (a cell of more than k times its distance), so the
@@ -11,6 +14,7 @@
 
 #include "falcon/gfx/gl.hpp"
 #include "falcon/gfx/shader.hpp"
+#include "falcon/render/block_models.hpp"
 #include "falcon/render/camera.hpp"
 #include "falcon/util/priority_pool.hpp"
 #include "falcon/worldgen/lod_surface.hpp"
@@ -48,10 +52,18 @@ struct LodStats {
     double megabytes = 0.0; // video memory the tiles take
 };
 
+// The layers of the block texture array (BlockModels) that LODs are drawn with.
+struct LodTextures {
+    std::uint16_t grassTop = 0, grassSide = 0, dirt = 0, stone = 0, deepslate = 0, sand = 0, sandstone = 0, snow = 0, snowSide = 0, terracotta = 0, mycelium = 0, myceliumSide = 0,
+                  gravel = 0, water = 0, ice = 0;
+    std::array<std::uint16_t, 8> leaves{};  // by LodTrees::kind (0 is not used)
+    bool operator==(const LodTextures&) const = default;
+};
+
 class LodRenderer {
 public:
-    // `trees`: what each biome grows, by biome id (Decorator::treeFacts), so that forests are drawn.
-    LodRenderer(std::shared_ptr<const worldgen::OverworldGenerator> generator, std::vector<worldgen::LodTrees> trees, PriorityPool& pool);
+    // `trees`: what each biome grows, by biome id (Decorator::treeFacts), so that forests are drawn. `models` has the pictures (and the colour maps) the faces are drawn with.
+    LodRenderer(std::shared_ptr<const worldgen::OverworldGenerator> generator, std::vector<worldgen::LodTrees> trees, PriorityPool& pool, BlockModels& models);
     ~LodRenderer();
     LodRenderer(const LodRenderer&) = delete;
     LodRenderer& operator=(const LodRenderer&) = delete;
@@ -67,22 +79,31 @@ public:
     // `uploadBudgetMs`. `nearChunks` is the radius (chunks) of the real world, which the LODs do not draw over.
     void update(double camX, double camZ, int nearChunks, double uploadBudgetMs);
     // Draws the LODs (the framebuffer's depth is left with them in it: the caller clears it before drawing the chunks). `view` is the camera's view matrix (rotation; the
-    // world is drawn relative to the camera), the camera's place is in blocks.
+    // world is drawn relative to the camera), the camera's place is in blocks. `lightmapTexture` is the world's light map (sky light across, block light down): LODs are lit with its
+    // brightest sky, so they follow the time of day like the chunks. The pictures must have been uploaded (BlockModels::uploadPending).
     void render(const Matrix4f& view, float fovDegrees, float aspect, double camX, double camY, double camZ, int nearChunks, const std::array<float, 3>& fogColor,
-                const std::array<float, 2>& envFog);
+                const std::array<float, 2>& envFog, gl::GLuint lightmapTexture, int fogNearChunks = -1);
 
     [[nodiscard]] LodStats stats() const { return stats_; }
 
     // A tile is 32 x 32 cells.
     static constexpr int kCells = 32;
+    // The most bands a wall has (the canopy, the topmost block, up to two layers of earth or sand, stone, deepslate), and so the most quads of a cell: its top and four such walls.
+    static constexpr int kMaxBands = 6;
+    static constexpr int kMaxQuadsPerCell = 1 + 4 * kMaxBands;
 
-    // 12 bytes: the place in the tile (x and z in cells, y in blocks) and the colour, with the face's shade already in it.
+    // 12 bytes: the place in the tile (x and z in cells, y in blocks), the picture (a layer of the texture array), the tint with the face's shade already in it, and which way the face
+    // looks (kFaceTop, kFaceNorth, kFaceSouth, kFaceWest or kFaceEast, which says how the picture is laid on it) in the low three bits of `face`, and which of the quad's four corners the
+    // vertex is (0..3) from bit kCornerShift on (the shader grows each quad a little by it, so that no crack is left between quads).
     struct Vertex {
-        std::int16_t x, y, z, unused;
-        std::uint8_t r, g, b, a;
+        std::int16_t x, y, z;
+        std::uint16_t layer;
+        std::uint8_t r, g, b, face;
     };
+    static constexpr std::uint8_t kFaceTop = 0, kFaceNorth = 1, kFaceSouth = 2, kFaceWest = 3, kFaceEast = 4;
+    static constexpr int kFaceMask = 7, kCornerShift = 3;
     // The columns of a tile as vertices (four to a quad), and the lowest and highest y among them. (Public for the tests.)
-    [[nodiscard]] static std::vector<Vertex> buildColumns(const worldgen::LodGrid& grid, int cell, float& minY, float& maxY);
+    [[nodiscard]] static std::vector<Vertex> buildColumns(const worldgen::LodGrid& grid, int cell, const LodTextures& textures, float& minY, float& maxY);
 
 private:
     struct TileKey {
@@ -119,8 +140,7 @@ private:
     struct Detail {
         int cellMin;        // the finest cell, in blocks
         float k;            // a cell may be at most k times its distance
-        int chunkMax;       // cells up to this size read the real height of every column (from whole chunks: exact, and the dearest)
-        bool residual;      // coarser ones are corrected by the real height on a sparse grid (else the preliminary surface alone)
+        int chunkMax;       // cells up to this size read the real height of every column from whole chunks' density (the dearest); coarser ones probe the real height of each column
     };
     struct Wanted {
         TileKey key;
@@ -144,12 +164,14 @@ private:
     PriorityPool& pool_;
     std::shared_ptr<Shared> shared_;
     LodSettings settings_;
-    Detail detail_{2, 1.0f / 100.0f, 2, true};
+    Detail detail_{2, 1.0f / 100.0f, 2};
     int topLevel_ = 0;
     std::uint64_t frame_ = 0;
 
+    BlockModels& models_;
+    LodTextures textures_;
     ShaderProgram program_;
-    gl::GLint uViewProj_ = -1, uOffset_ = -1, uCell_ = -1, uFogColor_ = -1, uFogRange_ = -1, uEnvFog_ = -1;
+    gl::GLint uViewProj_ = -1, uOffset_ = -1, uCell_ = -1, uFogColor_ = -1, uFogRange_ = -1, uEnvFog_ = -1, uTex_ = -1, uLightmap_ = -1;
     gl::GLuint vao_ = 0, indexBuffer_ = 0;
     // The vertices of every tile sit in a few big buffers (a buffer for each tile would be thousands of allocations).
     static constexpr std::uint32_t kVerticesPerBuffer = 1u << 20;

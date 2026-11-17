@@ -53,7 +53,7 @@ const std::vector<Expected>& programs() {
         {"gui", {"uProjection", "uCutoff"}, {{"uTexture", 0, 0}}, {{0, 2}, {1, 2}, {2, 4}}},
         {"sky", {"uForward", "uRight", "uUp", "uTan", "uHorizon", "uZenith", "uSunDir", "uAngle", "uStars", "uGlow", "uMoon"}, {}, {}},
         {"lines", {"uViewProj"}, {}, {{0, 3}}},
-        {"lod", {"uViewProj", "uOffset", "uCell", "uFogColor", "uFogRange", "uEnvFog"}, {}, {{0, 4}, {1, 4}}},
+        {"lod", {"uViewProj", "uOffset", "uCell", "uFogColor", "uFogRange", "uEnvFog"}, {{"uTex", 1, 0}, {"uLightmap", 0, 2}}, {{0, 4}, {1, 4}}},
         {"cracks", {"uViewProj"}, {{"uTex", 0, 0}}, {{0, 3}, {1, 2}}},
         {"world",
          {"uViewProj", "uOffset", "uInstanced", "uFogColor", "uFogRange", "uEnvFog", "uAlphaCut", "uGamma", "uHeldOrigin", "uHeldOn"},

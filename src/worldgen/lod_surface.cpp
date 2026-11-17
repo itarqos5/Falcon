@@ -31,9 +31,18 @@ Rgb grassOf(float temperature, float downfall) {
     return {cold.r * wCold + dry.r * wDry + wet.r * wWet, cold.g * wCold + dry.g * wDry + wet.g * wWet, cold.b * wCold + dry.b * wDry + wet.b * wWet};
 }
 
+// The same for the foliage colour map (the leaves of oak, acacia, jungle and dark oak): its corners are the cold, the hot and dry, and the hot and wet.
+Rgb foliageOf(float temperature, float downfall) {
+    const float t = std::clamp(temperature, 0.0f, 1.0f);
+    const float d = std::clamp(downfall, 0.0f, 1.0f) * t;
+    const Rgb cold = fromHex(0x60A17B), dry = fromHex(0xAEA42A), wet = fromHex(0x48B518);
+    const float wCold = 1.0f - t, wDry = t - d, wWet = d;
+    return {cold.r * wCold + dry.r * wDry + wet.r * wWet, cold.g * wCold + dry.g * wDry + wet.g * wWet, cold.b * wCold + dry.b * wDry + wet.b * wWet};
+}
+
 }  // namespace
 
-LodSurface::LodSurface(std::shared_ptr<const OverworldGenerator> generator, std::vector<LodTrees> trees) : generator_(std::move(generator)), trees_(std::move(trees)) {
+LodSurface::LodSurface(std::shared_ptr<const OverworldGenerator> generator, std::vector<LodTrees> trees, LodColourMaps maps) : generator_(std::move(generator)), trees_(std::move(trees)) {
     const BiomeRegistry& registry = generator_->biomes();
     looks_.resize(registry.size());
     for (std::size_t i = 0; i < registry.size(); ++i) {
@@ -43,50 +52,38 @@ LodSurface::LodSurface(std::shared_ptr<const OverworldGenerator> generator, std:
         Look& look = looks_[i];
         look.temperature = info.temperature;
         // What the top of the ground is made of, from the biome's name (the surface rules choose it by the same families of biome).
-        Rgb ground;
+        // Only grass is tinted (by the biome); the other tops are drawn with their texture as it is.
+        Rgb ground{255.0f, 255.0f, 255.0f};
         if (has(name, "ocean") || has(name, "river")) {
             look.kind = Kind::Water;
-            ground = fromHex(0x8C8F6A);  // the floor under it (not seen)
         } else if (has(name, "desert") || has(name, "beach")) {
             look.kind = Kind::Sand;
-            ground = fromHex(has(name, "snowy") ? 0xDDE0D0 : 0xDBCFA3);
         } else if (has(name, "badlands")) {
             look.kind = Kind::Terracotta;
-            ground = fromHex(0xB5643C);
         } else if (has(name, "mushroom")) {
             look.kind = Kind::Mycelium;
-            ground = fromHex(0x6F6369);
         } else if (has(name, "ice_spikes") || has(name, "snowy") || has(name, "frozen") || has(name, "grove") || has(name, "jagged_peaks")) {
             look.kind = Kind::Snow;
-            ground = fromHex(0xF4F8F8);
         } else if (has(name, "stony") || has(name, "windswept_gravelly")) {
             look.kind = Kind::Stone;
-            ground = fromHex(0x8B8B8B);
         } else {
             look.kind = Kind::Grass;
-            ground = info.grassColor ? fromHex(*info.grassColor) : grassOf(info.temperature, info.downfall);
+            ground = info.grassColor ? fromHex(*info.grassColor) : maps.grass ? fromHex(maps.grass(info.temperature, info.downfall)) : grassOf(info.temperature, info.downfall);
             if (info.grassColorModifier == GrassColorModifier::Swamp) ground = fromHex(0x6A7039);
             if (info.grassColorModifier == GrassColorModifier::DarkForest) ground = {ground.r * 0.5f + 0x28 * 0.5f, ground.g * 0.5f + 0x34 * 0.5f, ground.b * 0.5f + 0x0A * 0.5f};
         }
-        // A texture is darker than the colour it is tinted with: the grass block's top averages about 0.7 of white, a stone block about 0.5.
-        float factor = 1.0f;
-        switch (look.kind) {
-            case Kind::Grass: factor = 0.74f; break;
-            case Kind::Sand: factor = 0.93f; break;
-            case Kind::Terracotta: factor = 0.9f; break;
-            case Kind::Snow: factor = 0.98f; break;
-            case Kind::Stone: factor = 0.55f; break;
-            case Kind::Mycelium: factor = 0.85f; break;
-            case Kind::Gravel: factor = 0.6f; break;
-            case Kind::Water: factor = 0.9f; break;
-        }
-        look.r = byteOf(ground.r * factor);
-        look.g = byteOf(ground.g * factor);
-        look.b = byteOf(ground.b * factor);
+        look.r = byteOf(ground.r);
+        look.g = byteOf(ground.g);
+        look.b = byteOf(ground.b);
         const Rgb water = fromHex(info.waterColor.value_or(0x3F76E4u));
-        look.waterR = byteOf(water.r * 0.78f);
-        look.waterG = byteOf(water.g * 0.78f);
-        look.waterB = byteOf(water.b * 0.78f);
+        // Leaves: the foliage tint of the biome (a swamp has its own), which is not its grass tint.
+        const Rgb foliage = info.foliageColor ? fromHex(*info.foliageColor) : maps.foliage ? fromHex(maps.foliage(info.temperature, info.downfall)) : foliageOf(info.temperature, info.downfall);
+        look.leafR = byteOf(foliage.r);
+        look.leafG = byteOf(foliage.g);
+        look.leafB = byteOf(foliage.b);
+        look.waterR = byteOf(water.r);
+        look.waterG = byteOf(water.g);
+        look.waterB = byteOf(water.b);
         look.frozen = has(name, "frozen");
     }
 }
@@ -113,18 +110,20 @@ std::uint32_t hashPlace(int x, int z) {
 LodColumn LodSurface::paint(int x, int z, int floor, bool varied) const {
     LodColumn out;
     out.floor = static_cast<std::int16_t>(floor);
+    out.ground = LodGround::Water;
     const BiomeId biome = generator_->biomeAt(x, floor, z);
     const Look& look = looks_[biome < looks_.size() ? biome : 0];
 
-    const std::uint32_t h = hashPlace(x, z);
-    if (floor < kSeaLevel) {  // under the sea: the top is the water, darker the deeper it is, in four steps (so runs of cells are alike)
+    if (floor < kSeaLevel) {  // under the sea: the top is the water, with a subtle depth gradient
         out.water = true;
         out.height = kSeaLevel;
         if (look.frozen) {  // an ice sheet on the sea
-            out.r = 0xA8, out.g = 0xC4, out.b = 0xF2;
+            out.ice = true;
+            out.r = out.g = out.b = 255;
             return out;
         }
-        const float deep = 1.0f - 0.5f * std::floor(std::clamp(static_cast<float>(kSeaLevel - floor) / 50.0f, 0.0f, 1.0f) * 4.0f) / 4.0f;
+        // (Measured against the real sea in the same view, the opaque colour was about a quarter too bright: the real water lets the dark sea floor show through it. x 0.78.)
+        const float deep = 0.78f * (1.0f - 0.15f * std::clamp(static_cast<float>(kSeaLevel - floor) / 32.0f, 0.0f, 1.0f));
         out.r = byteOf(look.waterR * deep);
         out.g = byteOf(look.waterG * deep);
         out.b = byteOf(look.waterB * deep);
@@ -132,45 +131,59 @@ LodColumn LodSurface::paint(int x, int z, int floor, bool varied) const {
     }
 
     out.height = static_cast<std::int16_t>(floor);
+    out.ground = look.kind == Kind::Water ? Kind::Sand : look.kind;  // (the shore of an ocean biome is sand)
     std::uint8_t r = look.r, g = look.g, b = look.b;
     // Snow where it is cold at that height (the game cools the air 0.00125 a block above y 80), and bare rock above the trees on a mountain.
     const float temperature = look.temperature - std::max(0, floor - 80) * 0.00125f;
     if (temperature < 0.15f && look.kind != Kind::Water) {
-        r = 0xF2, g = 0xF6, b = 0xF6;
-    } else if (look.kind == Kind::Grass && floor > 135) {
-        const float rock = std::clamp(static_cast<float>(floor - 135) / 40.0f, 0.0f, 1.0f);
-        r = byteOf(r + (0x6E - r) * rock);
-        g = byteOf(g + (0x6E - g) * rock);
-        b = byteOf(b + (0x6E - b) * rock);
+        r = g = b = 255;
+        out.bareSnow = look.kind != Kind::Grass && look.kind != Kind::Mycelium;  // (a cold plain has earth under its snow; a peak has rock)
+        out.ground = Kind::Snow;
+    } else if (look.kind == Kind::Grass && floor > 155) {
+        r = g = b = 255;  // bare rock from here up: no earth on it, so the top and the side of a cliff are stone
+        out.ground = Kind::Stone;
     }
     if (varied) {
-        // A forest: a column of the tree cover has the colour of the leaves, as high as the tree. The cover is the share of the ground that the canopies of the biome's trees
-        // shade (a Poisson cover, for trees of about 5 x 5), and only land that is not bare (sand, snow, rock) has trees.
+        // A forest: trees generate in natural clusters with coherent 5x5 rounded canopies, forming continuous forest
+        // canopies instead of noisy isolated 1x1 pillars.
         const LodTrees trees = look.kind != Kind::Water && biome < trees_.size() ? trees_[biome] : LodTrees{};
-        if (trees.kind != 0 && out.height > kSeaLevel && look.kind != Kind::Sand && look.kind != Kind::Stone && look.kind != Kind::Terracotta) {
-            const float cover = 1.0f - std::exp(-trees.perChunk * 22.0f / 256.0f);
-            if (static_cast<float>(h & 0xFFFFu) / 65536.0f < cover) {
-                Rgb leaf{static_cast<float>(look.r), static_cast<float>(look.g), static_cast<float>(look.b)};  // the biome's tint (oak, acacia, jungle, dark oak)
-                float factor = 0.78f;
+        if (trees.kind != 0 && out.height > kSeaLevel && look.kind != Kind::Sand && look.kind != Kind::Stone && look.kind != Kind::Terracotta && out.ground != Kind::Stone) {
+            const int cx = x >= 0 ? x / 4 : (x - 3) / 4;
+            const int cz = z >= 0 ? z / 4 : (z - 3) / 4;
+            const int remX = x - cx * 4;
+            const int remZ = z - cz * 4;
+            const int qx = remX >= 2 ? 1 : -1;
+            const int qz = remZ >= 2 ? 1 : -1;
+            const float prob = std::min(0.92f, trees.perChunk * 16.0f / 256.0f);
+            int bestTall = 0;
+            const int cellDirs[4][2] = {{0, 0}, {qx, 0}, {0, qz}, {qx, qz}};
+            for (const auto& dir : cellDirs) {
+                const int scx = cx + dir[0], scz = cz + dir[1];
+                const std::uint32_t th = hashPlace(scx * 0x45D9F3Bu + 0x12345u, scz * 0x45D9F3Bu + 0x67891u);
+                if (static_cast<float>(th & 0xFFFFu) / 65536.0f < prob) {
+                    const int tx = scx * 4 + static_cast<int>((th >> 16) & 3u);
+                    const int tz = scz * 4 + static_cast<int>((th >> 18) & 3u);
+                    const int dx = x - tx, dz = z - tz;
+                    if (dx * dx + dz * dz <= 5) {
+                        const int tall = std::max(1, trees.height + static_cast<int>((th >> 20) & 1u));
+                        bestTall = std::max(bestTall, tall);
+                    }
+                }
+            }
+            if (bestTall > 0) {
+                // The leaf texture is multiplied by the foliage tint of the biome (oak, acacia, jungle, dark oak); birch and spruce leaves have a colour of their own, cherry leaves none.
+                r = look.leafR, g = look.leafG, b = look.leafB;
                 switch (trees.kind) {
-                    case 2: leaf = fromHex(0x80A755), factor = 0.72f; break;   // birch
-                    case 3: leaf = fromHex(0x619961), factor = 0.6f; break;    // spruce
-                    case 5: factor = 0.82f; break;                             // jungle
-                    case 6: leaf = fromHex(0xE5B5D3), factor = 0.88f; break;   // cherry
-                    case 7: factor = 0.62f; break;                             // dark oak
+                    case 2: r = 0x80, g = 0xA7, b = 0x55; break;
+                    case 3: r = 0x61, g = 0x99, b = 0x61; break;
+                    case 6: r = g = b = 255; break;
                     default: break;
                 }
-                r = byteOf(leaf.r * factor);
-                g = byteOf(leaf.g * factor);
-                b = byteOf(leaf.b * factor);
-                out.height = static_cast<std::int16_t>(out.height + trees.height + static_cast<int>((h >> 20) & 3u) - 1);
+                out.height = static_cast<std::int16_t>(out.height + bestTall);
+                out.canopy = static_cast<std::uint8_t>(std::min(bestTall, 255));
+                out.tree = static_cast<std::uint8_t>(trees.kind);
             }
         }
-        // No two blocks are quite alike: a few percent of lightness either way, so that open ground shows the cells it is made of.
-        const float shade = 1.0f + (static_cast<float>((h >> 24) & 15u) - 7.5f) / 150.0f;
-        r = byteOf(static_cast<float>(r) * shade);
-        g = byteOf(static_cast<float>(g) * shade);
-        b = byteOf(static_cast<float>(b) * shade);
     }
     out.r = r;
     out.g = g;
@@ -207,8 +220,50 @@ LodGrid LodSurface::grid(int originX, int originZ, int cell, int cells, LodMode 
             }
         }
     } else if (mode == LodMode::Direct) {
+        // The real height of every column, found fast: the full search on a sparse grid (every 4th column and the last), and every other column searched from a guess, the
+        // interpolation of the nodes corrected by how wrong it was at the two columns just made (terrain errors run in patches), which the search usually confirms in two or three probes.
+        std::vector<int> nodes;
+        for (int g = 0; g < side; g += 4) nodes.push_back(g);
+        if (nodes.back() != side - 1) nodes.push_back(side - 1);
+        const auto n = static_cast<int>(nodes.size());
+        std::vector<float> nodeHeight(static_cast<std::size_t>(n) * static_cast<std::size_t>(n));
+        for (int b = 0; b < n; ++b) {
+            for (int a = 0; a < n; ++a) {
+                nodeHeight[static_cast<std::size_t>(b * n + a)] =
+                    static_cast<float>(generator_->surfaceHeightQuickAt(xOf(nodes[static_cast<std::size_t>(a)]), zOf(nodes[static_cast<std::size_t>(b)])));
+            }
+        }
+        std::vector<int> segment(static_cast<std::size_t>(side));
+        std::vector<float> along(static_cast<std::size_t>(side));
+        std::vector<bool> isNode(static_cast<std::size_t>(side), false);
+        for (const int g : nodes) isNode[static_cast<std::size_t>(g)] = true;
+        for (int g = 0, s = 0; g < side; ++g) {
+            while (s + 2 < n && nodes[static_cast<std::size_t>(s + 1)] <= g) ++s;
+            segment[static_cast<std::size_t>(g)] = s;
+            along[static_cast<std::size_t>(g)] = static_cast<float>(g - nodes[static_cast<std::size_t>(s)]) / static_cast<float>(nodes[static_cast<std::size_t>(s + 1)] - nodes[static_cast<std::size_t>(s)]);
+        }
+        std::vector<float> smooth(count);  // the interpolation of the nodes, at every column
+        const auto h = [&](int a, int b) { return nodeHeight[static_cast<std::size_t>(b * n + a)]; };
         for (int gj = 0; gj < side; ++gj) {
-            for (int gi = 0; gi < side; ++gi) floors[at(gi, gj)] = generator_->surfaceHeightQuickAt(xOf(gi), zOf(gj));
+            const int sj = segment[static_cast<std::size_t>(gj)];
+            const float fj = along[static_cast<std::size_t>(gj)];
+            for (int gi = 0; gi < side; ++gi) {
+                const int si = segment[static_cast<std::size_t>(gi)];
+                const float fi = along[static_cast<std::size_t>(gi)];
+                const float low = h(si, sj) * (1.0f - fi) + h(si + 1, sj) * fi;
+                const float high = h(si, sj + 1) * (1.0f - fi) + h(si + 1, sj + 1) * fi;
+                smooth[at(gi, gj)] = low * (1.0f - fj) + high * fj;
+                if (isNode[static_cast<std::size_t>(gi)] && isNode[static_cast<std::size_t>(gj)]) {
+                    floors[at(gi, gj)] = static_cast<int>(smooth[at(gi, gj)]);  // (exact: the node's own height)
+                    continue;
+                }
+                float correction = 0.0f;
+                int known = 0;
+                if (gi > 0) correction += static_cast<float>(floors[at(gi - 1, gj)]) - smooth[at(gi - 1, gj)], ++known;
+                if (gj > 0) correction += static_cast<float>(floors[at(gi, gj - 1)]) - smooth[at(gi, gj - 1)], ++known;
+                const float guess = smooth[at(gi, gj)] + (known > 0 ? correction / static_cast<float>(known) : 0.0f);
+                floors[at(gi, gj)] = generator_->surfaceHeightNear(xOf(gi), zOf(gj), static_cast<int>(std::lround(guess)));
+            }
         }
     } else {
         for (int gj = 0; gj < side; ++gj) {

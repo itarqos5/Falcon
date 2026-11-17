@@ -51,8 +51,10 @@ void testLodSurface(const GameData& gd, const falcon::BlockRegistry& registry) {
         return sum / 64.0;
     };
     const double preliminary = error8(falcon::worldgen::LodMode::Preliminary), residual = error8(falcon::worldgen::LodMode::Residual);
-    std::printf("  lod surface, cells of 8: preliminary %.2f blocks off, corrected %.2f\n", preliminary, residual);
+    const double direct = error8(falcon::worldgen::LodMode::Direct);
+    std::printf("  lod surface, cells of 8: preliminary %.2f blocks off, corrected %.2f, probed %.2f\n", preliminary, residual, direct);
     CHECK(residual <= preliminary);
+    CHECK(direct <= residual);  // the probes (from a guess) read the real height of every column: what the far LODs are made of
 }
 
 // The carvers and the ores (worldgen/underground.hpp): caves cut into the rock and join across chunk borders, lava lies at the bottom of them, the ores appear in their

@@ -848,7 +848,7 @@ void WorldRenderer::setLods(const LodSettings& settings) {
             trees.resize(overworld_->biomes().size());
             for (std::size_t i = 0; i < trees.size(); ++i) trees[i] = decorator_->treeFacts(static_cast<worldgen::BiomeId>(i));
         }
-        lod_ = std::make_unique<LodRenderer>(overworld_, std::move(trees), pool_);
+        lod_ = std::make_unique<LodRenderer>(overworld_, std::move(trees), pool_, models_);
     }
     if (lod_) lod_->setSettings(lodSettings_);
 }

@@ -7,22 +7,45 @@
 namespace falcon {
 namespace {
 
-// The shaders: a tile's vertices carry their place in the tile (x and z in cells, y in blocks) and the colour of the column, with the shade of the face already in it. Fog is the
-// world's, so LODs and chunks melt into the same haze. (The Vulkan twins are src/vulkan/shaders/lod.vert and lod.frag.)
+// The shaders: a tile's vertices carry their place in the tile (x and z in cells, y in blocks), the picture of the face (a layer of the block texture array) and its tint, with the
+// shade of the face already in it. The picture is laid on the face once a block (the coordinates are in blocks, and the array repeats), the way Distant Horizons and Voxy draw their
+// distant blocks, and lit with the sky light of the world's own light map, so it follows the time of day. Fog is the world's, so LODs and chunks melt into the same haze.
+// (The Vulkan twins are src/vulkan/shaders/lod.vert and lod.frag.)
 constexpr char kVertexShader[] = R"(// vk: lod.vert
 #version 330 core
-layout(location = 0) in vec4 aPos;     // x and z in cells, y in blocks, inside the tile
-layout(location = 1) in vec4 aColor;   // the colour of the face
+layout(location = 0) in vec4 aPos;     // x and z in cells, y in blocks, inside the tile; w: the layer of the picture
+layout(location = 1) in vec4 aColor;   // rgb: the tint with the shade of the face in it; a: the face (0 top, 1 north, 2 south, 3 west, 4 east) and, from bit 3, which corner of its quad this is
 uniform mat4 uViewProj;
 uniform vec3 uOffset;                  // where the tile's corner is, relative to the camera
 uniform float uCell;                   // the width of a cell, in blocks
 out vec3 vColor;
 out float vDist;
+out vec2 vUv;
+flat out float vLayer;
 void main() {
-    vec3 p = vec3(aPos.x * uCell, aPos.y, aPos.z * uCell) + uOffset;
-    gl_Position = uViewProj * vec4(p, 1.0);
-    vColor = aColor.rgb;
-    vDist = length(p);
+    vec3 block = vec3(aPos.x * uCell, aPos.y, aPos.z * uCell);  // in blocks from the tile's corner, which is a whole number of blocks: a picture lines up from tile to tile
+    vec3 p = block + uOffset;
+    float dist = length(p);
+    int bits = int(aColor.a * 255.0 + 0.5);
+    int face = bits & 7;
+    int corner = bits >> 3;
+    // Sub-pixel quad growth to seal T-junction cracks without inflating or deforming distant mountains:
+    float grow = min(0.04, 0.005 + 0.00002 * dist);
+    float alongX = corner >= 2 ? 1.0 : -1.0;                    // the corners run (low, low), (low, high), (high, high), (high, low) along the quad's two axes
+    float alongZ = (corner == 1 || corner == 2) ? 1.0 : -1.0;
+    float down = (corner == 0 || corner == 3) ? -1.0 : 0.0;     // a wall also grows down (never up, so it does not rise over the top it holds)
+    vec3 grown = vec3(0.0);
+    if (face == 0) grown = vec3(alongX, 0.0, alongZ) * grow;
+    else if (face < 3) grown = vec3(alongX * grow, down * grow, 0.0);
+    else grown = vec3(0.0, down * grow, alongX * grow);
+    gl_Position = uViewProj * vec4(p + grown, 1.0);
+    // Smooth ambient occlusion: the base of a cliff/wall (corners 0 and 3) is shaded compared to the top:
+    float ao = (face != 0 && (corner == 0 || corner == 3)) ? 0.82 : 1.0;
+    vColor = aColor.rgb * ao;
+    vDist = dist;
+    // A top is laid out along x and z; the sides of north and south along x and up, those of west and east along z and up (v runs down the picture).
+    vUv = face == 0 ? block.xz : (face < 3 ? vec2(block.x, -block.y) : vec2(block.z, -block.y));
+    vLayer = aPos.w;
 }
 )";
 
@@ -30,20 +53,42 @@ constexpr char kFragmentShader[] = R"(// vk: lod.frag
 #version 330 core
 in vec3 vColor;
 in float vDist;
+in vec2 vUv;
+flat in float vLayer;
+uniform sampler2DArray uTex;           // the block pictures, mip-mapped: far away a block is its average colour
+uniform sampler2D uLightmap;           // the world's light map: sky light across, block light down
 uniform vec3 uFogColor;
 uniform vec2 uFogRange;                // the world's fog: start, end (distance from the camera)
 uniform vec2 uEnvFog;                  // the fog of the medium the eyes are in (water); far away when there is none
 out vec4 frag;
 void main() {
-    float fog = max(clamp((vDist - uFogRange.x) / (uFogRange.y - uFogRange.x), 0.0, 1.0), clamp((vDist - uEnvFog.x) / (uEnvFog.y - uEnvFog.x), 0.0, 1.0));
-    frag = vec4(mix(vColor, uFogColor, fog), 1.0);
+    // One mip level sharper than the hardware would pick: preserves texture definition on distant terrain
+    vec4 t = texture(uTex, vec3(vUv, vLayer), -1.0);
+    vec3 rgb = t.rgb;
+    // Foliage cutouts: darken only actual leaf holes (alpha near 0), not translucent water:
+    if (t.a < 0.25) rgb *= 0.45;
+    vec3 light = texture(uLightmap, vec2(1.0, 0.0) * (15.0 / 16.0) + vec2(0.5 / 16.0)).rgb;  // sky light 15, block light 0
+    // Distant Horizons style exponential-squared atmospheric fog:
+    float d = max(0.0, vDist - uFogRange.x);
+    float span = max(1.0, uFogRange.y - uFogRange.x);
+    float fogNorm = clamp(d / span, 0.0, 1.0);
+    float fog = 1.0 - exp(-fogNorm * fogNorm * 3.5);
+    float env = clamp((vDist - uEnvFog.x) / max(1.0, uEnvFog.y - uEnvFog.x), 0.0, 1.0);
+    fog = max(fog, env);
+    // Subtle horizon fresnel highlight on water surfaces:
+    vec3 col = rgb * vColor;
+    if (t.a < 0.85 && t.a > 0.25) {
+        float fresnel = pow(clamp(vDist / max(100.0, uFogRange.y), 0.0, 1.0), 3.0) * 0.35;
+        col = mix(col, uFogColor, fresnel);
+    }
+    frag = vec4(mix(col * light, uFogColor, fog), 1.0);
 }
 )";
 
 constexpr int kCells = LodRenderer::kCells;
 constexpr int kSea = worldgen::LodSurface::kSeaLevel;
-// The most quads a tile can hold: a top and four walls for every cell.
-constexpr std::uint32_t kMaxQuads = kCells * kCells * 5;
+// The most quads a tile can hold: a top for every cell and, on each of its four sides, a wall of as many bands as the ground has layers (see wallBands).
+constexpr std::uint32_t kMaxQuads = kCells * kCells * LodRenderer::kMaxQuadsPerCell;
 
 // The one index list every tile shares: quad n is vertices 4n..4n+3, drawn as two triangles.
 std::vector<std::uint32_t> makeIndices() {
@@ -55,29 +100,141 @@ std::vector<std::uint32_t> makeIndices() {
     return out;
 }
 
+using Colour = std::array<std::uint8_t, 3>;
+constexpr Colour kWhite{255, 255, 255};
+
+// A band of the side of a cliff: from y = low to y = high, one picture, one tint.
+struct Band {
+    int low, high;
+    std::uint16_t layer;
+    Colour tint;
+};
+
+// The picture of the top of a column: the leaves of its trees, the sea, or what the ground is made of.
+std::uint16_t topLayer(const worldgen::LodColumn& c, const LodTextures& t) {
+    using worldgen::LodGround;
+    if (c.water) return c.ice ? t.ice : t.water;
+    if (c.tree > 0) return t.leaves[std::min<std::size_t>(c.tree, t.leaves.size() - 1)];
+    switch (c.ground) {
+        case LodGround::Grass: return t.grassTop;
+        case LodGround::Sand: return t.sand;
+        case LodGround::Terracotta: return t.terracotta;
+        case LodGround::Snow: return t.snow;
+        case LodGround::Stone: return t.stone;
+        case LodGround::Mycelium: return t.mycelium;
+        case LodGround::Gravel: return t.gravel;
+        case LodGround::Water: return t.sand;
+    }
+    return t.stone;
+}
+
+// The bands of the wall of column `c` between `low` and `high` (a wall is made by the higher of two columns; `low` is the top of the lower one), the highest first, each with the
+// picture of the block it is: the leaves of a tree on top (they stand over the ground), the topmost block of the ground, the earth under it, then stone, and deepslate under y 4
+// (the game mixes the two between y 8 and 0). At most kMaxBands.
+constexpr int kMaxBands = LodRenderer::kMaxBands;
+int wallBands(const worldgen::LodColumn& c, int low, int high, const LodTextures& t, std::array<Band, kMaxBands>& out) {
+    using worldgen::LodGround;
+    int n = 0;
+    const auto add = [&](int from, int to, std::uint16_t layer, const Colour& tint) {  // the part of [to, from] inside the wall
+        const int hi = std::min(from, high), lo = std::max(to, low);
+        if (hi <= lo || n >= kMaxBands) return;
+        if (n > 0) {
+            Band& last = out[static_cast<std::size_t>(n - 1)];
+            if (last.layer == layer && last.tint == tint && last.low == hi) {  // the same block as the band above: one band
+                last.low = lo;
+                return;
+            }
+        }
+        out[static_cast<std::size_t>(n++)] = {lo, hi, layer, tint};
+    };
+    const Colour top{c.r, c.g, c.b};
+    if (c.water) {  // a sea has no layers to show
+        add(high, low, c.ice ? t.ice : t.water, top);
+        return n;
+    }
+    const int ground = c.height - c.canopy;
+    if (c.canopy > 0) add(c.height, ground, t.leaves[std::min<std::size_t>(c.tree, t.leaves.size() - 1)], top);
+    // The topmost block, and the layers under it (thickness in blocks): earth, sand over sandstone, and so on.
+    struct Layer {
+        int thickness;
+        std::uint16_t layer;
+    };
+    std::uint16_t strip = t.stone;
+    std::array<Layer, 2> layers{};
+    int layerCount = 0;
+    switch (c.ground) {
+        case LodGround::Grass: strip = t.grassSide, layers[0] = {3, t.dirt}, layerCount = 1; break;
+        case LodGround::Mycelium: strip = t.myceliumSide, layers[0] = {3, t.dirt}, layerCount = 1; break;
+        case LodGround::Sand: strip = t.sand, layers[0] = {3, t.sand}, layers[1] = {6, t.sandstone}, layerCount = 2; break;
+        case LodGround::Terracotta: strip = t.terracotta, layers[0] = {10, t.terracotta}, layerCount = 1; break;
+        case LodGround::Snow: strip = c.bareSnow ? t.snow : t.snowSide, layers[0] = {3, c.bareSnow ? t.snow : t.dirt}, layerCount = 1; break;
+        case LodGround::Gravel: strip = t.gravel, layers[0] = {4, t.gravel}, layerCount = 1; break;
+        case LodGround::Stone: strip = t.stone; break;  // bare rock: stone all the way
+        case LodGround::Water: strip = t.sand; break;
+    }
+    int y = ground;
+    add(y, y - 1, strip, kWhite);
+    y -= 1;
+    for (int i = 0; i < layerCount; ++i) {
+        add(y, y - layers[static_cast<std::size_t>(i)].thickness, layers[static_cast<std::size_t>(i)].layer, kWhite);
+        y -= layers[static_cast<std::size_t>(i)].thickness;
+    }
+    if (y > 4) {
+        add(y, 4, t.stone, kWhite);
+        y = 4;
+    }
+    add(y, low, t.deepslate, kWhite);
+    return n;
+}
+
+LodTextures resolveTextures(const BlockModels& models) {
+    const auto layer = [&](const char* name) { return models.layerFor(std::string("minecraft:block/") + name); };
+    LodTextures t;
+    t.grassTop = layer("grass_block_top");
+    t.grassSide = layer("grass_block_side");
+    t.dirt = layer("dirt");
+    t.stone = layer("stone");
+    t.deepslate = layer("deepslate");
+    t.sand = layer("sand");
+    t.sandstone = layer("sandstone");
+    t.snow = layer("snow");
+    t.snowSide = layer("grass_block_snow");
+    t.terracotta = layer("terracotta");
+    t.mycelium = layer("mycelium_top");
+    t.myceliumSide = layer("mycelium_side");
+    t.gravel = layer("gravel");
+    t.water = layer("water_still");
+    t.ice = layer("ice");
+    t.leaves = {layer("oak_leaves"), layer("oak_leaves"), layer("birch_leaves"), layer("spruce_leaves"), layer("acacia_leaves"), layer("jungle_leaves"), layer("cherry_leaves"), layer("dark_oak_leaves")};
+    return t;
+}
+
 }  // namespace
 
 LodRenderer::Detail LodRenderer::detailOf(int detail) {
     switch (detail) {
-        // Cells as wide as a block next to the loaded chunks and twice as wide for every doubling of the distance (a cell at most k times as far as it is wide), as the
-        // gallery of Distant Horizons shows it; Low starts at 8 blocks and never reads a real chunk.
-        case kLodDetailLow: return {8, 1.0f / 40.0f, 0, false};
-        case kLodDetailFull: return {1, 1.0f / 200.0f, 2, true};
-        default: return {2, 1.0f / 100.0f, 2, true};
+        // The five types of Distant Horizons: a cell of 1, 2, 4, 8 or 16 blocks (a block, two blocks, four blocks, half a chunk, a whole chunk), the finest next to the loaded chunks
+        // and the next one for every doubling of the distance (a cell at most k times as far as it is wide). Past the fifth the cells keep doubling, only so that a far radius is
+        // reachable. Low starts at 8 blocks (types 4 and 5) and never reads a real chunk (but it does read the real height of every column).
+        case kLodDetailLow: return {8, 1.0f / 40.0f, 0};
+        default: return {1, detail == kLodDetailFull ? 1.0f / 200.0f : 1.0f / 100.0f, 2};
     }
 }
 
 std::pair<float, float> LodRenderer::fogRange(int radiusChunks, int nearChunks) {
     const float end = static_cast<float>(radiusChunks) * 16.0f;
-    float start = std::max(static_cast<float>(nearChunks) * 16.0f, 0.6f * end);
-    if (start > end * 0.9f) start = end * 0.8f;
+    const float start = static_cast<float>(nearChunks) * 16.0f;
     return {start, end};
 }
 
-LodRenderer::LodRenderer(std::shared_ptr<const worldgen::OverworldGenerator> generator, std::vector<worldgen::LodTrees> trees, PriorityPool& pool)
-    : surface_(std::make_shared<const worldgen::LodSurface>(std::move(generator), std::move(trees))),
+LodRenderer::LodRenderer(std::shared_ptr<const worldgen::OverworldGenerator> generator, std::vector<worldgen::LodTrees> trees, PriorityPool& pool, BlockModels& models)
+    : surface_(std::make_shared<const worldgen::LodSurface>(
+          std::move(generator), std::move(trees),
+          worldgen::LodColourMaps{[&models](float t, float d) { return models.grassColor(t, d); }, [&models](float t, float d) { return models.foliageColor(t, d); }})),
       pool_(pool),
       shared_(std::make_shared<Shared>()),
+      models_(models),
+      textures_(resolveTextures(models)),
       program_("lod", kVertexShader, kFragmentShader) {
     uViewProj_ = program_.uniform("uViewProj");
     uOffset_ = program_.uniform("uOffset");
@@ -85,6 +242,8 @@ LodRenderer::LodRenderer(std::shared_ptr<const worldgen::OverworldGenerator> gen
     uFogColor_ = program_.uniform("uFogColor");
     uFogRange_ = program_.uniform("uFogRange");
     uEnvFog_ = program_.uniform("uEnvFog");
+    uTex_ = program_.uniform("uTex");
+    uLightmap_ = program_.uniform("uLightmap");
 
     const std::vector<std::uint32_t> indices = makeIndices();
     gl::GenVertexArrays(1, &vao_);
@@ -170,9 +329,9 @@ void LodRenderer::select(double camX, double camZ, double nearBlocks, double max
 // ---- making tiles -------------------------------------------------------------------------------------------------------------------------------------------------
 
 // A tile as columns: for every cell a flat top, and a wall wherever the next cell is lower (walls between the cells of a tile are made by the higher one, so none is made
-// twice); a run of cells with the same top and colour is one quad, so flat country (the sea above all) is a few quads. The edge of the tile also gets a wall that hangs a
+// twice); a run of cells with the same top, picture and tint is one quad, so flat country (the sea above all) is a few quads. The edge of the tile also gets a wall that hangs a
 // good way under it whatever its neighbour is, which hides the gaps where it meets a tile of another level (their cells do not line up).
-std::vector<LodRenderer::Vertex> LodRenderer::buildColumns(const worldgen::LodGrid& grid, int cell, float& minY, float& maxY) {
+std::vector<LodRenderer::Vertex> LodRenderer::buildColumns(const worldgen::LodGrid& grid, int cell, const LodTextures& textures, float& minY, float& maxY) {
     std::vector<Vertex> out;
     out.reserve(2048);
     int lowest = 100000, highest = -100000;
@@ -184,30 +343,78 @@ std::vector<LodRenderer::Vertex> LodRenderer::buildColumns(const worldgen::LodGr
         const worldgen::LodColumn& c = grid.at(i, j);
         return (static_cast<std::uint32_t>(c.r) << 16) | (static_cast<std::uint32_t>(c.g) << 8) | c.b;
     };
+    // Two columns whose walls look the same: the same tint on top, the same kind of ground under it, the same trees, and the ground at the same height.
+    const auto sameStyle = [&](int i, int j, int ni, int nj) {
+        const worldgen::LodColumn& a = grid.at(i, j);
+        const worldgen::LodColumn& b = grid.at(ni, nj);
+        return colourOf(i, j) == colourOf(ni, nj) && a.ground == b.ground && a.bareSnow == b.bareSnow && a.water == b.water && a.ice == b.ice && a.tree == b.tree &&
+               a.height - a.canopy == b.height - b.canopy;
+    };
     const int skirt = std::min(2 * cell + 4, 320);
     // The shade of each way a face looks, as the game gives its blocks: up 1, north and south 0.8, east and west 0.6.
-    const auto shaded = [](std::uint32_t rgb, float shade) {
-        const auto channel = [&](std::uint32_t c) { return static_cast<std::uint8_t>(std::min(255.0f, std::floor(static_cast<float>(c) * shade + 0.5f))); };
-        return std::array<std::uint8_t, 3>{channel((rgb >> 16) & 255u), channel((rgb >> 8) & 255u), channel(rgb & 255u)};
+    const auto shaded = [](const Colour& rgb, float shade) {
+        const auto channel = [&](std::uint8_t c) { return static_cast<std::uint8_t>(std::min(255.0f, std::floor(static_cast<float>(c) * shade + 0.5f))); };
+        return Colour{channel(rgb[0]), channel(rgb[1]), channel(rgb[2])};
     };
-    const auto corner = [&](int x, int y, int z, const std::array<std::uint8_t, 3>& c) {
-        out.push_back({static_cast<std::int16_t>(x), static_cast<std::int16_t>(y), static_cast<std::int16_t>(z), 0, c[0], c[1], c[2], 255});
+    const auto cornerShade = [&](int x, int z, int h, bool isWater) -> float {
+        if (isWater) return 1.0f;
+
+        const int h00 = top(x - 1, z - 1);
+        const int h10 = top(x, z - 1);
+        const int h01 = top(x - 1, z);
+        const int h11 = top(x, z);
+
+        // 1. Ambient Occlusion: occluded by higher neighboring columns
+        int occluded = 0;
+        if (h00 > h) ++occluded;
+        if (h10 > h) ++occluded;
+        if (h01 > h) ++occluded;
+        if (h11 > h) ++occluded;
+        const float ao = 1.0f - 0.12f * static_cast<float>(occluded);
+
+        // 2. Directional Slope Lighting (Hillshading)
+        const float cellF = static_cast<float>(std::max(1, cell));
+        const float dhdx = static_cast<float>((h10 + h11) - (h00 + h01)) / (2.0f * cellF);
+        const float dhdz = static_cast<float>((h01 + h11) - (h00 + h10)) / (2.0f * cellF);
+
+        const float len = std::sqrt(dhdx * dhdx + 1.0f + dhdz * dhdz);
+        const float nx = -dhdx / len;
+        const float ny = 1.0f / len;
+        const float nz = -dhdz / len;
+
+        // Light direction: slightly from South-East (standard sun angle)
+        // Scaled so flat horizontal (ny=1, nx=0, nz=0) is exactly 1.0f
+        float slopeLight = 1.0f + (0.35f * nx - 0.40f * nz) * 0.45f - (1.0f - ny) * 0.25f;
+        slopeLight = std::clamp(slopeLight, 0.65f, 1.25f);
+
+        return std::clamp(ao * slopeLight, 0.4f, 1.25f);
+    };
+    const auto corner = [&](int x, int y, int z, std::uint16_t layer, const Colour& c, std::uint8_t face) {
+        // (A quad is always four corners in a row: the vertex shader grows each quad by its corner, see kVertexShader.)
+        const auto which = static_cast<std::uint8_t>(out.size() & 3u);
+        out.push_back({static_cast<std::int16_t>(x), static_cast<std::int16_t>(y), static_cast<std::int16_t>(z), layer, c[0], c[1], c[2], static_cast<std::uint8_t>(face | (which << kCornerShift))});
         lowest = std::min(lowest, y);
         highest = std::max(highest, y);
     };
 
-    // The tops: along each row, runs of the same height and colour.
+    // The tops: along each row, runs of the same height, picture and tint.
     for (int j = 0; j < kCells; ++j) {
         for (int i = 0; i < kCells;) {
             const int h = top(i, j);
             const std::uint32_t colour = colourOf(i, j);
+            const std::uint16_t layer = topLayer(grid.at(i, j), textures);
             int e = i + 1;
-            while (e < kCells && top(e, j) == h && colourOf(e, j) == colour) ++e;
-            const auto c = shaded(colour, 1.0f);
-            corner(i, h, j, c);
-            corner(i, h, j + 1, c);
-            corner(e, h, j + 1, c);
-            corner(e, h, j, c);
+            while (e < kCells && top(e, j) == h && colourOf(e, j) == colour && topLayer(grid.at(e, j), textures) == layer) ++e;
+            const bool isWater = grid.at(i, j).water;
+            const Colour baseColour{grid.at(i, j).r, grid.at(i, j).g, grid.at(i, j).b};
+            const auto c0 = shaded(baseColour, cornerShade(i, j, h, isWater));
+            const auto c1 = shaded(baseColour, cornerShade(i, j + 1, h, isWater));
+            const auto c2 = shaded(baseColour, cornerShade(e, j + 1, h, isWater));
+            const auto c3 = shaded(baseColour, cornerShade(e, j, h, isWater));
+            corner(i, h, j, layer, c0, kFaceTop);
+            corner(i, h, j + 1, layer, c1, kFaceTop);
+            corner(e, h, j + 1, layer, c2, kFaceTop);
+            corner(e, h, j, layer, c3, kFaceTop);
             i = e;
         }
     }
@@ -225,9 +432,11 @@ std::vector<LodRenderer::Vertex> LodRenderer::buildColumns(const worldgen::LodGr
         if (onEdge) return {true, std::min(neighbour, h) - skirt, h};
         return {neighbour < h, neighbour, h};
     };
+    static constexpr std::uint8_t kFaceOfFacing[4] = {kFaceWest, kFaceEast, kFaceNorth, kFaceSouth};
     for (int facing = 0; facing < 4; ++facing) {
         const bool alongZ = facing < 2;  // west and east walls run along z (their cells are in a column), north and south ones along x
         const float shade = alongZ ? 0.6f : 0.8f;
+        const std::uint8_t face = kFaceOfFacing[facing];
         for (int line = 0; line < kCells; ++line) {  // the column (west, east) or row (north, south) of cells the wall runs along
             for (int t = 0; t < kCells;) {
                 const int i = alongZ ? line : t, j = alongZ ? t : line;
@@ -236,27 +445,31 @@ std::vector<LodRenderer::Vertex> LodRenderer::buildColumns(const worldgen::LodGr
                     ++t;
                     continue;
                 }
-                const std::uint32_t colour = colourOf(i, j);
                 int e = t + 1;
                 while (e < kCells) {
                     const int ni = alongZ ? line : e, nj = alongZ ? e : line;
                     const Wall n = wallOf(facing, ni, nj);
-                    if (!n.has || n.low != w.low || n.high != w.high || colourOf(ni, nj) != colour) break;
+                    if (!n.has || n.low != w.low || n.high != w.high || !sameStyle(i, j, ni, nj)) break;
                     ++e;
                 }
-                const auto c = shaded(colour, shade);
-                if (alongZ) {
-                    const int x = facing == 0 ? line : line + 1;
-                    corner(x, w.low, t, c);
-                    corner(x, w.high, t, c);
-                    corner(x, w.high, e, c);
-                    corner(x, w.low, e, c);
-                } else {
-                    const int z = facing == 2 ? line : line + 1;
-                    corner(t, w.low, z, c);
-                    corner(t, w.high, z, c);
-                    corner(e, w.high, z, c);
-                    corner(e, w.low, z, c);
+                std::array<Band, kMaxBands> bands;
+                const int bandCount = wallBands(grid.at(i, j), w.low, w.high, textures, bands);
+                for (int k = 0; k < bandCount; ++k) {
+                    const Band& band = bands[static_cast<std::size_t>(k)];
+                    const auto c = shaded(band.tint, shade);
+                    if (alongZ) {
+                        const int x = facing == 0 ? line : line + 1;
+                        corner(x, band.low, t, band.layer, c, face);
+                        corner(x, band.high, t, band.layer, c, face);
+                        corner(x, band.high, e, band.layer, c, face);
+                        corner(x, band.low, e, band.layer, c, face);
+                    } else {
+                        const int z = facing == 2 ? line : line + 1;
+                        corner(t, band.low, z, band.layer, c, face);
+                        corner(t, band.high, z, band.layer, c, face);
+                        corner(e, band.high, z, band.layer, c, face);
+                        corner(e, band.low, z, band.layer, c, face);
+                    }
                 }
                 t = e;
             }
@@ -277,15 +490,17 @@ void LodRenderer::request(const TileKey& key, double priority) {
     const double size = tileSize(key.level);
     const int originX = static_cast<int>(std::llround(static_cast<double>(key.tx) * size));
     const int originZ = static_cast<int>(std::llround(static_cast<double>(key.tz) * size));
-    const worldgen::LodMode mode = cell <= detail_.chunkMax ? worldgen::LodMode::Chunk : (detail_.residual ? worldgen::LodMode::Residual : worldgen::LodMode::Preliminary);
+    // Every cell reads the real height (never the preliminary surface, which is only good to eight blocks and loses low land to the sea): whole chunks for the finest cells, a probe
+    // for each column of the others.
+    const worldgen::LodMode mode = cell <= detail_.chunkMax ? worldgen::LodMode::Chunk : worldgen::LodMode::Direct;
     const int epoch = shared_->epoch.load();
-    pool_.submit(static_cast<float>(priority), [surface = surface_, shared = shared_, key, epoch, cell, mode, originX, originZ] {
+    pool_.submit(static_cast<float>(priority), [surface = surface_, shared = shared_, textures = textures_, key, epoch, cell, mode, originX, originZ] {
         if (shared->epoch.load() == epoch) {
             const worldgen::LodGrid grid = surface->grid(originX, originZ, cell, kCells, mode);
             Result r;
             r.key = key;
             r.epoch = epoch;
-            r.vertices = buildColumns(grid, cell, r.minY, r.maxY);
+            r.vertices = buildColumns(grid, cell, textures, r.minY, r.maxY);
             std::lock_guard<std::mutex> lock(shared->mutex);
             shared->done.push_back(std::move(r));
         }
@@ -424,7 +639,7 @@ void LodRenderer::update(double camX, double camZ, int nearChunks, double upload
 // ---- drawing ------------------------------------------------------------------------------------------------------------------------------------------------------
 
 void LodRenderer::render(const Matrix4f& view, float fovDegrees, float aspect, double camX, double camY, double camZ, int nearChunks, const std::array<float, 3>& fogColor,
-                         const std::array<float, 2>& envFog) {
+                         const std::array<float, 2>& envFog, gl::GLuint lightmapTexture, int fogNearChunks) {
     stats_.tilesDrawn = 0;
     stats_.trianglesDrawn = 0;
     stats_.levels = 0;
@@ -459,11 +674,11 @@ void LodRenderer::render(const Matrix4f& view, float fovDegrees, float aspect, d
                 break;
             }
             if (key.level >= topLevel_) break;
-            // A coarser tile stands in, a little lower than the finer ones that are there beside it, so they win where both are drawn.
+            // A coarser tile stands in, slightly biased to avoid z-fighting while maintaining true world elevation:
             ++key.level;
             key.tx >>= 1;
             key.tz >>= 1;
-            bias = 0.75f * static_cast<float>(cellOf(key.level)) + 1.0f;
+            bias = 0.05f;
         }
         if (tile == nullptr) continue;
         if (std::find(asked.begin(), asked.end(), key) != asked.end()) continue;
@@ -473,8 +688,14 @@ void LodRenderer::render(const Matrix4f& view, float fovDegrees, float aspect, d
     std::sort(draws.begin(), draws.end(), [](const Draw& a, const Draw& b) { return a.tile->buffer < b.tile->buffer; });
 
     program_.use();
+    models_.bindTextures(0);  // the block pictures on unit 0, the light map on unit 2 (as the chunks' shader has them)
+    gl::Uniform1i(uTex_, 0);
+    gl::ActiveTexture(gl::TEXTURE0 + 2);
+    gl::BindTexture(gl::TEXTURE_2D, lightmapTexture);
+    gl::ActiveTexture(gl::TEXTURE0);
+    gl::Uniform1i(uLightmap_, 2);
     gl::UniformMatrix4fv(uViewProj_, 1, 0, viewProj.m.data());
-    const auto [fogStart, fogEnd] = fogRange(settings_.radiusChunks, nearChunks);
+    const auto [fogStart, fogEnd] = fogRange(settings_.radiusChunks, fogNearChunks >= 0 ? fogNearChunks : nearChunks);  // (a zoom's chunks reach further: the haze starts where they end)
     gl::Uniform3f(uFogColor_, fogColor[0], fogColor[1], fogColor[2]);
     gl::Uniform2f(uFogRange_, fogStart, fogEnd);
     gl::Uniform2f(uEnvFog_, envFog[0], envFog[1]);

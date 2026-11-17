@@ -88,7 +88,9 @@ void WorldRenderer::render(const Camera& camera, int framebufferWidth, int frame
     if (lodsOn) {
         const std::array<float, 3> fogColor = underwater_ ? waterFogColor_ : skyState_.horizon;
         const std::array<float, 2> envFog = underwater_ ? std::array<float, 2>{waterFogStart_, waterFogEnd_} : std::array<float, 2>{envFogStart_, envFogEnd_};
-        lod_->render(view, camera.fov, aspect, camera.x, camera.y, camera.z, renderDistance, fogColor, envFog);
+        models_.uploadPending();  // the pictures the LODs use may be new
+        if (lightmapBrightness_ != brightness_ || lightmapSkyChanged()) updateLightmap();  // (the chunks below want it the same way)
+        lod_->render(view, camera.fov, aspect, camera.x, camera.y, camera.z, renderDistance, fogColor, envFog, lightmapTex_);
         gl::DepthMask(1);
         gl::Clear(gl::DEPTH_BUFFER_BIT);
     }
