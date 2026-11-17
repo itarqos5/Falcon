@@ -10,18 +10,24 @@ layout(std140, set = 0, binding = 0) uniform Block {
     vec3 uFogColor;
     vec2 uFogRange;
     vec2 uEnvFog;
+    vec2 uHoleOrigin;
+    float uHoleRadius2;
 } u;
 layout(location = 0) out vec3 vColor;
 layout(location = 1) out float vDist;
 layout(location = 2) out vec2 vUv;
 layout(location = 3) flat out float vLayer;
+layout(location = 4) flat out float vFlat;
+layout(location = 5) out vec2 vXZ;
 void main() {
     vec3 block = vec3(aPos.x * u.uCell, aPos.y, aPos.z * u.uCell);
     vec3 p = block + u.uOffset;
     float dist = length(p);
     int bits = int(aColor.a * 255.0 + 0.5);
     int face = bits & 7;
-    int corner = bits >> 3;
+    int corner = (bits >> 3) & 3;
+    vFlat = float((bits >> 5) & 1);
+    vXZ = p.xz;
     float grow = min(0.04, 0.005 + 0.00002 * dist);
     float alongX = corner >= 2 ? 1.0 : -1.0;
     float alongZ = (corner == 1 || corner == 2) ? 1.0 : -1.0;

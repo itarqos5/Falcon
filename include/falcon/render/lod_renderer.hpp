@@ -81,8 +81,11 @@ public:
     // Draws the LODs (the framebuffer's depth is left with them in it: the caller clears it before drawing the chunks). `view` is the camera's view matrix (rotation; the
     // world is drawn relative to the camera), the camera's place is in blocks. `lightmapTexture` is the world's light map (sky light across, block light down): LODs are lit with its
     // brightest sky, so they follow the time of day like the chunks. The pictures must have been uploaded (BlockModels::uploadPending).
+    // The chunks are drawn where the LODs are not: the chunk (holeChunkX, holeChunkZ) and every chunk within `holeRadiusChunks` of it (a circle of chunks, like the chunks that are drawn) are
+    // cut out of the LODs, cell by cell, whatever the tiles that hold them look like (a tile is 32 blocks or more across and does not follow a circle; without the cut a LOD under a chunk
+    // shows through its translucent water). -1: no cut.
     void render(const Matrix4f& view, float fovDegrees, float aspect, double camX, double camY, double camZ, int nearChunks, const std::array<float, 3>& fogColor,
-                const std::array<float, 2>& envFog, gl::GLuint lightmapTexture, int fogNearChunks = -1);
+                const std::array<float, 2>& envFog, gl::GLuint lightmapTexture, int fogNearChunks = -1, int holeChunkX = 0, int holeChunkZ = 0, int holeRadiusChunks = -1);
 
     [[nodiscard]] LodStats stats() const { return stats_; }
 
@@ -94,14 +97,16 @@ public:
 
     // 12 bytes: the place in the tile (x and z in cells, y in blocks), the picture (a layer of the texture array), the tint with the face's shade already in it, and which way the face
     // looks (kFaceTop, kFaceNorth, kFaceSouth, kFaceWest or kFaceEast, which says how the picture is laid on it) in the low three bits of `face`, and which of the quad's four corners the
-    // vertex is (0..3) from bit kCornerShift on (the shader grows each quad a little by it, so that no crack is left between quads).
+    // vertex is (0..3) in the two bits from kCornerShift on (the shader grows each quad a little by it, so that no crack is left between quads); bit kFlatPictureBit says the picture is the sea's: it is
+    // read at its smallest size (one colour), so the sea is the same colour near and far (a picture read at a larger size was a third brighter than the same sea far away).
     struct Vertex {
         std::int16_t x, y, z;
         std::uint16_t layer;
         std::uint8_t r, g, b, face;
     };
     static constexpr std::uint8_t kFaceTop = 0, kFaceNorth = 1, kFaceSouth = 2, kFaceWest = 3, kFaceEast = 4;
-    static constexpr int kFaceMask = 7, kCornerShift = 3;
+    static constexpr int kFaceMask = 7, kCornerShift = 3, kCornerMask = 3;
+    static constexpr std::uint8_t kFlatPictureBit = 32;
     // The columns of a tile as vertices (four to a quad), and the lowest and highest y among them. (Public for the tests.)
     [[nodiscard]] static std::vector<Vertex> buildColumns(const worldgen::LodGrid& grid, int cell, const LodTextures& textures, float& minY, float& maxY);
 
@@ -171,7 +176,7 @@ private:
     BlockModels& models_;
     LodTextures textures_;
     ShaderProgram program_;
-    gl::GLint uViewProj_ = -1, uOffset_ = -1, uCell_ = -1, uFogColor_ = -1, uFogRange_ = -1, uEnvFog_ = -1, uTex_ = -1, uLightmap_ = -1;
+    gl::GLint uViewProj_ = -1, uOffset_ = -1, uCell_ = -1, uFogColor_ = -1, uFogRange_ = -1, uEnvFog_ = -1, uTex_ = -1, uLightmap_ = -1, uHoleOrigin_ = -1, uHoleRadius2_ = -1;
     gl::GLuint vao_ = 0, indexBuffer_ = 0;
     // The vertices of every tile sit in a few big buffers (a buffer for each tile would be thousands of allocations).
     static constexpr std::uint32_t kVerticesPerBuffer = 1u << 20;

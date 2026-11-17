@@ -101,7 +101,9 @@ void WorldRenderer::render(const Camera& camera, int framebufferWidth, int frame
         const std::array<float, 2> envFog = underwater_ ? std::array<float, 2>{waterFogStart_, waterFogEnd_} : std::array<float, 2>{envFogStart_, envFogEnd_};
         models_.uploadPending();  // the pictures the LODs use may be new
         if (lightmapBrightness_ != brightness_ || lightmapSkyChanged()) updateLightmap();  // (the chunks below want it the same way)
-        lod_->render(view, camera.fov, aspect, camera.x, camera.y, camera.z, renderDistance, fogColor, envFog, lightmapTex_, drawRadius(renderDistance));
+        // (The chunks that are drawn: the circle of the render distance, and a ring round it while a zoom is up, see drawable().)
+        lod_->render(view, camera.fov, aspect, camera.x, camera.y, camera.z, renderDistance, fogColor, envFog, lightmapTex_, drawRadius(renderDistance), playerChunkX_.load(), playerChunkZ_.load(),
+                     zoomReach_ > 0 ? renderDistance + 2 : renderDistance);
         gl::DepthMask(1);
         gl::Clear(gl::DEPTH_BUFFER_BIT);
     }
@@ -343,8 +345,14 @@ void WorldRenderer::setGrid(const SectionKey& key, const GpuSection* section, st
 // While a zoom is up, a chunk beyond the render distance is drawn only if the zoom's cone holds it: the ring of chunks round the cone is there so that the light and the faces
 // at the cone's edge have their neighbours, and is not complete itself (it would show as dark slivers along the cone's sides).
 bool WorldRenderer::drawable(int chunkX, int chunkZ) const {
-    if (zoomReach_ <= 0) return true;
     const int dx = chunkX - playerChunkX_.load(), dz = chunkZ - playerChunkZ_.load();
+    if (zoomReach_ <= 0) {
+        // With LODs the chunks end exactly where the LODs begin: a ring of chunks beyond the render distance (there for the light, the mesh of the chunks inside it) was drawn on top of
+        // its LOD, and its translucent sea showed the LOD's sea under it, a lighter band round the chunks.
+        if (lod_ == nullptr || !lodSettings_.enabled) return true;
+        const int r = std::max(lastRadius_, 0);
+        return dx * dx + dz * dz <= r * r;
+    }
     const int r = std::max(lastRadius_, 0) + 2;
     return dx * dx + dz * dz <= r * r || inZoom(ChunkPos{chunkX, chunkZ}, false);
 }

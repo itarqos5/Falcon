@@ -110,7 +110,7 @@ void testShadesAndColours() {
     for (std::size_t q = 0; q + 3 < vertices.size(); q += 4) {
         const auto& v = vertices[q];
         CHECK(v.layer == 4);
-        for (std::size_t k = 0; k < 4; ++k) CHECK((vertices[q + k].face >> LodRenderer::kCornerShift) == static_cast<int>(k));  // each corner says which it is (the shader grows quads by it)
+        for (std::size_t k = 0; k < 4; ++k) CHECK(((vertices[q + k].face >> LodRenderer::kCornerShift) & LodRenderer::kCornerMask) == static_cast<int>(k));  // each corner says which it is (the shader grows quads by it)
         if (v.y == vertices[q + 1].y && v.y == vertices[q + 2].y) {
             ++tops;
             CHECK(v.r == 200 && v.g == 100 && v.b == 50);

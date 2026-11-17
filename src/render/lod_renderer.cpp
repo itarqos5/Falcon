@@ -14,7 +14,7 @@ namespace {
 constexpr char kVertexShader[] = R"(// vk: lod.vert
 #version 330 core
 layout(location = 0) in vec4 aPos;     // x and z in cells, y in blocks, inside the tile; w: the layer of the picture
-layout(location = 1) in vec4 aColor;   // rgb: the tint with the shade of the face in it; a: the face (0 top, 1 north, 2 south, 3 west, 4 east) and, from bit 3, which corner of its quad this is
+layout(location = 1) in vec4 aColor;   // rgb: the tint with the shade of the face in it; a: the face (0 top, 1 north, 2 south, 3 west, 4 east), from bit 3 which corner of its quad this is (two bits), and bit 5: the picture is read at its smallest size
 uniform mat4 uViewProj;
 uniform vec3 uOffset;                  // where the tile's corner is, relative to the camera
 uniform float uCell;                   // the width of a cell, in blocks
@@ -22,13 +22,17 @@ out vec3 vColor;
 out float vDist;
 out vec2 vUv;
 flat out float vLayer;
+flat out float vFlat;
+out vec2 vXZ;
 void main() {
     vec3 block = vec3(aPos.x * uCell, aPos.y, aPos.z * uCell);  // in blocks from the tile's corner, which is a whole number of blocks: a picture lines up from tile to tile
     vec3 p = block + uOffset;
     float dist = length(p);
     int bits = int(aColor.a * 255.0 + 0.5);
     int face = bits & 7;
-    int corner = bits >> 3;
+    int corner = (bits >> 3) & 3;
+    vFlat = float((bits >> 5) & 1);
+    vXZ = p.xz;
     // Sub-pixel quad growth to seal T-junction cracks without inflating or deforming distant mountains:
     float grow = min(0.04, 0.005 + 0.00002 * dist);
     float alongX = corner >= 2 ? 1.0 : -1.0;                    // the corners run (low, low), (low, high), (high, high), (high, low) along the quad's two axes
@@ -55,6 +59,10 @@ in vec3 vColor;
 in float vDist;
 in vec2 vUv;
 flat in float vLayer;
+flat in float vFlat;
+in vec2 vXZ;
+uniform vec2 uHoleOrigin;              // the corner of the chunk the player is in, relative to the camera
+uniform float uHoleRadius2;            // the chunks drawn as chunks: those whose distance (in chunks) from that one is at most this, squared; -1: none
 uniform sampler2DArray uTex;           // the block pictures, mip-mapped: far away a block is its average colour
 uniform sampler2D uLightmap;           // the world's light map: sky light across, block light down
 uniform vec3 uFogColor;
@@ -62,8 +70,14 @@ uniform vec2 uFogRange;                // the world's fog: start, end (distance 
 uniform vec2 uEnvFog;                  // the fog of the medium the eyes are in (water); far away when there is none
 out vec4 frag;
 void main() {
+    // The chunks are drawn where the LODs are not (see LodRenderer::render): a cell inside the circle of chunks is not drawn, except the sea, which stays there as dark as the sea floor under
+    // the chunks' own water: the chunks' water is see-through, and at the edge of the circle the eye looks through it past the last chunk, where nothing else would be behind it.
+    vec2 chunk = floor((vXZ - uHoleOrigin) * (1.0 / 16.0));
+    bool underChunks = dot(chunk, chunk) <= uHoleRadius2;
+    if (underChunks && vFlat < 0.5) discard;
     // One mip level sharper than the hardware would pick: preserves texture definition on distant terrain
-    vec4 t = texture(uTex, vec3(vUv, vLayer), -1.0);
+    // (The sea's picture is read at its smallest size, 8 levels on: it is one colour, the same near and far.)
+    vec4 t = texture(uTex, vec3(vUv, vLayer), mix(-1.0, 8.0, vFlat));
     vec3 rgb = t.rgb;
     // Foliage cutouts: darken only actual leaf holes (alpha near 0), not translucent water:
     if (t.a < 0.25) rgb *= 0.45;
@@ -81,7 +95,7 @@ void main() {
         float fresnel = pow(clamp(vDist / max(100.0, uFogRange.y), 0.0, 1.0), 3.0) * 0.35;
         col = mix(col, uFogColor, fresnel);
     }
-    frag = vec4(mix(col * light, uFogColor, fog), 1.0);
+    frag = vec4(mix(underChunks ? vec3(0.065) : col * light, uFogColor, fog), 1.0);
 }
 )";
 
@@ -242,6 +256,8 @@ LodRenderer::LodRenderer(std::shared_ptr<const worldgen::OverworldGenerator> gen
     uFogColor_ = program_.uniform("uFogColor");
     uFogRange_ = program_.uniform("uFogRange");
     uEnvFog_ = program_.uniform("uEnvFog");
+    uHoleOrigin_ = program_.uniform("uHoleOrigin");
+    uHoleRadius2_ = program_.uniform("uHoleRadius2");
     uTex_ = program_.uniform("uTex");
     uLightmap_ = program_.uniform("uLightmap");
 
@@ -392,7 +408,8 @@ std::vector<LodRenderer::Vertex> LodRenderer::buildColumns(const worldgen::LodGr
     const auto corner = [&](int x, int y, int z, std::uint16_t layer, const Colour& c, std::uint8_t face) {
         // (A quad is always four corners in a row: the vertex shader grows each quad by its corner, see kVertexShader.)
         const auto which = static_cast<std::uint8_t>(out.size() & 3u);
-        out.push_back({static_cast<std::int16_t>(x), static_cast<std::int16_t>(y), static_cast<std::int16_t>(z), layer, c[0], c[1], c[2], static_cast<std::uint8_t>(face | (which << kCornerShift))});
+        const std::uint8_t flat = layer == textures.water ? kFlatPictureBit : 0;
+        out.push_back({static_cast<std::int16_t>(x), static_cast<std::int16_t>(y), static_cast<std::int16_t>(z), layer, c[0], c[1], c[2], static_cast<std::uint8_t>(face | (which << kCornerShift) | flat)});
         lowest = std::min(lowest, y);
         highest = std::max(highest, y);
     };
@@ -639,7 +656,7 @@ void LodRenderer::update(double camX, double camZ, int nearChunks, double upload
 // ---- drawing ------------------------------------------------------------------------------------------------------------------------------------------------------
 
 void LodRenderer::render(const Matrix4f& view, float fovDegrees, float aspect, double camX, double camY, double camZ, int nearChunks, const std::array<float, 3>& fogColor,
-                         const std::array<float, 2>& envFog, gl::GLuint lightmapTexture, int fogNearChunks) {
+                         const std::array<float, 2>& envFog, gl::GLuint lightmapTexture, int fogNearChunks, int holeChunkX, int holeChunkZ, int holeRadiusChunks) {
     stats_.tilesDrawn = 0;
     stats_.trianglesDrawn = 0;
     stats_.levels = 0;
@@ -699,6 +716,8 @@ void LodRenderer::render(const Matrix4f& view, float fovDegrees, float aspect, d
     gl::Uniform3f(uFogColor_, fogColor[0], fogColor[1], fogColor[2]);
     gl::Uniform2f(uFogRange_, fogStart, fogEnd);
     gl::Uniform2f(uEnvFog_, envFog[0], envFog[1]);
+    gl::Uniform2f(uHoleOrigin_, static_cast<float>(holeChunkX * 16 - camX), static_cast<float>(holeChunkZ * 16 - camZ));
+    gl::Uniform1f(uHoleRadius2_, holeRadiusChunks >= 0 ? static_cast<float>(holeRadiusChunks) * static_cast<float>(holeRadiusChunks) : -1.0f);
     gl::Enable(gl::DEPTH_TEST);
     gl::DepthFunc(gl::LEQUAL);
     gl::DepthMask(1);
