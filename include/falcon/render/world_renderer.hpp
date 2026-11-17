@@ -177,6 +177,12 @@ public:
     // Loads and unloads chunks around the player (block coordinates) for a render distance in chunks, and uploads
     // finished meshes for at most `uploadBudgetMs`.
     void update(double playerX, double playerZ, int renderDistance, double uploadBudgetMs);
+    // A zoom (the spyglass) looks far, and what is far is a LOD. While it lasts, the chunks in the cone the camera looks into, out to `reachChunks`, are generated, lit and
+    // drawn as real chunks (the ones beyond the render distance; the rest is as it was). `dirX`, `dirZ`: where the camera looks (horizontally), `halfAngleDegrees`: how wide
+    // the cone is on each side. Call it every frame; a reach of 0 (or no further than the render distance) ends it, and the chunks go back to the cache.
+    void setZoom(double x, double z, float dirX, float dirZ, float halfAngleDegrees, int reachChunks);
+    // How far, in chunks, the world is drawn as chunks now: the render distance, or the reach of the zoom's cone when that is further.
+    [[nodiscard]] int drawRadius(int renderDistance) const { return renderDistance > zoomReach_ ? renderDistance : zoomReach_; }
     // 0..1: how much of the area within `radius` chunks is generated and meshed. 1 means everything is on screen.
     [[nodiscard]] float loadProgress(int radius) const;
     // How far one chunk is, for the loading screen's chunk map (main thread).
@@ -398,6 +404,24 @@ private:
     int lastChunkX_ = 1 << 30;
     int lastChunkZ_ = 1 << 30;
     int lastRadius_ = -1;
+    // The zoom cone (setZoom). The request is the last call's; the sets are made from it when it changed (main thread) and read by the workers, who check a chunk against them
+    // before they spend time on it.
+    struct ZoomCone {
+        double x = 0.0, z = 0.0;
+        float dirX = 0.0f, dirZ = 1.0f, halfAngle = 0.0f;
+        int reach = 0;
+    };
+    using ChunkSet = std::unordered_set<ChunkPos, ChunkPosHash>;
+    ZoomCone zoomRequest_;
+    int zoomReach_ = 0;                                   // the reach of the cone in force, in chunks: 0 when there is none
+    std::array<int, 6> zoomKey_{-1, 0, 0, 0, 0, 0};       // what the sets were made for
+    std::vector<std::pair<ChunkPos, int>> zoomOrder_;     // the chunks to generate, nearest first, with their squared distance (main thread)
+    mutable std::mutex zoomMutex_;
+    std::shared_ptr<const ChunkSet> zoomWanted_;          // the cone beyond the render distance: drawn
+    std::shared_ptr<const ChunkSet> zoomGenerate_;        // and a ring of two chunks round it: generated, so that the light and the faces at the edges have their neighbours
+    [[nodiscard]] bool inZoom(ChunkPos pos, bool generate) const;
+    [[nodiscard]] bool drawable(int chunkX, int chunkZ) const;  // whether the chunk's sections are drawn (see the zoom)
+    bool refreshZoom(int playerChunkX, int playerChunkZ, int renderDistance);  // true when the cone changed
     std::size_t meshBytes_ = 0;
     std::size_t quadsTotal_ = 0;
     RenderStats stats_;

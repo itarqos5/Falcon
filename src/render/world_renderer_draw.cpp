@@ -48,7 +48,7 @@ void WorldRenderer::render(const Camera& camera, int framebufferWidth, int frame
     measureGpu(true);
     models_.animate(std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count() * 20.0);  // water, lava and fire move
     const float aspect = static_cast<float>(framebufferWidth) / static_cast<float>(std::max(1, framebufferHeight));
-    const float farPlane = std::max(256.0f, static_cast<float>(renderDistance + 4) * 16.0f * 1.5f);
+    const float farPlane = std::max(256.0f, static_cast<float>(drawRadius(renderDistance) + 4) * 16.0f * 1.5f);
     const Matrix4f view = cameraView(camera);
     const Matrix4f viewProj = perspective(camera.fov, aspect, 0.05f, farPlane) * view;
     lastViewProj_ = viewProj;
@@ -92,7 +92,7 @@ void WorldRenderer::render(const Camera& camera, int framebufferWidth, int frame
         const std::array<float, 2> envFog = underwater_ ? std::array<float, 2>{waterFogStart_, waterFogEnd_} : std::array<float, 2>{envFogStart_, envFogEnd_};
         models_.uploadPending();  // the pictures the LODs use may be new
         if (lightmapBrightness_ != brightness_ || lightmapSkyChanged()) updateLightmap();  // (the chunks below want it the same way)
-        lod_->render(view, camera.fov, aspect, camera.x, camera.y, camera.z, renderDistance, fogColor, envFog, lightmapTex_);
+        lod_->render(view, camera.fov, aspect, camera.x, camera.y, camera.z, renderDistance, fogColor, envFog, lightmapTex_, drawRadius(renderDistance));
         gl::DepthMask(1);
         gl::Clear(gl::DEPTH_BUFFER_BIT);
     }
@@ -105,7 +105,7 @@ void WorldRenderer::render(const Camera& camera, int framebufferWidth, int frame
     gl::FrontFace(gl::CCW);
     world_.use();
     gl::UniformMatrix4fv(uViewProj_, 1, 0, viewProj.m.data());
-    const float fogEnd = static_cast<float>(renderDistance) * 16.0f;
+    const float fogEnd = static_cast<float>(drawRadius(renderDistance)) * 16.0f;  // (a zoom's chunks reach further, and the haze with them)
     if (underwater_) {
         gl::Uniform3f(uFogColor_, waterFogColor_[0], waterFogColor_[1], waterFogColor_[2]);
         gl::Uniform2f(uEnvFog_, waterFogStart_, waterFogEnd_);
@@ -114,7 +114,7 @@ void WorldRenderer::render(const Camera& camera, int framebufferWidth, int frame
         gl::Uniform2f(uEnvFog_, envFogStart_, envFogEnd_);  // (the dimension's own fog, if it has one)
     }
     if (lodsOn) {  // the haze belongs to the far end of the LODs, not to the edge of the chunks
-        const auto [lodFogStart, lodFogEnd] = LodRenderer::fogRange(lodSettings_.radiusChunks, renderDistance);
+        const auto [lodFogStart, lodFogEnd] = LodRenderer::fogRange(lodSettings_.radiusChunks, drawRadius(renderDistance));
         gl::Uniform2f(uFogRange_, lodFogStart, lodFogEnd);
     } else {
         gl::Uniform2f(uFogRange_, fogEnd * 0.6f, fogEnd);
@@ -143,7 +143,7 @@ void WorldRenderer::render(const Camera& camera, int framebufferWidth, int frame
     lastViewProj_ = viewProj;
     lastFrustum_ = frustum;
     lastCameraPos_ = {camera.x, camera.y, camera.z};
-    const float reach = (static_cast<float>(renderDistance) + 1.0f) * 16.0f + 16.0f;
+    const float reach = (static_cast<float>(drawRadius(renderDistance)) + 1.0f) * 16.0f + 16.0f;
     visible_.clear();
     // Inside solid rock there is no air to walk out of, and the game then draws everything in view (as the game itself does: it turns its
     // own cave culling off when the camera is inside a solid block).
@@ -331,6 +331,15 @@ void WorldRenderer::setGrid(const SectionKey& key, const GpuSection* section, st
     gridVisibility_[cell] = visibility;
 }
 
+// While a zoom is up, a chunk beyond the render distance is drawn only if the zoom's cone holds it: the ring of chunks round the cone is there so that the light and the faces
+// at the cone's edge have their neighbours, and is not complete itself (it would show as dark slivers along the cone's sides).
+bool WorldRenderer::drawable(int chunkX, int chunkZ) const {
+    if (zoomReach_ <= 0) return true;
+    const int dx = chunkX - playerChunkX_.load(), dz = chunkZ - playerChunkZ_.load();
+    const int r = std::max(lastRadius_, 0) + 2;
+    return dx * dx + dz * dz <= r * r || inZoom(ChunkPos{chunkX, chunkZ}, false);
+}
+
 // The sections that may be seen, found by scanning every one with a mesh: those within the render distance and inside the view frustum,
 // nearest first.
 void WorldRenderer::collectVisibleByScan(const Camera& camera, const Frustum& frustum, float reach) {
@@ -342,6 +351,7 @@ void WorldRenderer::collectVisibleByScan(const Camera& camera, const Frustum& fr
         const float cz = oz + 8.0f;
         const float horizontal2 = cx * cx + cz * cz;
         if (horizontal2 > reach * reach) continue;  // beyond the render distance
+        if (!drawable(key.x, key.z)) continue;
         if (!frustum.mayContain({ox, oy, oz}, {ox + 16.0f, oy + 16.0f, oz + 16.0f})) continue;
         const float cy = oy + 8.0f;
         visible_.push_back({&section, ox, oy, oz, horizontal2 + cy * cy, key.x, key.z});
@@ -380,7 +390,7 @@ void WorldRenderer::collectVisibleByTraversal(const Camera& camera, const Frustu
     for (std::size_t head = 0; head < traversal_.size(); ++head) {
         const TraversalNode node = traversal_[head];
         // A section that has a mesh, and is in view, is drawn.
-        if (const GpuSection* section = gridSection_[node.cell]; section != nullptr) {
+        if (const GpuSection* section = gridSection_[node.cell]; section != nullptr && drawable(node.x, node.z)) {
             const float ox = static_cast<float>(node.x * 16 - camera.x);
             const float oy = static_cast<float>(kMinY + node.y * 16 - camera.y);
             const float oz = static_cast<float>(node.z * 16 - camera.z);
@@ -486,7 +496,7 @@ bool WorldRenderer::lightmapSkyChanged() const {
 
 void WorldRenderer::drawSelection(const Camera& camera, int framebufferWidth, int framebufferHeight, int x, int y, int z) {
     const float aspect = static_cast<float>(framebufferWidth) / static_cast<float>(std::max(1, framebufferHeight));
-    const float farPlane = std::max(256.0f, static_cast<float>(lastRadius_ + 4) * 16.0f * 1.5f);
+    const float farPlane = std::max(256.0f, static_cast<float>(std::max(lastRadius_, zoomReach_) + 4) * 16.0f * 1.5f);
     const Matrix4f viewProj = perspective(camera.fov, aspect, 0.05f, farPlane) * cameraView(camera);
     // The lines round the block's OUTLINE shape (a torch's small post, a slab's half block, a fence's posts and rails), shifted the
     // way the block is drawn when it is a plant, and a hair bigger so the block's own faces do not hide them.
@@ -552,7 +562,7 @@ void WorldRenderer::drawBreakOverlay(const Camera& camera, int framebufferWidth,
     const OutlineShape& outline = blockOutlines().shape(block);
     if (outline.boxes.empty()) return;
     const float aspect = static_cast<float>(framebufferWidth) / static_cast<float>(std::max(1, framebufferHeight));
-    const float farPlane = std::max(256.0f, static_cast<float>(lastRadius_ + 4) * 16.0f * 1.5f);
+    const float farPlane = std::max(256.0f, static_cast<float>(std::max(lastRadius_, zoomReach_) + 4) * 16.0f * 1.5f);
     const Matrix4f viewProj = perspective(camera.fov, aspect, 0.05f, farPlane) * cameraView(camera);
     double offsetX = 0.0, offsetZ = 0.0;
     if (blockRegistry().state(block).has(kStateHasOffset)) {

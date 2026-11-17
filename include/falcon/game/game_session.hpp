@@ -480,6 +480,7 @@ private:
     // ---- eating and drinking (game_session_use.cpp): LivingEntity.startUsingItem / updatingUsingItem / completeUsingItem and Consumable ----
     bool usingItem_ = false;
     bool usingSpyglass_ = false;
+    float lastAspect_ = 16.0f / 9.0f;  // the window's width over its height, as of the last frame drawn (the zoom's cone is as wide as the view)
     [[nodiscard]] bool usingSpyglass() const { return usingSpyglass_; }
     void startUsingSpyglass();
     void stopUsingSpyglass();

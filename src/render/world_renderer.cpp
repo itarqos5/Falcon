@@ -578,7 +578,7 @@ void WorldRenderer::requestChunk(ChunkPos pos, float priority) {
         const int dx = pos.x - playerChunkX_.load();
         const int dz = pos.z - playerChunkZ_.load();
         const int far = wantedRadius_.load() + 3;
-        if (dx * dx + dz * dz <= far * far) {  // else: the player moved on
+        if (dx * dx + dz * dz <= far * far || inZoom(pos, true)) {  // else: the player moved on
             if (std::shared_ptr<Chunk> cached = chunkCache_.take(pos)) {
                 chunk = std::move(cached);  // it was here before: its blocks (and anything the player changed) come back from the small copy
             } else if (overworld_) {
@@ -718,7 +718,7 @@ void WorldRenderer::requestSectionMesh(const SectionKey& key, float priority) {
         const int ddx = key.x - playerChunkX_.load();
         const int ddz = key.z - playerChunkZ_.load();
         const int far = wantedRadius_.load() + 3;
-        if (ddx * ddx + ddz * ddz <= far * far) {
+        if (ddx * ddx + ddz * ddz <= far * far || inZoom({key.x, key.z}, true)) {
             const bool lod = leafLodFor(key);
             auto started = std::chrono::steady_clock::now();
             SectionMesh mesh = meshSection(around, models_, key.x * 16, kMinY + key.y * 16, key.z * 16, smoothLighting_, cutoutLeaves_, lod);
@@ -892,7 +892,8 @@ void WorldRenderer::update(double playerX, double playerZ, int renderDistance, d
     playerChunkX_ = pcx;
     playerChunkZ_ = pcz;
     wantedRadius_ = renderDistance;
-    const bool moved = pcx != lastChunkX_ || pcz != lastChunkZ_ || renderDistance != lastRadius_;
+    const bool zoomChanged = refreshZoom(pcx, pcz, renderDistance);
+    const bool moved = pcx != lastChunkX_ || pcz != lastChunkZ_ || renderDistance != lastRadius_ || zoomChanged;
     lastChunkX_ = pcx;
     lastChunkZ_ = pcz;
     lastRadius_ = renderDistance;
@@ -909,7 +910,7 @@ void WorldRenderer::update(double playerX, double playerZ, int renderDistance, d
         const int dx = r.pos.x - pcx;
         const int dz = r.pos.z - pcz;
         const int stream = streamRadius(renderDistance);
-        if (dx * dx + dz * dz <= stream * stream) acceptChunk(r.pos, std::move(r.chunk));
+        if (dx * dx + dz * dz <= stream * stream || inZoom(r.pos, true)) acceptChunk(r.pos, std::move(r.chunk));
     }
 
     // A server's chunks that came (and the ones it says to forget).
@@ -958,13 +959,17 @@ void WorldRenderer::update(double playerX, double playerZ, int renderDistance, d
             const ChunkPos pos{pcx + o.dx, pcz + o.dz};
             if (level_.chunk(pos) == nullptr && !chunkRequested_.contains(pos)) requestChunk(pos, static_cast<float>(o.d2));
         }
-        // Let go of what is now too far away.
+        // The chunks a zoom looks at, beyond the circle (and the ring that lets them be lit): nearest first, like the rest.
+        for (const auto& [pos, d2] : zoomOrder_) {
+            if (level_.chunk(pos) == nullptr && !chunkRequested_.contains(pos)) requestChunk(pos, static_cast<float>(d2));
+        }
+        // Let go of what is now too far away (the chunks of the zoom stay while it lasts).
         std::vector<ChunkPos> unload;
         const int keep = streamRadius(renderDistance) * streamRadius(renderDistance);
         for (const auto& [pos, chunk] : level_.chunks()) {
             const int dx = pos.x - pcx;
             const int dz = pos.z - pcz;
-            if (dx * dx + dz * dz > keep) unload.push_back(pos);
+            if (dx * dx + dz * dz > keep && !inZoom(pos, true)) unload.push_back(pos);
         }
         for (const ChunkPos& pos : unload) {
             dropSections(pos);
@@ -1120,8 +1125,78 @@ bool WorldRenderer::isChunkRendered(int chunkX, int chunkZ) const {
     if (r <= 0) return level_.chunk(ChunkPos{chunkX, chunkZ}) != nullptr;
     const int dx = chunkX - pcx;
     const int dz = chunkZ - pcz;
-    if (dx * dx + dz * dz > r * r) return false;
+    if (dx * dx + dz * dz > r * r && !inZoom(ChunkPos{chunkX, chunkZ}, false)) return false;  // (the chunks a zoom looks at count as drawn)
     return level_.chunk(ChunkPos{chunkX, chunkZ}) != nullptr;
+}
+
+// ---- the zoom cone ----------------------------------------------------------------------------------------------------------------------------------------------
+
+void WorldRenderer::setZoom(double x, double z, float dirX, float dirZ, float halfAngleDegrees, int reachChunks) {
+    zoomRequest_.x = x;
+    zoomRequest_.z = z;
+    const float length = std::sqrt(dirX * dirX + dirZ * dirZ);
+    zoomRequest_.dirX = length > 1.0e-4f ? dirX / length : 0.0f;
+    zoomRequest_.dirZ = length > 1.0e-4f ? dirZ / length : 1.0f;
+    zoomRequest_.halfAngle = halfAngleDegrees;
+    zoomRequest_.reach = reachChunks;
+}
+
+bool WorldRenderer::inZoom(ChunkPos pos, bool generate) const {
+    std::shared_ptr<const ChunkSet> set;
+    {
+        std::lock_guard<std::mutex> lock(zoomMutex_);
+        set = generate ? zoomGenerate_ : zoomWanted_;
+    }
+    return set != nullptr && set->count(pos) != 0;
+}
+
+// Makes the sets of the cone again when what it is made from changed (the chunk the player is in, where the camera looks to 3 degrees, how far and how wide): the chunks beyond the
+// render distance whose middle lies inside the cone (a chunk's own half-width, 11 blocks, is added to the angle), and a ring of two round them. At most 2000 chunks.
+bool WorldRenderer::refreshZoom(int pcx, int pcz, int renderDistance) {
+    const ZoomCone& c = zoomRequest_;
+    const bool active = c.reach > renderDistance + 1;
+    const int angle = static_cast<int>(std::lround(std::atan2(static_cast<double>(c.dirZ), static_cast<double>(c.dirX)) * 57.29577951308232 / 3.0));
+    const std::array<int, 6> key = {active ? 1 : 0, pcx, pcz, active ? angle : 0, active ? c.reach : 0, active ? static_cast<int>(std::lround(c.halfAngle)) : 0};
+    if (key == zoomKey_) return false;
+    zoomKey_ = key;
+    zoomReach_ = active ? c.reach : 0;
+    auto wanted = std::make_shared<ChunkSet>();
+    auto generate = std::make_shared<ChunkSet>();
+    zoomOrder_.clear();
+    if (active) {
+        const double halfAngle = c.halfAngle;
+        const int r2 = renderDistance * renderDistance;
+        const int reach = c.reach;
+        for (int dz = -reach; dz <= reach && wanted->size() < 2000; ++dz) {
+            for (int dx = -reach; dx <= reach && wanted->size() < 2000; ++dx) {
+                if (dx * dx + dz * dz <= r2 || dx * dx + dz * dz > (reach + 1) * (reach + 1)) continue;
+                const double ox = (pcx + dx) * 16.0 + 8.0 - c.x, oz = (pcz + dz) * 16.0 + 8.0 - c.z;
+                const double distance = std::sqrt(ox * ox + oz * oz);
+                if (distance < 1.0) continue;
+                const double cosine = std::clamp((ox * c.dirX + oz * c.dirZ) / distance, -1.0, 1.0);
+                const double degrees = std::acos(cosine) * 57.29577951308232;
+                const double margin = std::atan2(11.5, distance) * 57.29577951308232;
+                if (degrees <= halfAngle + margin) wanted->insert(ChunkPos{pcx + dx, pcz + dz});
+            }
+        }
+        for (const ChunkPos& p : *wanted) {
+            for (int rz = -2; rz <= 2; ++rz) {
+                for (int rx = -2; rx <= 2; ++rx) generate->insert(ChunkPos{p.x + rx, p.z + rz});
+            }
+        }
+        zoomOrder_.reserve(generate->size());
+        for (const ChunkPos& p : *generate) {
+            const int dx = p.x - pcx, dz = p.z - pcz;
+            if (dx * dx + dz * dz > (renderDistance + 3) * (renderDistance + 3)) zoomOrder_.emplace_back(p, dx * dx + dz * dz);
+        }
+        std::sort(zoomOrder_.begin(), zoomOrder_.end(), [](const auto& a, const auto& b) { return a.second < b.second; });
+    }
+    {
+        std::lock_guard<std::mutex> lock(zoomMutex_);
+        zoomWanted_ = std::move(wanted);
+        zoomGenerate_ = std::move(generate);
+    }
+    return true;
 }
 
 bool WorldRenderer::isBlockInRenderedChunk(int x, int z) const {

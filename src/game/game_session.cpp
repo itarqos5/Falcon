@@ -570,6 +570,29 @@ void GameSession::update(double dt, bool active, int framebufferWidth, int frame
     renderer_.setSmoothLighting(services_.options.ambientOcclusion);
     renderer_.setCutoutLeaves(services_.options.cutoutLeaves);
     renderer_.setLods({services_.options.lodsEnabled, services_.options.lodChunkRadius, services_.options.lodDetail});
+    {   // A spyglass looks far, and what is far is a LOD: the chunks it looks at are made and drawn as real chunks while it is up (out to 10 times the render distance, at most 56
+        // chunks), in a cone as wide as the zoomed view.
+        constexpr float pi = 3.14159265358979f;
+        // (Test aids: FALCON_TEST_ZOOM holds a spyglass to the eye of a pinned camera, where no tick would zoom it; FALCON_NO_ZOOM_CHUNKS leaves the cone out, to compare.)
+        static const bool testZoom = std::getenv("FALCON_TEST_ZOOM") != nullptr, noZoomChunks = std::getenv("FALCON_NO_ZOOM_CHUNKS") != nullptr;
+        if (testZoom && pinnedPose_) {
+            usingSpyglass_ = true;
+            fovModifier_ = fovModifierO_ = 0.1f;
+        }
+        const bool zoom = usingSpyglass_ && ready_ && perspective_ == 0 && info_.gameType != 3 && !remote_ && !noZoomChunks;
+        const float yaw = static_cast<float>(player_.yaw) * pi / 180.0f;
+        const float verticalFov = static_cast<float>(services_.options.fov) * fovModifier_ * pi / 180.0f;
+        const float horizontalHalf = std::atan(std::tan(verticalFov * 0.5f) * lastAspect_);
+        const float halfAngle = std::max(horizontalHalf, verticalFov * 0.5f) * 180.0f / pi + 5.0f;
+        const int reach = std::min(60, static_cast<int>(std::lround(static_cast<double>(distance) / std::max(0.1, static_cast<double>(fovModifier_)))));
+        // (FALCON_TEST_CONE=<degrees> draws a cone of real chunks of that half-width with the normal view, to put real chunks beside LODs.)
+        static const char* const testCone = std::getenv("FALCON_TEST_CONE");
+        float coneHalf = 0.0f, coneTurn = 0.0f;  // ("16" or "16,25": half-width, and how many degrees the cone is turned from where the camera looks)
+        if (testCone != nullptr && pinnedPose_ && ready_ && std::sscanf(testCone, "%f,%f", &coneHalf, &coneTurn) >= 1) {
+            const float turned = yaw + coneTurn * pi / 180.0f;
+            renderer_.setZoom(player_.x, player_.z, -std::sin(turned), std::cos(turned), coneHalf, 40);
+        } else renderer_.setZoom(player_.x, player_.z, -std::sin(yaw), std::cos(yaw), halfAngle, zoom ? reach : 0);
+    }
     renderer_.update(player_.x, player_.z, distance, ready_ ? 1.5 : 6.0);
     // (The old idle call to trimWorkingSet() was removed: SetProcessWorkingSetSize(-1,-1) empties every page out of RAM, so the
     // next frame faults them all back in - a ~0.7 s stall that showed up as a stutter whenever the world went quiet. The memory it

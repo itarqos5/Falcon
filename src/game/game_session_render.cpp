@@ -108,6 +108,7 @@ void GameSession::renderLocalMobs(const std::array<double, 3>& camPos) {
 
 void GameSession::renderWorld(int framebufferWidth, int framebufferHeight) {
     const Camera cam = camera();
+    if (framebufferWidth > 0 && framebufferHeight > 0) lastAspect_ = static_cast<float>(framebufferWidth) / static_cast<float>(framebufferHeight);
     // A torch (or any light-giving block) in the hand lights the blocks round the player while it is held.
     // (the main hand or the offhand: either one lights the way)
     const int carried = ready_ && info_.gameType != 3 ? std::max(carriedLightLevel(inventory_.selectedItem()), carriedLightLevel(inventory_.offhand())) : 0;
