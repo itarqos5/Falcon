@@ -187,6 +187,7 @@ add_library(falcon_base
     src/util/math.cpp
     src/util/text_util.cpp
     src/util/options_file.cpp
+    src/util/log.cpp
     src/util/base64.cpp
     src/util/server_address.cpp
     src/assets/resource_location.cpp

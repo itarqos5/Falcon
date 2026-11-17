@@ -1,10 +1,13 @@
 #include "falcon/client.hpp"
 #include "falcon/platform/dialog.hpp"
+#include "falcon/util/log.hpp"
+#include "falcon/version.hpp"
 
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <exception>
+#include <filesystem>
 #include <stdexcept>
 #include <string>
 
@@ -23,6 +26,20 @@ bool isAutomatedRun(int argc, char** argv) {
     return false;
 }
 
+// What the program was started with, for the log's header: the values that name the account are left out.
+std::string describeArguments(int argc, char** argv) {
+    std::string out;
+    for (int i = 1; i < argc; ++i) {
+        if (!out.empty()) out += ' ';
+        out += argv[i];
+        if ((std::strcmp(argv[i], "--username") == 0 || std::strcmp(argv[i], "--uuid") == 0) && i + 1 < argc) {
+            out += " <hidden>";
+            ++i;
+        }
+    }
+    return out;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -31,6 +48,26 @@ int main(int argc, char** argv) {
     falcon::attachParentConsole();
     // The log is read while the game runs (the launcher's log, a script waiting for "spawn area loaded"): a line goes out when it is written, also into a file or a pipe.
     std::setvbuf(stdout, nullptr, _IOLBF, 4096);
+
+    // The client's own log (logs/client.log in Falcon's folder) and the crash report. A scripted run (a capture, a background run) does not fill the person's folder unless it is
+    // told where to write (FALCON_LOG_DIR).
+    const bool automated = isAutomatedRun(argc, argv);
+    {
+        falcon::log::Settings settings;
+        settings.version = "Falcon " FALCON_VERSION_STRING " (Minecraft Java 26.3)";
+        settings.commandLine = describeArguments(argc, argv);
+        bool help = false;  // (a --help run must not push the log of the last real run out of the way)
+        for (int i = 1; i < argc; ++i) help = help || std::strcmp(argv[i], "--help") == 0 || std::strcmp(argv[i], "-h") == 0;
+        settings.toFile = !automated && !help;
+        falcon::log::init(settings);
+        falcon::log::installCrashHandler([automated](const std::filesystem::path& report) {
+            if (!automated) falcon::showErrorDialog("Falcon has crashed", "Falcon stopped because of an error. What happened and where is written to:\n\n" + report.string());
+        });
+    }
+    struct LogEnd {  // (the last line of the log says the run ended cleanly)
+        int code = 0;
+        ~LogEnd() { falcon::log::shutdown(code); }
+    } logEnd;
 
     try {
         falcon::ClientOptions options = falcon::parseOptions(argc, argv);
@@ -58,14 +95,18 @@ int main(int argc, char** argv) {
         }
 #endif
         falcon::Client client(std::move(options));
-        return client.run();
+        logEnd.code = client.run();
+        return logEnd.code;
     } catch (const std::exception& e) {
-        if (isAutomatedRun(argc, argv)) {
+        // A fatal error the program caught itself (no assets, no OpenGL ...): a report with the stack and what the game was doing, then the person is told.
+        falcon::log::writeCrashReport(std::string("fatal error: ") + falcon::log::typeName(typeid(e)), e.what());
+        if (automated) {
             std::fprintf(stderr, "[falcon] fatal: %s\n", e.what());
             std::fflush(stderr);
         } else {
             falcon::showErrorDialog("Falcon", e.what());
         }
+        logEnd.code = 1;
         return 1;
     }
 }

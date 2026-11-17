@@ -42,6 +42,11 @@ add_executable(falcon_lod_tests EXCLUDE_FROM_ALL test_lod.cpp)
 target_link_libraries(falcon_lod_tests PRIVATE falcon::core falcon_warnings)
 add_test(NAME falcon_lod_tests COMMAND falcon_lod_tests)
 
+# The client log and the crash report (util/log.hpp).
+add_executable(falcon_log_tests EXCLUDE_FROM_ALL test_log.cpp)
+target_link_libraries(falcon_log_tests PRIVATE falcon::core falcon_warnings)
+add_test(NAME falcon_log_tests COMMAND falcon_log_tests)
+
 # The advancements: the tree read from data files made on the spot, laid out, and checked against what the player holds.
 add_executable(falcon_advancement_tests EXCLUDE_FROM_ALL test_advancements.cpp)
 target_link_libraries(falcon_advancement_tests PRIVATE falcon::core falcon_warnings)
@@ -62,7 +67,7 @@ add_test(NAME falcon_net_tests COMMAND falcon_net_tests)
 
 add_custom_target(check
     COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure
-    DEPENDS falcon_tests falcon_worldgen_tests falcon_worldgen_chunk_tests falcon_item_tests falcon_world_tests falcon_net_tests falcon_lod_tests falcon_advancement_tests falcon_logic_tests
+    DEPENDS falcon_tests falcon_worldgen_tests falcon_worldgen_chunk_tests falcon_item_tests falcon_world_tests falcon_net_tests falcon_lod_tests falcon_advancement_tests falcon_log_tests falcon_logic_tests
     WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
     COMMENT "Running the unit tests"
     USES_TERMINAL
