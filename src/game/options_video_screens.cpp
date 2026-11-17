@@ -6,9 +6,13 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
+#include <functional>
+#include <string>
 #include <type_traits>
+#include <vector>
 
 namespace falcon {
 namespace {
@@ -19,14 +23,98 @@ std::string fixed(double v, int decimals) {
     return buffer;
 }
 
-
 }  // namespace
 
 // ---- Video Settings -------------------------------------------------------------------------
 
+// The pages and options of the screen. An option reads and writes one whole number (a switch is 0 or 1, a row of values the index of the shown one, a slider the step it is at),
+// whatever the field it stands for is: `read` and `write` go to the field, `set` is what a change made in the screen does to the pending options (the quality options also turn
+// the preset to Custom).
+struct VideoSettingsModel {
+    enum class Kind { Switch, Cycle, Range };
+    enum class Impact { None, Low, Medium, High };
+    struct Option {
+        Kind kind = Kind::Switch;
+        std::string name, tooltip;
+        Impact impact = Impact::None;
+        std::vector<std::string> values;               // Switch (Off, On) and Cycle: the name of each value
+        int min = 0, max = 0;                          // Range
+        std::function<std::string(int)> label;         // Range: the text of a step
+        std::function<int(const GameOptions&)> read;
+        std::function<void(GameOptions&, int)> write;
+        std::function<void(GameOptions&, int)> set;
+        std::function<bool(const GameOptions&)> enabled;  // (empty: always)
+        float hover = 0.0f;                            // 0..1, eased: the red of the hovered row
+    };
+    struct Page {
+        std::string name;
+        std::vector<std::vector<std::unique_ptr<Option>>> blocks;  // groups of options, a gap between them
+    };
+    struct Block {
+        std::string title;  // (only the search results have one: the page it came from)
+        std::vector<Option*> options;
+    };
+    struct RowInfo {
+        Option* option;
+        int y;
+    };
+
+    GameOptions pending;  // the options as the screen has them, until Apply
+    std::vector<Page> pages;
+    int page = 0;
+    std::string query;
+    std::vector<Block> found;  // the search results
+    float scroll = 0.0f;
+    int totalLength = 0;
+    Option* dragging = nullptr;
+    bool draggingScroll = false;
+    std::vector<RowInfo> rows;  // what was drawn last frame, for the mouse
+    std::array<float, 8> buttonHover{};
+    std::array<float, 3> actionHover{};
+
+    [[nodiscard]] bool searching() const { return !query.empty(); }
+    [[nodiscard]] std::vector<Block> blocksOf() const {
+        if (searching()) return found;
+        std::vector<Block> out;
+        for (const auto& block : pages[static_cast<std::size_t>(page)].blocks) {
+            Block b;
+            for (const auto& option : block) b.options.push_back(option.get());
+            out.push_back(std::move(b));
+        }
+        return out;
+    }
+    template <class F>
+    void forEachOption(F&& f) {
+        for (Page& p : pages) {
+            for (auto& block : p.blocks) {
+                for (auto& option : block) f(*option);
+            }
+        }
+    }
+};
+
 namespace {
 
-constexpr std::uint32_t kAccent = 0xFF5BD18A;  // the green of what is selected
+using Model = VideoSettingsModel;
+using Option = VideoSettingsModel::Option;
+using Kind = VideoSettingsModel::Kind;
+using Impact = VideoSettingsModel::Impact;
+
+// ---- VulkanMod's colours and sizes (config/gui/util/VGuiConstants.java and the widgets) ----
+
+constexpr std::uint32_t pack(float r, float g, float b, float a) {
+    const auto c = [](float v) { return static_cast<std::uint32_t>(v * 255.0f + 0.5f); };
+    return (c(a) << 24) | (c(r) << 16) | (c(g) << 8) | c(b);
+}
+std::uint32_t withAlpha(std::uint32_t argb, float multiplier) {
+    const auto a = static_cast<std::uint32_t>(std::clamp(static_cast<float>(argb >> 24) * multiplier, 0.0f, 255.0f) + 0.5f);
+    return (a << 24) | (argb & 0xFFFFFFu);
+}
+constexpr std::uint32_t kRed = pack(0.4f, 0.05f, 0.05f, 0.8f);
+constexpr std::uint32_t kBlack = pack(0.0f, 0.0f, 0.0f, 1.0f);
+constexpr std::uint32_t kGrey = pack(0.6f, 0.6f, 0.6f, 1.0f);
+constexpr int kMargin = 10, kPageWidth = 100, kWidgetHeight = 20, kWidgetMargin = 5;
+constexpr int kListTop = 32, kListBottom = 60, kItemMargin = 3, kIconHeight = 28;
 
 // How far out the LODs reach, for a place on the slider: 64 to 8192 chunks on a scale where every doubling is the same distance, in steps that grow with the number.
 int lodChunksFromSlider(double t) {
@@ -36,101 +124,340 @@ int lodChunksFromSlider(double t) {
 }
 double sliderFromLodChunks(int chunks) { return std::clamp(std::log(std::max(chunks, 1) / 64.0) / std::log(128.0), 0.0, 1.0); }
 
-// One of the tabs down the left of the screen.
-class TabButton final : public Widget {
-public:
-    TabButton(std::string label, int px, int py, int w, int h) : Widget(px, py, w, h), label_(std::move(label)) {}
-    bool selected = false;
+std::string lower(std::string s) {
+    for (char& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return s;
+}
 
-protected:
-    void renderContents(GuiGraphics& g) override {
-        const bool hot = isHovered();
-        g.fill(x, y, x + width, y + height, selected ? 0xE0262C30u : hot ? 0x70FFFFFFu : 0x50000000u);
-        if (selected) g.fill(x, y, x + 3, y + height, kAccent);
-        g.text(label_, static_cast<float>(x + 11), static_cast<float>(y + (height - 8) / 2), selected || hot ? 0xFFFFFFFFu : 0xFFB8B8B8u, true, false, selected);
+[[nodiscard]] std::string shown(const Option& o, int v) {
+    if (o.kind == Kind::Range) return o.label ? o.label(v) : std::to_string(v);
+    if (o.values.empty()) return {};
+    return o.values[static_cast<std::size_t>(std::clamp(v, 0, static_cast<int>(o.values.size()) - 1))];
+}
+
+// ---- the options ----
+
+// A page's options are made with these; `quality` ones turn the preset to Custom when they change.
+struct Builder {
+    VideoSettingsModel& model;
+    ScreenServices& services;
+    std::function<std::string(const std::string&)> tr;
+
+    Option& add(std::size_t page, std::size_t block, Option&& option, bool quality) {
+        if (!option.set) {
+            option.set = quality ? std::function<void(GameOptions&, int)>([write = option.write](GameOptions& g, int v) {
+                write(g, v);
+                g.graphicsPreset = GraphicsPreset::Custom;
+            })
+                                 : option.write;
+        }
+        auto& p = model.pages[page];
+        if (p.blocks.size() <= block) p.blocks.resize(block + 1);
+        p.blocks[block].push_back(std::make_unique<Option>(std::move(option)));
+        return *p.blocks[block].back();
     }
-
-private:
-    std::string label_;
+    template <class T>
+    Option& toggle(std::size_t page, std::size_t block, const std::string& name, const std::string& tip, Impact impact, T GameOptions::*field, bool quality) {
+        Option o;
+        o.kind = Kind::Switch;
+        o.name = name;
+        o.tooltip = tip;
+        o.impact = impact;
+        o.values = {tr("options.off"), tr("options.on")};
+        o.read = [field](const GameOptions& g) { return static_cast<int>(g.*field); };
+        o.write = [field](GameOptions& g, int v) { g.*field = static_cast<T>(v != 0); };
+        return add(page, block, std::move(o), quality);
+    }
+    template <class T>
+    Option& cycle(std::size_t page, std::size_t block, const std::string& name, const std::string& tip, Impact impact, std::vector<std::string> values, T GameOptions::*field,
+                  bool quality) {
+        Option o;
+        o.kind = Kind::Cycle;
+        o.name = name;
+        o.tooltip = tip;
+        o.impact = impact;
+        o.values = std::move(values);
+        o.read = [field](const GameOptions& g) { return static_cast<int>(g.*field); };
+        o.write = [field](GameOptions& g, int v) { g.*field = static_cast<T>(v); };
+        return add(page, block, std::move(o), quality);
+    }
+    Option& range(std::size_t page, std::size_t block, const std::string& name, const std::string& tip, Impact impact, int min, int max, std::function<int(const GameOptions&)> read,
+                  std::function<void(GameOptions&, int)> write, std::function<std::string(int)> label, bool quality) {
+        Option o;
+        o.kind = Kind::Range;
+        o.name = name;
+        o.tooltip = tip;
+        o.impact = impact;
+        o.min = min;
+        o.max = max;
+        o.read = std::move(read);
+        o.write = std::move(write);
+        o.label = std::move(label);
+        return add(page, block, std::move(o), quality);
+    }
+    template <class T>
+    Option& intRange(std::size_t page, std::size_t block, const std::string& name, const std::string& tip, Impact impact, int min, int max, T GameOptions::*field,
+                     std::function<std::string(int)> label, bool quality) {
+        return range(page, block, name, tip, impact, min, max, [field](const GameOptions& g) { return static_cast<int>(g.*field); },
+                     [field](GameOptions& g, int v) { g.*field = static_cast<T>(v); }, std::move(label), quality);
+    }
 };
 
-// The three presets as cards: what each sets, and a frame round the one that is on.
-class PresetRow final : public ScrollList::Entry {
-public:
-    static constexpr int kHeight = 98;
-    struct Card {
-        std::string name;
-        std::array<std::string, 4> lines;
-    };
-    PresetRow(const GameOptions& options, int rowsWidth, std::array<Card, 3> cards, std::function<void(int)> pick)
-        : Entry(kHeight), options_(options), rowsWidth_(rowsWidth), cards_(std::move(cards)), pick_(std::move(pick)) {}
+void buildPages(VideoSettingsModel& m, ScreenServices& services, const std::function<std::string(const std::string&)>& tr) {
+    using falcon::formatLanguageString;
+    Builder b{m, services, tr};
+    m.pages.resize(4);
+    m.pages[0].name = "Video";
+    m.pages[1].name = "Graphics";
+    m.pages[2].name = "LODs";
+    m.pages[3].name = "Other";
+    const auto chunks = [tr](int n) { return formatLanguageString(tr("options.chunks"), {std::to_string(n)}); };
+    const auto offOr = [tr](int n) { return n == 0 ? tr("options.off") : std::to_string(n); };
 
-    void render(GuiGraphics& g, const Rect& r, int mouseX, int mouseY, const ScrollList::RowState&) override {
-        for (int i = 0; i < 3; ++i) {
-            const Rect c = card(r, i);
-            const bool hot = mouseX >= c.x && mouseX < c.x + c.width && mouseY >= c.y && mouseY < c.y + c.height;
-            const bool on = static_cast<int>(options_.graphicsPreset) == i;
-            g.fill(c.x, c.y, c.x + c.width, c.y + c.height, on ? 0xC01E3A2Au : hot ? 0xA03A3A3Au : 0x80202020u);
-            const std::uint32_t border = on ? kAccent : hot ? 0xFFAAAAAAu : 0xFF505050u;
-            g.fill(c.x, c.y, c.x + c.width, c.y + 1, border);
-            g.fill(c.x, c.y + c.height - 1, c.x + c.width, c.y + c.height, border);
-            g.fill(c.x, c.y, c.x + 1, c.y + c.height, border);
-            g.fill(c.x + c.width - 1, c.y, c.x + c.width, c.y + c.height, border);
-            const Card& card = cards_[static_cast<std::size_t>(i)];
-            g.text(card.name, static_cast<float>(c.x + (c.width - g.textWidth(card.name, true)) / 2), static_cast<float>(c.y + 8), kWhite, true, false, true);
-            for (std::size_t line = 0; line < card.lines.size(); ++line) {
-                g.text(card.lines[line], static_cast<float>(c.x + 8), static_cast<float>(c.y + 28 + 13 * static_cast<int>(line)), 0xFFC4C4C4u);
+    // ---- Video: the window and the frame rate ----
+    b.range(0, 0, tr("options.framerateLimit"), "How many frames a second the game draws at most.", Impact::None, 1, 26,
+            [](const GameOptions& g) { return g.framerateLimit / 10; }, [](GameOptions& g, int i) { g.framerateLimit = i * 10; },
+            [tr](int i) { return i * 10 >= 260 ? tr("options.framerateLimit.max") : formatLanguageString(tr("options.framerate"), {std::to_string(i * 10)}); }, false);
+    b.toggle(0, 0, tr("options.vsync"), "Waits for the screen to refresh before showing a frame: no tearing, and the frame rate follows the monitor's.", Impact::None,
+             &GameOptions::enableVsync, false);
+    b.cycle(0, 0, tr("options.inactivityFpsLimit"),
+            "Minimized: limits the frame rate only when the game window is minimized.\nAFK: limits it to 30 when the game is not getting any player input for more than a minute, "
+            "and to 10 after 9 more minutes.",
+            Impact::None, {tr("options.inactivityFpsLimit.minimized"), tr("options.inactivityFpsLimit.afk")}, &GameOptions::inactivityFpsLimit, false);
+    {
+        const int maxScale = services.maxGuiScale ? std::max(1, services.maxGuiScale()) : 4;
+        std::vector<std::string> scales{tr("options.guiScale.auto")};
+        for (int i = 1; i <= maxScale; ++i) scales.push_back(std::to_string(i));
+        Option o;
+        o.kind = Kind::Cycle;
+        o.name = tr("options.guiScale");
+        o.tooltip = "How big the menus and the HUD are. Auto picks the largest size the window allows.";
+        o.values = std::move(scales);
+        o.read = [maxScale](const GameOptions& g) { return std::min(g.guiScale, maxScale); };
+        o.write = [](GameOptions& g, int v) { g.guiScale = v; };
+        b.add(0, 0, std::move(o), false);
+    }
+    b.range(0, 0, tr("options.gamma"), "How bright the dark is. Moody is the game's own darkness, Bright lights up caves and nights.", Impact::None, 0, 100,
+            [](const GameOptions& g) { return static_cast<int>(std::lround(g.gamma * 100.0)); }, [](GameOptions& g, int v) { g.gamma = v / 100.0; },
+            [tr](int p) { return p == 0 ? tr("options.gamma.min") : p == 50 ? tr("options.gamma.default") : p == 100 ? tr("options.gamma.max") : std::to_string(p); }, false);
+
+    b.toggle(0, 1, tr("options.fullscreen"), {}, Impact::None, &GameOptions::fullscreen, false);
+    b.toggle(0, 1, tr("options.exclusiveFullscreen"),
+             "Exclusive fullscreen might prevent some input methods from working, but adaptive sync (Nvidia G-Sync, AMD FreeSync) should work.\nOtherwise all input methods are "
+             "expected to work, but adaptive sync will not.",
+             Impact::None, &GameOptions::exclusiveFullscreen, false);
+    {
+        const std::vector<std::string> modes = services.videoModes ? services.videoModes() : std::vector<std::string>();
+        const int last = static_cast<int>(modes.size()) - 1;
+        Option& mode = b.range(0, 1, tr("options.fullscreen.exclusive.mode"), "This setting only takes effect when Exclusive Fullscreen is enabled.", Impact::None, -1, std::max(-1, last),
+                               [last](const GameOptions& g) { return std::min(g.exclusiveFullscreenMode, last); }, [](GameOptions& g, int v) { g.exclusiveFullscreenMode = v; },
+                               [tr, modes](int v) { return modes.empty() ? tr("options.fullscreen.unavailable") : v < 0 ? tr("options.fullscreen.current") : modes[static_cast<std::size_t>(v)]; },
+                               false);
+        mode.enabled = [last](const GameOptions&) { return last >= 0; };
+    }
+    b.cycle(0, 1, tr("options.graphicsApi"),
+            graphicsApiTooltip(GraphicsApi::OpenGL) + "\n" + graphicsApiTooltip(GraphicsApi::Vulkan) + "\n" + tr("options.graphicsApi.restart"), Impact::None,
+            {tr(std::string(graphicsApiTranslationKey(GraphicsApi::OpenGL))), tr(std::string(graphicsApiTranslationKey(GraphicsApi::Vulkan)))}, &GameOptions::graphicsApi, false);
+
+    // ---- Graphics: the preset, then what it sets ----
+    {
+        const auto presetName = [tr](const char* key, const char* fallback) {
+            const std::string s = tr(key);
+            return s.empty() || s[0] == 'o' ? std::string(fallback) : s;
+        };
+        Option o;
+        o.kind = Kind::Cycle;
+        o.name = "Graphics Preset";
+        o.tooltip = "A preset sets distance, lighting, clouds, textures and LODs together. Change any of them below and it reads Custom.";
+        o.values = {presetName("options.graphics.fast", "Fast"), presetName("options.graphics.fancy", "Fancy"), presetName("options.graphics.fabulous", "Fabulous!"), "Custom"};
+        o.read = [](const GameOptions& g) { return static_cast<int>(g.graphicsPreset); };
+        o.write = [](GameOptions& g, int v) { g.graphicsPreset = static_cast<GraphicsPreset>(v); };
+        o.set = [](GameOptions& g, int v) {
+            if (v < 3) VideoSettingsScreen::applyPreset(g, static_cast<GraphicsPreset>(v));
+            else g.graphicsPreset = GraphicsPreset::Custom;
+        };
+        b.add(1, 0, std::move(o), false);
+    }
+    b.intRange(1, 1, tr("options.renderDistance"), "How far the world is drawn as real chunks. Every step costs a good deal of memory and processing.", Impact::High, 2, 32,
+               &GameOptions::renderDistance, chunks, true);
+    b.intRange(1, 1, tr("options.simulationDistance"), "How far from you things move and grow: mobs, crops, fire. Chunks beyond it are still drawn but stand still.", Impact::Medium, 5, 32,
+               &GameOptions::simulationDistance, chunks, true);
+    b.intRange(1, 1, tr("options.biomeBlendRadius"), "How softly the colours of grass, leaves and water change from biome to biome.", Impact::Low, 0, 7, &GameOptions::biomeBlendRadius,
+               [tr](int n) { return tr("options.biomeBlendRadius." + std::to_string(2 * n + 1)); }, true);
+    b.cycle(1, 1, tr("options.prioritizeChunkUpdates"),
+            "Threaded: nearby chunks are compiled in parallel threads. This may result in brief visual holes when blocks are destroyed.\nSemi Blocking: some actions within a chunk "
+            "will recompile the chunk immediately. This includes block placing and destroying.\nFully Blocking: nearby chunks are always compiled immediately. This may impact game "
+            "performance when blocks are placed or destroyed.",
+            Impact::Medium, {tr("options.prioritizeChunkUpdates.none"), tr("options.prioritizeChunkUpdates.byPlayer"), tr("options.prioritizeChunkUpdates.nearby")},
+            &GameOptions::prioritizeChunkUpdates, true);
+
+    b.toggle(1, 2, tr("options.ao"), "Smooth lighting: the soft shade in corners and under overhangs.", Impact::Medium, &GameOptions::ambientOcclusion, true);
+    b.cycle(1, 2, tr("options.renderClouds"), "Fast clouds are flat, fancy ones have a thickness.", Impact::Medium, {tr("options.off"), tr("options.clouds.fast"), tr("options.clouds.fancy")},
+            &GameOptions::cloudStatus, true);
+    b.intRange(1, 2, tr("options.renderCloudsDistance"), "How far away the clouds are drawn.", Impact::Medium, 2, 128, &GameOptions::cloudRange, chunks, true);
+    b.cycle(1, 2, tr("options.particles"), "How many particles the world makes: smoke, rain splashes, breaking blocks.", Impact::Medium,
+            {tr("options.particles.all"), tr("options.particles.decreased"), tr("options.particles.minimal")}, &GameOptions::particles, true);
+    b.intRange(1, 2, tr("options.weatherRadius"), "Radius of the area where rain and snow effects are visible. Very low performance impact.", Impact::Low, 3, 10,
+               &GameOptions::weatherRadius, [tr](int n) { return formatLanguageString(tr("options.blocks"), {std::to_string(n)}); }, true);
+    b.toggle(1, 2, tr("options.entityShadows"), "Blobs of shadow under mobs and items.", Impact::Low, &GameOptions::entityShadows, true);
+    b.range(1, 2, tr("options.entityDistanceScaling"), "How far away mobs and items are still drawn.", Impact::Medium, 2, 20,
+            [](const GameOptions& g) { return static_cast<int>(std::lround(g.entityDistanceScaling * 4.0)); }, [](GameOptions& g, int i) { g.entityDistanceScaling = i / 4.0; },
+            [](int i) { return std::to_string(i * 25) + "%"; }, true);
+
+    b.intRange(1, 3, tr("options.mipmapLevels"), "How far textures shrink into smaller copies of themselves with distance: smoother far away, a little blurrier.", Impact::Low, 0, 4,
+               &GameOptions::mipmapLevels, offOr, true);
+    b.cycle(1, 3, tr("options.textureFiltering"),
+            "None: textures are displayed without any filtering. Blocks may look blurry when viewed at an angle.\nRGSS (Rotated Grid Super Sampling): a shader-based filtering method "
+            "that improves texture quality with a moderate performance impact.\nAnisotropic: a hardware-based filtering method, but impacts performance and significantly impacts "
+            "video memory usage. May not be supported on all hardware.",
+            Impact::Medium, {tr("options.textureFiltering.none"), tr("options.textureFiltering.rgss"), tr("options.textureFiltering.anisotropic")}, &GameOptions::textureFiltering, true);
+    {
+        Option& anisotropy = b.intRange(1, 3, tr("options.maxAnisotropy"),
+                                        "Each level significantly improves how smooth textures look, but impacts performance and significantly impacts video memory usage. Requires "
+                                        "Texture Filtering to be set to Anisotropic.",
+                                        Impact::Medium, 1, 3, &GameOptions::maxAnisotropyBit, [](int n) { return std::to_string(1 << n) + "x"; }, true);
+        anisotropy.enabled = [](const GameOptions& g) { return g.textureFiltering == TextureFiltering::Anisotropic; };
+    }
+    b.toggle(1, 3, tr("options.cutoutLeaves"), "Allows you to see through gaps in leaves. Disabling improves performance.", Impact::Medium, &GameOptions::cutoutLeaves, true);
+    b.toggle(1, 3, tr("options.improvedTransparency"),
+             "An experimental approach that uses an order-independent transparency algorithm to avoid graphical issues normally present when looking through multiple layers of "
+             "translucent objects.\nThis will impact performance.",
+             Impact::High, &GameOptions::improvedTransparency, true);
+    b.intRange(1, 3, tr("options.accessibility.menu_background_blurriness"), tr("options.accessibility.menu_background_blurriness.tooltip"), Impact::Low, 0, 10,
+               &GameOptions::menuBackgroundBlurriness, offOr, true);
+
+    // ---- LODs: the terrain beyond the loaded chunks ----
+    b.toggle(2, 0, "LODs",
+             "Draws simplified terrain, as blocky columns with the block textures, beyond the loaded chunks, out to the LOD Distance. It is worked out from the world's seed: no chunks "
+             "are generated for it. Only the surface is drawn, never caves.",
+             Impact::High, &GameOptions::lodsEnabled, true);
+    {
+        const auto lodsOn = [](const GameOptions& g) { return g.lodsEnabled; };
+        Option& radius = b.range(2, 0, "LOD Distance", "How far out LODs reach, 64 to 8192 chunks from you. The further, the more of the world is drawn and the more the LODs cost.",
+                                 Impact::High, 0, 100, [](const GameOptions& g) { return static_cast<int>(std::lround(sliderFromLodChunks(g.lodChunkRadius) * 100.0)); },
+                                 [](GameOptions& g, int v) { g.lodChunkRadius = lodChunksFromSlider(v / 100.0); }, [chunks](int v) { return chunks(lodChunksFromSlider(v / 100.0)); },
+                                 true);
+        radius.enabled = lodsOn;
+        Option& strength = b.cycle(2, 0, "LOD View Strength",
+                                   "Low Detail: big columns, the cheapest. For the longest distances and for slower computers.\nMedium Detail: a balance. Columns get smaller close to the "
+                                   "loaded chunks.\nFull Detail: the finest columns (down to a block), the closest to the real terrain. Needs a fast processor to fill in.",
+                                   Impact::High, {"Low Detail", "Medium Detail", "Full Detail"}, &GameOptions::lodDetail, true);
+        strength.enabled = lodsOn;
+    }
+
+    // ---- Other ----
+    b.toggle(3, 0, tr("options.autosaveIndicator"), {}, Impact::None, &GameOptions::showAutosaveIndicator, false);
+    b.toggle(3, 0, tr("options.vignette"),
+             "This is a subtle texture over the game screen used for reducing brightness towards the edges of the screen and warning about the world border.", Impact::None,
+             &GameOptions::vignette, false);
+    b.cycle(3, 0, tr("options.attackIndicator"), {}, Impact::None, {tr("options.off"), tr("options.attack.crosshair"), tr("options.attack.hotbar")}, &GameOptions::attackIndicator, false);
+    b.range(3, 0, tr("options.chunkFade"), "How long in seconds chunks should fade in when they're first rendered, if at all.", Impact::None, 0, 40,
+            [](const GameOptions& g) { return static_cast<int>(std::lround(g.chunkSectionFadeInTime * 20.0)); }, [](GameOptions& g, int i) { g.chunkSectionFadeInTime = i / 20.0; },
+            [](int i) { return i <= 0 ? std::string("None") : fixed(i / 20.0, 2) + " s"; }, false);
+}
+
+// ---- drawing ----
+
+// A triangle pointing left or right, as VulkanMod's arrows are (a column of fills for each step across it).
+void arrow(GuiGraphics& g, float cx, float cy, float f, bool left, std::uint32_t color) {
+    const float w = f - 1.0f;
+    const int steps = std::max(1, static_cast<int>(std::lround(2.0f * w)));
+    for (int i = 0; i < steps; ++i) {
+        const float t = (static_cast<float>(i) + 0.5f) / static_cast<float>(steps);
+        const float half = f * (left ? t : 1.0f - t);
+        const int x0 = static_cast<int>(std::floor(cx - w + static_cast<float>(i)));
+        g.fill(x0, static_cast<int>(std::lround(cy - half)), x0 + 1, static_cast<int>(std::lround(cy + half)), color);
+    }
+}
+
+void border(GuiGraphics& g, int x0, int y0, int x1, int y1, int width, std::uint32_t color) {
+    g.fill(x0, y0, x1, y0 + width, color);
+    g.fill(x0, y1 - width, x1, y1, color);
+    g.fill(x0, y0 + width, x0 + width, y1 - width, color);
+    g.fill(x1 - width, y0 + width, x1, y1 - width, color);
+}
+
+// Text centred on cx; one that does not fit slides back and forth (VulkanMod's drawScrollingString).
+void scrollingText(GuiGraphics& g, const std::string& text, int cx, int y, int maxWidth, std::uint32_t color, double timeMs) {
+    const int width = g.textWidth(text);
+    if (width <= maxWidth) {
+        g.text(text, static_cast<float>(cx - width / 2), static_cast<float>(y), color);
+        return;
+    }
+    const int x0 = cx - maxWidth / 2, x1 = cx + maxWidth / 2;
+    const double scrollAmount = width - maxWidth;
+    const double seconds = timeMs / 1000.0;
+    const double speed = std::max(scrollAmount * 0.5, 3.0);
+    const double offset = std::sin((3.14159265358979 / 2.0) * std::cos(6.28318530717959 * seconds / speed)) / 2.0 + 0.5;
+    g.pushScissor(x0 - 1, 0, x1, g.guiHeight());
+    g.text(text, static_cast<float>(x0) - static_cast<float>(offset * scrollAmount), static_cast<float>(y), color);
+    g.popScissor();
+}
+
+void ease(float& hover, bool on, float dtMs) {
+    const float target = on ? 1.0f : 0.0f;
+    hover += (target - hover) * std::min(1.0f, dtMs / 90.0f);
+    if (std::abs(target - hover) < 0.01f) hover = target;
+}
+
+// The hover of a VulkanMod widget: a red wash and a red frame, both fading in.
+void hovering(GuiGraphics& g, int x, int y, int w, int h, float hover) {
+    if (hover <= 0.0f) return;
+    g.fill(x, y, x + w, y + h, withAlpha(kRed, 0.3f * hover));
+    border(g, x, y, x + w, y + h, 1, withAlpha(kRed, hover));
+}
+
+void drawButton(GuiGraphics& g, int x, int y, int w, int h, const std::string& label, bool active, bool selected, bool centered, float hover) {
+    g.fill(x, y, x + w, y + h, withAlpha(kBlack, active ? 0.45f : 0.3f));
+    if (selected) {
+        g.fill(x, y, x + 2, y + h, withAlpha(kRed, 0.8f));
+        g.fill(x, y, x + w, y + h, withAlpha(kRed, 0.2f));
+    }
+    if (active) hovering(g, x, y, w, h, hover);
+    const std::uint32_t color = active ? kWhite : kGrey;
+    const int ty = y + h / 2 - 4;
+    if (centered) g.text(label, static_cast<float>(x + (w - g.textWidth(label)) / 2), static_cast<float>(ty), color);
+    else g.text(label, static_cast<float>(x + 12), static_cast<float>(ty), color);
+}
+
+// Wraps `text` (with '\n' for new paragraphs) to `width`.
+std::vector<std::string> wrap(const GuiGraphics& g, const std::string& text, int width) {
+    std::vector<std::string> lines;
+    std::size_t start = 0;
+    while (start <= text.size()) {
+        std::size_t end = text.find('\n', start);
+        if (end == std::string::npos) end = text.size();
+        const std::string paragraph = text.substr(start, end - start);
+        std::string line;
+        std::size_t i = 0;
+        while (i < paragraph.size()) {
+            std::size_t j = paragraph.find(' ', i);
+            if (j == std::string::npos) j = paragraph.size();
+            const std::string word = paragraph.substr(i, j - i);
+            const std::string next = line.empty() ? word : line + " " + word;
+            if (!line.empty() && g.textWidth(next) > width) {
+                lines.push_back(line);
+                line = word;
+            } else {
+                line = next;
             }
-            if (on) g.text("Selected", static_cast<float>(c.x + (c.width - g.textWidth("Selected")) / 2), static_cast<float>(c.y + c.height - 13), kAccent);
+            i = j + 1;
         }
+        lines.push_back(line);
+        start = end + 1;
     }
-    ScrollList::ClickOutcome mouseClicked(const Rect& r, double px, double py, int button) override {
-        if (button != 0) return {};
-        for (int i = 0; i < 3; ++i) {
-            const Rect c = card(r, i);
-            if (px >= c.x && px < c.x + c.width && py >= c.y && py < c.y + c.height) {
-                pick_(i);
-                return {true, true};
-            }
-        }
-        return {};
-    }
-
-private:
-    [[nodiscard]] Rect card(const Rect& r, int index) const {
-        constexpr int kGap = 6, kRowWidth = 310;
-        const int width = (kRowWidth - 2 * kGap) / 3;
-        return {rowsWidth_ / 2 - kRowWidth / 2 + index * (width + kGap), r.y + 2, width, kHeight - 4};
-    }
-    const GameOptions& options_;
-    int rowsWidth_;
-    std::array<Card, 3> cards_;
-    std::function<void(int)> pick_;
-};
-
-// Lines of grey text in a row (a note under the options); the lines are asked for every frame, so they can follow the options.
-class NoteRow final : public ScrollList::Entry {
-public:
-    NoteRow(int lines, int rowsWidth, std::function<std::vector<std::string>()> text) : Entry(lines * 11 + 8), rowsWidth_(rowsWidth), text_(std::move(text)) {}
-    void render(GuiGraphics& g, const Rect& r, int, int, const ScrollList::RowState&) override {
-        int y = r.y + 4;
-        for (const std::string& line : text_()) {
-            g.text(line, static_cast<float>(rowsWidth_ / 2 - 155), static_cast<float>(y), 0xFFA0A0A0u);
-            y += 11;
-        }
-    }
-
-private:
-    int rowsWidth_;
-    std::function<std::vector<std::string>()> text_;
-};
-
-constexpr const char* kTabNames[] = {"Presets", "Display", "Quality", "LODs", "Preferences"};
-constexpr int kTabCount = 5;
-constexpr int kTabWidth = 84;
-constexpr int kTabMargin = 8;
+    return lines;
+}
 
 }  // namespace
+
+VideoSettingsScreen::VideoSettingsScreen(ScreenNavigator& navigator, ScreenServices& services)
+    : Screen(navigator), services_(services), model_(std::make_unique<VideoSettingsModel>()) {
+    model_->pending = services.options;
+    buildPages(*model_, services_, [this](const std::string& key) { return text(key); });
+}
+
+VideoSettingsScreen::~VideoSettingsScreen() = default;
 
 void VideoSettingsScreen::applyPreset(GameOptions& o, GraphicsPreset preset) {
     if (preset == GraphicsPreset::Custom) return;
@@ -181,343 +508,422 @@ void VideoSettingsScreen::applyPreset(GameOptions& o, GraphicsPreset preset) {
     o.graphicsPreset = preset;
 }
 
-void VideoSettingsScreen::markCustom() { services_.options.graphicsPreset = GraphicsPreset::Custom; }
+// ---- layout and actions ----
 
-ListScreenLayout VideoSettingsScreen::computeLayout(int titleWidth) const {
-    ListScreenLayout l = ListScreen::computeLayout(titleWidth);
-    l.list.x = kTabMargin + kTabWidth + kTabMargin;
-    l.list.width = std::max(320, width_ - l.list.x - kTabMargin);
-    return l;
+void VideoSettingsScreen::computeLayout() {
+    Layout& l = layout_;
+    const int leftMargin = kMargin + kPageWidth + 6;
+    l.listX = leftMargin;
+    l.listY = kListTop;
+    l.listWidth = std::min(width_ - leftMargin - kMargin, 420);
+    // (VulkanMod puts the box under the list when there is no room of 200 beside it; a list that can give up some width keeps it beside, where it can be read.)
+    if (width_ - (leftMargin + l.listWidth + 6) - 10 < 200 && width_ - leftMargin - kMargin - 6 - 200 >= 300) l.listWidth = width_ - leftMargin - kMargin - 6 - 200;
+    l.listHeight = std::max(40, height_ - kListTop - kListBottom);
+    int x = leftMargin + l.listWidth + 6;
+    int tipWidth = std::min(width_ - x - 10, 420);
+    int y = kListTop + kWidgetHeight + 6;
+    if (tipWidth < 200) {  // no room beside the list: under it (which takes some of the list's height, so that a few lines of text fit)
+        l.listHeight = std::max(40, height_ - kListTop - kListBottom - 28);
+        x = leftMargin + 3;
+        tipWidth = l.listWidth;
+        y = kListTop + l.listHeight + 10;
+    }
+    l.tipX = x;
+    l.tipY = y;
+    l.tipWidth = tipWidth;
+    l.searchX = leftMargin;
+    l.searchWidth = std::min(width_ - kMargin - leftMargin - 4, 413);
+    const int padding = 10;
+    l.doneWidth = font().width(text("gui.done")) + 2 * padding;
+    l.applyWidth = font().width("Apply") + 2 * padding;
+    l.undoWidth = font().width("Undo") + 2 * padding;
+    l.doneX = width_ - l.doneWidth - kMargin;
+    l.applyX = l.doneX - l.applyWidth - kWidgetMargin;
+    l.undoX = l.applyX - l.undoWidth - kWidgetMargin;
+    l.buttonY = height_ - kWidgetHeight - 7;
 }
 
-void VideoSettingsScreen::addFooter(const ListScreenLayout& layout) {
-    ListScreen::addFooter(layout);  // Done
-    tabButtons_.clear();
-    for (int i = 0; i < kTabCount; ++i) {
-        auto& tab = addWidget<TabButton>(kTabNames[i], kTabMargin, layout.list.y + 4 + i * 25, kTabWidth, 22);
-        tab.selected = i == tab_;
-        tab.onPress = [this, i] { selectTab(i); };
-        tabButtons_.push_back(&tab);
+void VideoSettingsScreen::init() {
+    computeLayout();
+    // (An unframed box draws its text from its top edge: it is a line of text high, in the middle of the bar.)
+    auto& box = addWidget<EditBox>(font(), layout_.searchX + 6, 4 + (kWidgetHeight - 8) / 2, std::max(20, layout_.searchWidth - 12), 10, "Search options (Ctrl+L)", 48);
+    box.bordered = false;
+    box.setText(model_->query);
+    box.onChange = [this](const std::string& query) { searchChanged(query); };
+    search_ = &box;
+}
+
+void VideoSettingsScreen::searchChanged(const std::string& query) {
+    VideoSettingsModel& m = *model_;
+    m.query = query;
+    m.found.clear();
+    m.scroll = 0.0f;
+    if (query.empty()) return;
+    const std::string term = lower(query);
+    for (const auto& page : m.pages) {
+        VideoSettingsModel::Block block;
+        block.title = page.name;
+        for (const auto& group : page.blocks) {
+            for (const auto& option : group) {
+                std::string hay = lower(option->name + " " + option->tooltip + " " + shown(*option, option->read(m.pending)));
+                for (const std::string& value : option->values) hay += " " + lower(value);
+                if (hay.find(term) != std::string::npos) block.options.push_back(option.get());
+            }
+        }
+        if (!block.options.empty()) m.found.push_back(std::move(block));
     }
 }
 
-void VideoSettingsScreen::selectTab(int tab) {
-    if (tab == tab_) return;
-    tab_ = tab;
-    for (int i = 0; i < static_cast<int>(tabButtons_.size()); ++i) static_cast<TabButton*>(tabButtons_[static_cast<std::size_t>(i)])->selected = i == tab_;
-    list().clearEntries();
-    list().setScrollAmount(0.0);
-    fill();
+void VideoSettingsScreen::selectPage(int page) {
+    VideoSettingsModel& m = *model_;
+    m.page = page;
+    m.scroll = 0.0f;
+    m.query.clear();
+    m.found.clear();
+    if (search_ != nullptr) search_->setText("");
+    setFocus(nullptr);
 }
 
-void VideoSettingsScreen::render(GuiGraphics& graphics, int mouseX, int mouseY, const FrameTime& time) {
-    ui().drawBackdrop(graphics, width_, height_, time.deltaTicks);
-    graphics.fill(kTabMargin - 3, metrics::kHeaderHeight, kTabMargin + kTabWidth + 3, height_ - metrics::kFooterHeight, 0x70000000u);  // behind the tabs
-    Screen::render(graphics, mouseX, mouseY, time);
+void VideoSettingsScreen::apply() {
+    VideoSettingsModel& m = *model_;
+    m.forEachOption([&](Option& o) {
+        const int value = o.read(m.pending);
+        if (value != o.read(services_.options)) o.write(services_.options, value);
+    });
 }
 
-void VideoSettingsScreen::addOptions() { fill(); }
+void VideoSettingsScreen::undo() { model_->pending = services_.options; }
 
-void VideoSettingsScreen::fill() {
-    GameOptions& o = services_.options;
-    anisotropySlider_ = nullptr;
-    lodRadiusSlider_ = nullptr;
-    lodDetailButton_ = nullptr;
+void VideoSettingsScreen::onClose() {
+    if (model_->searching()) {  // Escape clears the search first
+        if (search_ != nullptr) search_->setText("");
+        searchChanged("");
+        setFocus(nullptr);
+        return;
+    }
+    navigator_.pop();
+}
 
-    // An on/off button bound to a bool field; `quality` ones switch the Preset to Custom when changed.
-    const auto toggle = [&](const char* caption, bool GameOptions::*field, const std::string& tip, bool quality) {
-        auto button = makeToggle(caption, o.*field, kSmallWidth, [this, field, quality](bool on) {
-            services_.options.*field = on;
-            if (quality) markCustom();
-        });
-        button->tooltip = tip;
-        return button;
-    };
-    // A button cycling through the values of an enum field, with an optional tooltip per value.
-    const auto choice = [&](const char* caption, std::vector<std::string> keys, auto GameOptions::*field,
-                            std::vector<std::string> tips, bool quality) {
-        using Value = std::remove_reference_t<decltype(o.*field)>;
-        auto button = makeChoice(caption, std::move(keys), static_cast<int>(o.*field), kSmallWidth, nullptr);
-        CycleButton* raw = button.get();
-        const auto setTip = [raw, tips](int i) {
-            if (!tips.empty()) raw->tooltip = tips[static_cast<std::size_t>(i)];
-        };
-        setTip(static_cast<int>(o.*field));
-        button->onChange = [this, field, quality, setTip](int i) {
-            services_.options.*field = static_cast<Value>(i);
-            setTip(i);
-            if (quality) markCustom();
-        };
-        return button;
-    };
-    // A slider over the whole numbers min..max, read and written through `get`/`set`.
-    const auto intSlider = [&](int min, int max, std::function<int()> get, std::function<void(int)> set,
-                               std::function<std::string(int)> label, const std::string& tip, bool quality) {
-        auto slider = makeIntSlider(min, max, get(), kSmallWidth, std::move(label), [this, set, quality](int v) {
-            set(v);
-            if (quality) markCustom();
-        });
-        slider->tooltip = tip;
-        return slider;
-    };
-    const auto chunksLabel = [this](const char* caption) {
-        return [this, caption](int n) { return optionLabel(caption, formatLanguageString(text("options.chunks"), {std::to_string(n)})); };
-    };
-    const auto intField = [this](int GameOptions::*member) {  // get/set pair for a plain int field
-        return std::make_pair(std::function<int()>([this, member] { return services_.options.*member; }),
-                              std::function<void(int)>([this, member](int v) { services_.options.*member = v; }));
-    };
+// ---- drawing the screen ----
 
-    switch (tab_) {
-        case 0: {  // ---- Presets ----
-            addHeader("Graphics Preset");
-            std::array<PresetRow::Card, 3> cards;
-            static constexpr const char* kNames[3] = {"Fast", "Fancy", "Fabulous!"};
-            for (int i = 0; i < 3; ++i) {
-                GameOptions sample;
-                applyPreset(sample, static_cast<GraphicsPreset>(i));
-                PresetRow::Card& card = cards[static_cast<std::size_t>(i)];
-                card.name = text(i == 0 ? "options.graphics.fast" : i == 1 ? "options.graphics.fancy" : "options.graphics.fabulous");
-                if (card.name.empty() || card.name[0] == 'o') card.name = kNames[i];
-                card.lines = {std::to_string(sample.renderDistance) + " chunks", sample.ambientOcclusion ? "Smooth lighting" : "Flat lighting",
-                              sample.cloudStatus == CloudStatus::Fancy ? "Fancy clouds" : "Fast clouds",
-                              sample.lodsEnabled ? "LODs to " + std::to_string(sample.lodChunkRadius) : std::string("No LODs")};
-            }
-            list().addEntry<PresetRow>(services_.options, rowsWidth(), cards, [this](int i) { applyPreset(services_.options, static_cast<GraphicsPreset>(i)); });
-            list().addEntry<NoteRow>(1, rowsWidth(), [this] {
-                const GraphicsPreset p = services_.options.graphicsPreset;
-                return std::vector<std::string>{p == GraphicsPreset::Custom ? "Preset: Custom (you changed something a preset sets)"
-                                                                           : std::string("Preset: ") + (p == GraphicsPreset::Fast ? "Fast" : p == GraphicsPreset::Fancy ? "Fancy" : "Fabulous!")};
-            });
-            list().addEntry<NoteRow>(2, rowsWidth(), [] {
-                return std::vector<std::string>{"A preset sets distance, lighting, clouds, textures and LODs together.", "Change any of them in the other tabs and it reads Custom."};
-            });
-            break;
+void VideoSettingsScreen::render(GuiGraphics& g, int mouseX, int mouseY, const FrameTime& time) {
+    VideoSettingsModel& m = *model_;
+    const Layout& l = layout_;
+    const float dtMs = std::min(100.0f, time.deltaTicks * 50.0f);
+    g.setTimeMillis(time.millis);
+    ui().drawBackdrop(g, width_, height_, time.deltaTicks);
+
+    // Which options differ from the real ones (Apply and Undo wake up, and a changed option's name is marked).
+    bool modified = false;
+    m.forEachOption([&](Option& o) { modified |= o.read(m.pending) != o.read(services_.options); });
+
+    // ---- the pages ----
+    g.fill(kMargin, 4, kMargin + kPageWidth, 4 + kIconHeight, withAlpha(kBlack, 0.6f));
+    g.text("Falcon", static_cast<float>(kMargin + 8), static_cast<float>(4 + (kIconHeight - 8) / 2), kWhite, true, false, true);
+    for (int i = 0; i < static_cast<int>(m.pages.size()); ++i) {
+        const int y = 4 + kIconHeight + i * kWidgetHeight;
+        const bool over = mouseX >= kMargin && mouseX < kMargin + kPageWidth && mouseY >= y && mouseY < y + kWidgetHeight;
+        ease(m.buttonHover[static_cast<std::size_t>(i)], over, dtMs);
+        drawButton(g, kMargin, y, kPageWidth, kWidgetHeight, m.pages[static_cast<std::size_t>(i)].name, true, !m.searching() && i == m.page, false, m.buttonHover[static_cast<std::size_t>(i)]);
+    }
+
+    // ---- the list ----
+    const std::vector<VideoSettingsModel::Block> blocks = m.blocksOf();
+    const int itemWidth = l.listWidth - 7;
+    int length = 0;
+    for (const auto& block : blocks) {
+        if (!block.title.empty()) length += 9 + 8;
+        length += static_cast<int>(block.options.size()) * (kWidgetHeight + kItemMargin) + 12;
+    }
+    m.totalLength = length;
+    const int maxScroll = std::max(0, length - l.listHeight);
+    m.scroll = std::clamp(m.scroll, 0.0f, static_cast<float>(maxScroll));
+    m.rows.clear();
+    g.enableScissor(l.listX, l.listY, l.listX + l.listWidth, l.listY + l.listHeight);
+    int rowTop = l.listY - static_cast<int>(m.scroll);
+    const bool listHot = mouseX >= l.listX && mouseX < l.listX + itemWidth && mouseY >= l.listY && mouseY < l.listY + l.listHeight;
+    Option* hovered = m.dragging;
+    for (const auto& block : blocks) {
+        if (!block.title.empty()) {
+            g.text(block.title, static_cast<float>(l.listX + 8), static_cast<float>(rowTop + 4), kWhite, true, false, true);
+            rowTop += 9 + 8;
         }
-        case 1: {  // ---- Display ----
-            // Exclusive Fullscreen Mode: -1 is the current mode, then each mode the monitor offers.
-            const std::vector<std::string> modes = services_.videoModes ? services_.videoModes() : std::vector<std::string>();
-            auto exclusive = makeIntSlider(
-                -1, static_cast<int>(modes.size()) - 1, std::min(o.exclusiveFullscreenMode, static_cast<int>(modes.size()) - 1), kBigWidth,
-                [this, modes](int v) {
-                    if (modes.empty()) return text("options.fullscreen.unavailable");
-                    return optionLabel("options.fullscreen.exclusive.mode",
-                                       v < 0 ? text("options.fullscreen.current") : modes[static_cast<std::size_t>(v)]);
-                },
-                [this](int v) { services_.options.exclusiveFullscreenMode = v; });
-            exclusive->tooltip = "This setting only takes effect when Exclusive Fullscreen is enabled.";
-            addBig(std::move(exclusive));
+        for (Option* option : block.options) {
+            const int y = rowTop;
+            rowTop += kWidgetHeight + kItemMargin;
+            if (y + kWidgetHeight < l.listY || y > l.listY + l.listHeight) continue;
+            m.rows.push_back({option, y});
+            const bool enabled = !option->enabled || option->enabled(m.pending);
+            const bool over = listHot && mouseY >= y && mouseY < y + kWidgetHeight;
+            if (over && hovered == nullptr) hovered = option;
+            ease(option->hover, over && enabled, dtMs);
+            const int controlWidth = std::min(static_cast<int>(static_cast<float>(itemWidth) * 0.5f) - 8, 120);
+            const int controlX = l.listX + itemWidth - controlWidth - 8;
+            const bool changed = option->read(m.pending) != option->read(services_.options);
 
-            auto framerate = intSlider(
-                1, 26, [this] { return services_.options.framerateLimit / 10; },
-                [this](int i) { services_.options.framerateLimit = i * 10; },
-                [this](int i) {
-                    return i * 10 >= 260 ? optionLabel("options.framerateLimit", text("options.framerateLimit.max"))
-                                         : optionLabel("options.framerateLimit",
-                                                       formatLanguageString(text("options.framerate"), {std::to_string(i * 10)}));
-                },
-                {}, false);
+            g.fill(l.listX, y, l.listX + itemWidth, y + kWidgetHeight, withAlpha(kBlack, 0.45f));
+            hovering(g, l.listX, y, itemWidth, kWidgetHeight, option->hover);
+            g.text(option->name, static_cast<float>(l.listX + 8), static_cast<float>(y + (kWidgetHeight - 8) / 2), !enabled ? 0xFFA0A0A0u : changed ? 0xFFFFD27Fu : kWhite);
 
-            // GUI Scale cycles Auto (0) up to the largest scale the window allows.
-            const int maxScale = services_.maxGuiScale ? std::max(1, services_.maxGuiScale()) : 4;
-            auto guiScale = std::make_unique<CycleButton>(
-                0, 0, kSmallWidth, kWidgetHeight, maxScale + 1, std::min(o.guiScale, maxScale),
-                [this](int i) { return optionLabel("options.guiScale", i == 0 ? text("options.guiScale.auto") : std::to_string(i)); },
-                shiftDown());
-            guiScale->onChange = [this](int i) { services_.options.guiScale = i; };
-
-            auto exclusiveFullscreen = makeToggle("options.exclusiveFullscreen", o.exclusiveFullscreen, kSmallWidth, nullptr);
-            {
-                const auto tip = [](bool on) {
-                    return on ? "This fullscreen mode might prevent some input methods from working, but adaptive sync "
-                                "(Nvidia G-Sync, AMD FreeSync) should work."
-                              : "All input methods are expected to work in this fullscreen mode, but adaptive sync "
-                                "(Nvidia G-Sync, AMD FreeSync) will not work.";
-                };
-                CycleButton* raw = exclusiveFullscreen.get();
-                raw->tooltip = tip(o.exclusiveFullscreen);
-                raw->onChange = [this, raw, tip](int i) {
-                    services_.options.exclusiveFullscreen = i == 0;
-                    raw->tooltip = tip(i == 0);
-                };
-            }
-
-            auto brightness = makeSlider(
-                o.gamma, kSmallWidth,
-                [this](double v) {
-                    const int p = static_cast<int>(v * 100.0);
-                    return optionLabel("options.gamma", p == 0 ? text("options.gamma.min")
-                                                             : p == 50 ? text("options.gamma.default")
-                                                                       : p == 100 ? text("options.gamma.max") : std::to_string(p));
-                },
-                [this](double v) { services_.options.gamma = v; });
-
-            addPair(std::move(framerate), toggle("options.vsync", &GameOptions::enableVsync, {}, false));
-            addPair(choice("options.inactivityFpsLimit", {"options.inactivityFpsLimit.minimized", "options.inactivityFpsLimit.afk"},
-                           &GameOptions::inactivityFpsLimit,
-                           {"Limits framerate only when the game window is minimized.",
-                            "Limits framerate to 30 when the game is not getting any player input for more than a minute. "
-                            "Further limits it to 10 after 9 more minutes."},
-                           false),
-                    std::move(guiScale));
-            addPair(toggle("options.fullscreen", &GameOptions::fullscreen, {}, false), std::move(exclusiveFullscreen));
-            addPair(std::move(brightness),
-                    // (No "Default" choice: OpenGL or Vulkan. The list comes from graphics_api.hpp, so a new API only has to be added there.)
-                    choice("options.graphicsApi", {std::string(graphicsApiTranslationKey(GraphicsApi::OpenGL)), std::string(graphicsApiTranslationKey(GraphicsApi::Vulkan))},
-                           &GameOptions::graphicsApi, {graphicsApiTooltip(GraphicsApi::OpenGL), graphicsApiTooltip(GraphicsApi::Vulkan)}, false));
-            break;
-        }
-        case 2: {  // ---- Quality & Performance ----
-            auto biomeBlend = intSlider(
-                0, 7, intField(&GameOptions::biomeBlendRadius).first, intField(&GameOptions::biomeBlendRadius).second,
-                [this](int n) { return optionLabel("options.biomeBlendRadius", text("options.biomeBlendRadius." + std::to_string(2 * n + 1))); },
-                {}, true);
-            auto renderDistance = intSlider(2, 32, intField(&GameOptions::renderDistance).first, intField(&GameOptions::renderDistance).second,
-                                            chunksLabel("options.renderDistance"), {}, true);
-            auto simulationDistance = intSlider(5, 32, intField(&GameOptions::simulationDistance).first,
-                                                intField(&GameOptions::simulationDistance).second,
-                                                chunksLabel("options.simulationDistance"), {}, true);
-            auto mipmaps = intSlider(0, 4, intField(&GameOptions::mipmapLevels).first, intField(&GameOptions::mipmapLevels).second,
-                                     [this](int n) { return numberOrOffLabel("options.mipmapLevels", n); }, {}, true);
-            auto entityDistance = intSlider(
-                2, 20, [this] { return static_cast<int>(std::lround(services_.options.entityDistanceScaling * 4.0)); },
-                [this](int i) { services_.options.entityDistanceScaling = i / 4.0; },
-                [this](int i) { return percentLabel("options.entityDistanceScaling", i / 4.0); }, {}, true);
-            auto blur = intSlider(0, 10, intField(&GameOptions::menuBackgroundBlurriness).first,
-                                  intField(&GameOptions::menuBackgroundBlurriness).second,
-                                  [this](int n) { return numberOrOffLabel("options.accessibility.menu_background_blurriness", n); },
-                                  text("options.accessibility.menu_background_blurriness.tooltip"), true);
-            auto cloudDistance = intSlider(2, 128, intField(&GameOptions::cloudRange).first, intField(&GameOptions::cloudRange).second,
-                                           chunksLabel("options.renderCloudsDistance"), {}, true);
-            auto anisotropy = intSlider(
-                1, 3, intField(&GameOptions::maxAnisotropyBit).first, intField(&GameOptions::maxAnisotropyBit).second,
-                [this](int n) { return optionLabel("options.maxAnisotropy", std::to_string(1 << n) + "x"); },
-                "Each level significantly improves how smooth textures look, but impacts performance and significantly impacts "
-                "video memory usage. Requires Texture Filtering to be set to Anisotropic.",
-                true);
-            anisotropySlider_ = anisotropy.get();
-            anisotropy->active = o.textureFiltering == TextureFiltering::Anisotropic;
-            auto weather = intSlider(3, 10, intField(&GameOptions::weatherRadius).first, intField(&GameOptions::weatherRadius).second,
-                                     [this](int n) { return optionLabel("options.weatherRadius", formatLanguageString(text("options.blocks"), {std::to_string(n)})); },
-                                     "Radius of the area where rain and snow effects are visible. Very low performance impact.", true);
-
-            auto textureFiltering = choice(
-                "options.textureFiltering", {"options.textureFiltering.none", "options.textureFiltering.rgss", "options.textureFiltering.anisotropic"},
-                &GameOptions::textureFiltering,
-                {"Textures are displayed without any filtering. Blocks may look blurry when viewed at an angle.",
-                 "(Rotated Grid Super Sampling)\nA shader-based filtering method that improves texture quality with a moderate performance impact.",
-                 "A hardware-based filtering method, but impacts performance and significantly impacts video memory usage. May not be "
-                 "supported on all hardware."},
-                true);
-            // Anisotropic Filtering only works with that filtering mode.
-            {
-                auto previous = std::move(textureFiltering->onChange);
-                textureFiltering->onChange = [this, previous](int i) {
-                    if (previous) previous(i);
-                    if (anisotropySlider_ != nullptr) anisotropySlider_->active = i == static_cast<int>(TextureFiltering::Anisotropic);
-                };
-            }
-
-            addPair(std::move(biomeBlend), std::move(renderDistance));
-            addPair(choice("options.prioritizeChunkUpdates",
-                           {"options.prioritizeChunkUpdates.none", "options.prioritizeChunkUpdates.byPlayer", "options.prioritizeChunkUpdates.nearby"},
-                           &GameOptions::prioritizeChunkUpdates,
-                           {"Nearby chunks are compiled in parallel threads. This may result in brief visual holes when blocks are destroyed.",
-                            "Some actions within a chunk will recompile the chunk immediately. This includes block placing and destroying.",
-                            "Nearby chunks are always compiled immediately. This may impact game performance when blocks are placed or destroyed."},
-                           true),
-                    std::move(simulationDistance));
-            addPair(toggle("options.ao", &GameOptions::ambientOcclusion, {}, true),
-                    choice("options.renderClouds", {"options.off", "options.clouds.fast", "options.clouds.fancy"}, &GameOptions::cloudStatus, {}, true));
-            addPair(choice("options.particles", {"options.particles.all", "options.particles.decreased", "options.particles.minimal"},
-                           &GameOptions::particles, {}, true),
-                    std::move(mipmaps));
-            addPair(toggle("options.entityShadows", &GameOptions::entityShadows, {}, true), std::move(entityDistance));
-            addPair(std::move(blur), std::move(cloudDistance));
-            addPair(toggle("options.cutoutLeaves", &GameOptions::cutoutLeaves,
-                           "Allows you to see through gaps in leaves. Disabling improves performance.", true),
-                    toggle("options.improvedTransparency", &GameOptions::improvedTransparency,
-                           "An experimental approach that uses an order-independent transparency algorithm to avoid graphical issues "
-                           "normally present when looking through multiple layers of translucent objects.\nThis will impact performance.",
-                           true));
-            addPair(std::move(textureFiltering), std::move(anisotropy));
-            addPair(std::move(weather));
-            break;
-        }
-        case 3: {  // ---- LODs ----
-            addHeader("LODs");
-            // The checkbox: the whole feature on or off.
-            auto box = std::make_unique<CheckboxWidget>("LODs", 0, 0, font().width("LODs"), o.lodsEnabled);
-            box->tooltip = "Draws simplified terrain, as blocky columns, beyond the loaded chunks, out to the LOD Distance. It is worked out from the world's seed: no chunks are "
-                           "generated for it.";
-            box->onChange = [this](bool on) {
-                services_.options.lodsEnabled = on;
-                markCustom();
-                if (lodRadiusSlider_ != nullptr) lodRadiusSlider_->active = on;
-                if (lodDetailButton_ != nullptr) lodDetailButton_->active = on;
-            };
-            addBig(std::move(box));
-
-            // The distance: 64 to 8192 chunks, every doubling the same width on the slider.
-            auto radius = makeSlider(
-                sliderFromLodChunks(o.lodChunkRadius), kBigWidth,
-                [this](double t) { return optionLabel("LOD Distance", formatLanguageString(text("options.chunks"), {std::to_string(lodChunksFromSlider(t))})); },
-                [this](double t) {
-                    services_.options.lodChunkRadius = lodChunksFromSlider(t);
-                    markCustom();
-                });
-            radius->tooltip = "How far out LODs reach, 64 to 8192 chunks from you. The further, the more of the world is drawn and the more the LODs cost.";
-            radius->active = o.lodsEnabled;
-            lodRadiusSlider_ = radius.get();
-            addBig(std::move(radius));
-
-            // The strength: how fine the columns are.
-            static const std::vector<std::string> kStrengthTips = {
-                "Low Detail: big columns, the cheapest. For the longest distances and for slower computers; the terrain is simple.",
-                "Medium Detail: a balance. Columns get smaller close to the loaded chunks.",
-                "Full Detail: the finest columns (down to 4 blocks), the closest to the real terrain. Needs a fast processor to fill in."};
-            auto strength = makeChoice("LOD View Strength", {"Low Detail", "Medium Detail", "Full Detail"}, o.lodDetail, kBigWidth, nullptr);
-            CycleButton* strengthRaw = strength.get();
-            strengthRaw->tooltip = kStrengthTips[static_cast<std::size_t>(std::clamp(o.lodDetail, 0, 2))];
-            strength->onChange = [this, strengthRaw](int i) {
-                services_.options.lodDetail = i;
-                strengthRaw->tooltip = kStrengthTips[static_cast<std::size_t>(i)];
-                markCustom();
-            };
-            strength->active = o.lodsEnabled;
-            lodDetailButton_ = strength.get();
-            addBig(std::move(strength));
-
-            list().addEntry<NoteRow>(4, rowsWidth(), [this] {
-                if (services_.options.lodsEnabled) {
-                    return std::vector<std::string>{"LODs only fill in the distance: the loaded chunks are always the real world.", "Turn the LOD Distance up for a farther horizon, the strength",
-                                                    "down if it takes long to fill in. They need a world made on this computer", "(not a server)."};
+            const int value = option->read(m.pending);
+            const std::uint32_t textColor = enabled ? kWhite : 0xFFA0A0A0u;
+            const bool controlHot = over && mouseX >= controlX;
+            switch (option->kind) {
+                case Kind::Switch: {
+                    const int center = controlX + controlWidth / 2, half = 12;
+                    const int x0 = center - half, y0 = y + 4, h = kWidgetHeight - 8;
+                    if (value != 0) {
+                        const int x1 = x0 + half + 2;
+                        g.fill(x0 + 2, y0 + 2, x1 - 1, y0 + 2 + h - 4, pack(0.4f, 0.4f, 0.4f, 1.0f));
+                        g.fill(x1, y0 + 2, x1 + half - 4, y0 + 2 + h - 4, pack(1.0f, 1.0f, 1.0f, 1.0f));
+                    } else {
+                        g.fill(x0 + 2, y0 + 2, x0 + 2 + half - 4, y0 + 2 + h - 4, pack(1.0f, 1.0f, 1.0f, 0.4f));
+                    }
+                    border(g, x0, y0, x0 + half * 2, y0 + h, 1, kGrey);
+                    const int margin = std::max(g.textWidth(option->values[1]), g.textWidth(option->values[0])) / 3;
+                    const int tx = center - static_cast<int>(static_cast<float>(half) * 1.5f) - 4 - margin;
+                    const std::string& label = option->values[static_cast<std::size_t>(value != 0 ? 1 : 0)];
+                    g.text(label, static_cast<float>(tx - g.textWidth(label) / 2), static_cast<float>(y + (kWidgetHeight - 8) / 2), textColor);
+                    break;
                 }
-                return std::vector<std::string>{"LODs are off: the world ends where the loaded chunks do.", "", "", ""};
-            });
-            break;
+                case Kind::Cycle: {
+                    const int count = static_cast<int>(option->values.size());
+                    const int barMargin = 30, padding = 4;
+                    const int barWidth = (controlWidth - 2 * barMargin - padding * count) / std::max(1, count);
+                    if (barWidth > 0) {
+                        for (int i = 0; i < count; ++i) {
+                            const int x0 = controlX + barMargin + i * (barWidth + padding), y0 = y + kWidgetHeight - 5;
+                            g.fill(x0, y0, x0 + barWidth, y0 + 1, i == value ? pack(1, 1, 1, 1.0f) : pack(1, 1, 1, 0.4f));
+                        }
+                    }
+                    const bool canLeft = enabled && value > 0, canRight = enabled && value < count - 1;
+                    const bool leftHot = controlHot && mouseX < controlX + 16, rightHot = over && mouseX >= controlX + controlWidth - 16;
+                    scrollingText(g, shown(*option, value), controlX + controlWidth / 2, y + (kWidgetHeight - 9) / 2, controlWidth - 32 - 12, textColor, time.millis);
+                    const auto arrowColor = [&](bool can, bool hot) { return can ? (hot ? pack(1, 1, 1, 1.0f) : pack(1, 1, 1, 0.8f)) : pack(0.3f, 0.3f, 0.3f, 0.8f); };
+                    arrow(g, static_cast<float>(controlX) + 8.0f, static_cast<float>(y) + kWidgetHeight * 0.5f, leftHot && canLeft ? 5.0f : 4.5f, true, arrowColor(canLeft, leftHot));
+                    arrow(g, static_cast<float>(controlX + controlWidth) - 8.0f, static_cast<float>(y) + kWidgetHeight * 0.5f, rightHot && canRight ? 5.0f : 4.5f, false,
+                          arrowColor(canRight, rightHot));
+                    break;
+                }
+                case Kind::Range: {
+                    const float scaled = option->max > option->min ? static_cast<float>(value - option->min) / static_cast<float>(option->max - option->min) : 0.0f;
+                    const int valueX = controlX + static_cast<int>(scaled * static_cast<float>(controlWidth));
+                    if ((controlHot || m.dragging == option) && enabled) {
+                        const int y0 = y + kWidgetHeight / 2 - 1, y1 = y0 + 2;
+                        g.fill(controlX, y0, controlX + controlWidth, y1, pack(1, 1, 1, 0.1f));
+                        g.fill(controlX, y0, valueX - 2, y1, pack(1, 1, 1, 0.3f));
+                        border(g, valueX - 2, y0 - 4, valueX + 2, y1 + 4, 1, pack(1, 1, 1, 0.3f));
+                    } else {
+                        const int y0 = y + kWidgetHeight - 5;
+                        g.fill(controlX, y0, controlX + controlWidth, y0 + 1, pack(1, 1, 1, 0.3f));
+                        g.fill(controlX, y0, valueX, y0 + 1, pack(1, 1, 1, enabled ? 0.8f : 0.3f));
+                    }
+                    const std::string label = shown(*option, value);
+                    g.text(label, static_cast<float>(controlX + controlWidth / 2 - g.textWidth(label) / 2), static_cast<float>(y + (kWidgetHeight - 9) / 2), textColor);
+                    break;
+                }
+            }
         }
-        default: {  // ---- Preferences ----
-            auto chunkFade = intSlider(
-                0, 40, [this] { return static_cast<int>(std::lround(services_.options.chunkSectionFadeInTime * 20.0)); },
-                [this](int i) { services_.options.chunkSectionFadeInTime = i / 20.0; },
-                [this](int i) {
-                    const double seconds = i / 20.0;
-                    return seconds <= 0.0 ? text("options.chunkFade.none")
-                                          : formatLanguageString(text("options.chunkFade.seconds"), {fixed(seconds, 2)});
-                },
-                "How long in seconds chunks should fade in when they're first rendered, if at all.", false);
-            addPair(toggle("options.autosaveIndicator", &GameOptions::showAutosaveIndicator, {}, false),
-                    toggle("options.vignette", &GameOptions::vignette,
-                           "This is a subtle texture over the game screen used for reducing brightness towards the edges of the screen "
-                           "and warning about the world border.",
-                           false));
-            addPair(choice("options.attackIndicator", {"options.off", "options.attack.crosshair", "options.attack.hotbar"},
-                           &GameOptions::attackIndicator, {}, false),
-                    std::move(chunkFade));
-            break;
+        rowTop += 12;
+    }
+    g.disableScissor();
+    if (blocks.empty() || (m.searching() && m.found.empty())) {
+        g.text(m.searching() ? "No option matches that." : "Nothing here.", static_cast<float>(l.listX + 8), static_cast<float>(l.listY + 8), kGrey);
+    }
+    if (maxScroll > 0) {  // the scroll bar
+        const int bar = std::clamp(l.listHeight * l.listHeight / std::max(1, length), 32, l.listHeight - 8);
+        const int barY = std::max(l.listY, static_cast<int>(m.scroll) * (l.listHeight - bar) / maxScroll + l.listY);
+        const int x = l.listX + l.listWidth;
+        g.fill(x, l.listY, x + 3, l.listY + l.listHeight, pack(0.8f, 0.8f, 0.8f, 0.2f));
+        g.fill(x, barY, x + 3, barY + bar, pack(0.3f, 0.0f, 0.0f, 0.6f));
+    }
+
+    // ---- the search bar and the buttons ----
+    {
+        const bool focused = search_ != nullptr && search_->focused;
+        g.fill(l.searchX, 4, l.searchX + l.searchWidth, 4 + kWidgetHeight, withAlpha(kBlack, 0.45f));
+        if (focused) border(g, l.searchX, 4, l.searchX + l.searchWidth, 4 + kWidgetHeight, 1, withAlpha(kRed, 1.0f));
+        else if (mouseX >= l.searchX && mouseX < l.searchX + l.searchWidth && mouseY >= 4 && mouseY < 4 + kWidgetHeight) border(g, l.searchX, 4, l.searchX + l.searchWidth, 4 + kWidgetHeight, 1, withAlpha(kRed, 0.6f));
+    }
+    struct Action {
+        const char* label;
+        int x, width;
+        bool active, visible;
+    };
+    const std::array<Action, 3> actions = {{{"Undo", l.undoX, l.undoWidth, true, modified},
+                                            {"Apply", l.applyX, l.applyWidth, modified, true},
+                                            {nullptr, l.doneX, l.doneWidth, true, true}}};
+    for (std::size_t i = 0; i < actions.size(); ++i) {
+        const Action& a = actions[i];
+        if (!a.visible) continue;
+        const bool over = mouseX >= a.x && mouseX < a.x + a.width && mouseY >= l.buttonY && mouseY < l.buttonY + kWidgetHeight;
+        ease(m.actionHover[i], over && a.active, dtMs);
+        drawButton(g, a.x, l.buttonY, a.width, kWidgetHeight, a.label != nullptr ? std::string(a.label) : text("gui.done"), a.active, false, true, m.actionHover[i]);
+    }
+
+    Screen::render(g, mouseX, mouseY, time);  // (the search box's text)
+
+    // ---- what the hovered option does ----
+    if (hovered != nullptr) {
+        const std::vector<std::string> lines = wrap(g, hovered->tooltip, l.tipWidth);
+        const bool tipText = !hovered->tooltip.empty();
+        const bool impact = hovered->impact != Impact::None;
+        if (tipText || impact) {
+            const std::string impactWord = hovered->impact == Impact::Low ? "Low" : hovered->impact == Impact::Medium ? "Medium" : "High";
+            const std::uint32_t impactColor = hovered->impact == Impact::Low ? 0xFF00AA00u : hovered->impact == Impact::Medium ? 0xFFFFFF55u : 0xFFFF5555u;
+            const std::string impactLabel = "Performance Impact: ";
+            int width = 0;
+            if (tipText) {
+                for (const std::string& line : lines) width = std::max(width, g.textWidth(line));
+            }
+            if (impact) width = std::max(width, g.textWidth(impactLabel + impactWord));
+            // Under the list there is room for a few lines only (the buttons are below): the text is cut to what fits.
+            const int room = std::max(1, (l.buttonY - 6 - l.tipY) / 10);
+            const int reserved = impact ? 1 : 0;
+            const int shownLines = tipText ? std::min(static_cast<int>(lines.size()), std::max(1, room - reserved)) : 0;
+            const bool cut = tipText && shownLines < static_cast<int>(lines.size()) && l.tipY > l.listY + l.listHeight - 1;
+            const int count = shownLines + reserved;
+            const int x = l.tipX, y = l.tipY, pad = 3, height = count * 10;
+            g.fill(x - pad, y - pad, x + width + pad, y + height + pad, pack(0.05f, 0.05f, 0.05f, 0.6f));
+            border(g, x - pad, y - pad, x + width + pad, y + height + pad, 1, kRed);
+            int ty = y;
+            if (tipText) {
+                for (int i = 0; i < shownLines; ++i) {
+                    const bool last = cut && i == shownLines - 1;
+                    g.text(last ? lines[static_cast<std::size_t>(i)] + " ..." : lines[static_cast<std::size_t>(i)], static_cast<float>(x), static_cast<float>(ty), kWhite);
+                    ty += 10;
+                }
+            }
+            if (impact) {
+                g.text(impactLabel, static_cast<float>(x), static_cast<float>(ty), kWhite);
+                g.text(impactWord, static_cast<float>(x + g.textWidth(impactLabel)), static_cast<float>(ty), impactColor);
+            }
         }
     }
+}
+
+// ---- the mouse and the keys ----
+
+bool VideoSettingsScreen::mouseClicked(double x, double y, int button) {
+    VideoSettingsModel& m = *model_;
+    const Layout& l = layout_;
+    if (button != 0) return false;
+    // The search bar: the text box inside it takes the click.
+    if (x >= l.searchX && x < l.searchX + l.searchWidth && y >= 4 && y < 4 + kWidgetHeight && search_ != nullptr) {
+        return Screen::mouseClicked(std::clamp(x, static_cast<double>(search_->x), static_cast<double>(search_->x + search_->width - 1)), y, button);
+    }
+    setFocus(nullptr);
+
+    for (int i = 0; i < static_cast<int>(m.pages.size()); ++i) {
+        const int py = 4 + kIconHeight + i * kWidgetHeight;
+        if (x >= kMargin && x < kMargin + kPageWidth && y >= py && y < py + kWidgetHeight) {
+            navigator_.playButtonClick();
+            selectPage(i);
+            return true;
+        }
+    }
+    bool modified = false;
+    m.forEachOption([&](Option& o) { modified |= o.read(m.pending) != o.read(services_.options); });
+    if (y >= l.buttonY && y < l.buttonY + kWidgetHeight) {
+        if (x >= l.doneX && x < l.doneX + l.doneWidth) {
+            navigator_.playButtonClick();
+            navigator_.pop();  // (what was not applied is dropped, as in VulkanMod)
+            return true;
+        }
+        if (modified && x >= l.applyX && x < l.applyX + l.applyWidth) {
+            navigator_.playButtonClick();
+            apply();
+            return true;
+        }
+        if (modified && x >= l.undoX && x < l.undoX + l.undoWidth) {
+            navigator_.playButtonClick();
+            undo();
+            return true;
+        }
+    }
+
+    // The scroll bar.
+    if (m.totalLength > l.listHeight && x >= l.listX + l.listWidth && x < l.listX + l.listWidth + 6 && y >= l.listY && y < l.listY + l.listHeight) {
+        m.draggingScroll = true;
+        mouseDragged(x, y);
+        return true;
+    }
+    // The controls of the rows.
+    const int itemWidth = l.listWidth - 7;
+    if (x < l.listX || x >= l.listX + itemWidth || y < l.listY || y >= l.listY + l.listHeight) return false;
+    for (const VideoSettingsModel::RowInfo& row : m.rows) {
+        if (y < row.y || y >= row.y + kWidgetHeight) continue;
+        Option& o = *row.option;
+        if (o.enabled && !o.enabled(m.pending)) return true;
+        const int controlWidth = std::min(static_cast<int>(static_cast<float>(itemWidth) * 0.5f) - 8, 120);
+        const int controlX = l.listX + itemWidth - controlWidth - 8;
+        if (x < controlX) return true;
+        const int value = o.read(m.pending);
+        navigator_.playButtonClick();
+        switch (o.kind) {
+            case Kind::Switch: o.set(m.pending, value != 0 ? 0 : 1); break;
+            case Kind::Cycle: {
+                const int count = static_cast<int>(o.values.size());
+                if (x < controlX + 16) {
+                    if (value > 0) o.set(m.pending, value - 1);
+                } else if (x >= controlX + controlWidth - 16) {
+                    if (value < count - 1) o.set(m.pending, value + 1);
+                }
+                break;
+            }
+            case Kind::Range:
+                m.dragging = &o;
+                mouseDragged(x, y);
+                break;
+        }
+        return true;
+    }
+    return true;
+}
+
+void VideoSettingsScreen::mouseDragged(double x, double y) {
+    VideoSettingsModel& m = *model_;
+    const Layout& l = layout_;
+    if (m.draggingScroll) {
+        const int maxScroll = std::max(1, m.totalLength - l.listHeight);
+        const int bar = std::clamp(l.listHeight * l.listHeight / std::max(1, m.totalLength), 32, l.listHeight - 8);
+        const double t = (y - l.listY - bar / 2.0) / std::max(1.0, static_cast<double>(l.listHeight - bar));
+        m.scroll = static_cast<float>(std::clamp(t, 0.0, 1.0) * maxScroll);
+        return;
+    }
+    if (m.dragging != nullptr) {
+        Option& o = *m.dragging;
+        const int itemWidth = l.listWidth - 7;
+        const int controlWidth = std::min(static_cast<int>(static_cast<float>(itemWidth) * 0.5f) - 8, 120);
+        const int controlX = l.listX + itemWidth - controlWidth - 8;
+        const double t = std::clamp((x - (controlX + 4)) / static_cast<double>(controlWidth - 8), 0.0, 1.0);
+        const int value = o.min + static_cast<int>(std::lround(t * (o.max - o.min)));
+        if (value != o.read(m.pending)) o.set(m.pending, value);
+        return;
+    }
+    Screen::mouseDragged(x, y);  // (the search box selects text)
+}
+
+void VideoSettingsScreen::mouseReleased(double x, double y, int button) {
+    model_->dragging = nullptr;
+    model_->draggingScroll = false;
+    Screen::mouseReleased(x, y, button);
+}
+
+bool VideoSettingsScreen::mouseScrolled(double x, double y, double dy) {
+    VideoSettingsModel& m = *model_;
+    const Layout& l = layout_;
+    if (x < l.listX || x >= l.listX + l.listWidth + 6 || y < l.listY || y >= l.listY + l.listHeight) return Screen::mouseScrolled(x, y, dy);
+    m.scroll = std::clamp(m.scroll - static_cast<float>(dy) * static_cast<float>(kWidgetHeight + kItemMargin) / 2.0f, 0.0f, static_cast<float>(std::max(0, m.totalLength - l.listHeight)));
+    return true;
+}
+
+bool VideoSettingsScreen::keyPressed(int key, int mods) {
+    if ((mods & kEditControl) != 0 && key == 'L' && search_ != nullptr) {  // Ctrl+L: to the search
+        setFocus(search_);
+        return true;
+    }
+    return Screen::keyPressed(key, mods);
 }
 
 // ---- Controls -------------------------------------------------------------------------------
