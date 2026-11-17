@@ -164,7 +164,7 @@ function Logs() {
   return (
     <section className="card logs">
       <div className="logs-bar">
-        <h2>Launcher log</h2>
+        <h2>Client log</h2>
         <div className="btn-row">
           <button className="btn small" onClick={load}>
             <Refresh size={14} /> Refresh

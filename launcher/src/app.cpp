@@ -93,6 +93,26 @@ constexpr const char* kShortcutStep = "Adding an application menu entry";
 constexpr const char* kRuntimeDone = "WebKitGTK is installed";
 #endif
 
+// The client's log for the Logs tab (the game writes it, see docs/LOGS.md in the repository): latest.log while a run is in progress, else the newest log of a run that ended, which
+// is named by the time it started (2026-11-17_22-40-57.log; -crash and -unclean when it did not end cleanly). The launcher's own log (launcher.log) and the crash reports are not it.
+fs::path clientLogFile() {
+    const fs::path dir = dataRoot() / "logs";
+    std::error_code ec;
+    if (fs::exists(dir / "latest.log", ec)) return dir / "latest.log";
+    fs::path best;
+    std::string bestName;
+    for (const auto& entry : fs::directory_iterator(dir, ec)) {
+        const std::string name = narrow(entry.path().filename().wstring());
+        const bool dated = name.size() >= 23 && name.compare(name.size() - 4, 4, ".log") == 0 && name[4] == '-' && name[7] == '-' && name[10] == '_' && name[13] == '-' && name[16] == '-' &&
+                           name[0] >= '0' && name[0] <= '9';
+        if (dated && name > bestName) {
+            bestName = name;
+            best = entry.path();
+        }
+    }
+    return best;
+}
+
 }  // namespace
 
 App::App(HttpClient& http, AppOptions options, AppHooks hooks, Blob bundledClient)
@@ -309,20 +329,26 @@ std::string App::handleMessage(const std::string& message) {
         return ok();
     }
     if (method == "getLog") {
-        // The end of the launcher's log, for the page's Logs tab.
+        // The end of the client's log, for the page's Logs tab: the game's own log (the launcher's is not shown here). That is latest.log while the game runs, and when it does not,
+        // the newest log of a run that ended (named by the time it started).
         std::string text;
         if (options_.mock || !options_.mockState.empty()) {
             text =
-                "2026-11-14 18:02:11.204 Falcon Launcher starting\n"
-                "2026-11-14 18:02:11.241 window shown after 37 ms\n"
-                "2026-11-14 18:02:11.598 web view controller ready after 392 ms\n"
-                "2026-11-14 18:02:11.912 the UI is ready after 704 ms\n"
-                "2026-11-14 18:02:12.377 signed in; owns Java Edition: yes; profile: yes\n"
-                "2026-11-14 18:02:19.150 started the client, process 21408\n";
-        } else if (readFile(dataRoot() / "logs" / "launcher.log", text) && text.size() > 64 * 1024) {
-            text.erase(0, text.size() - 64 * 1024);
-            const std::size_t lineStart = text.find('\n');
-            if (lineStart != std::string::npos) text.erase(0, lineStart + 1);  // (starts on a whole line)
+                "2026-11-14 18:02:19.150 INFO  [client] ---- Falcon 1.2.1 (Minecraft Java 26.3) ----\n"
+                "2026-11-14 18:02:19.188 INFO  [gpu] vendor AMD; renderer Radeon RX 580; version 4.5.0 Core Profile Context\n"
+                "2026-11-14 18:02:19.241 INFO  [options] render distance 8, simulation 6, LODs on (64 chunks, detail 2)\n"
+                "2026-11-14 18:02:21.598 INFO  [world] playing world 'New World' (hills, seed 12345)\n"
+                "2026-11-14 18:02:22.912 INFO  [world] spawn area loaded in 1.19 s\n"
+                "2026-11-14 18:02:31.377 INFO  [render] 240 fps (4.2 ms); chunks 377, sections 310 of 1967 drawn\n";
+        } else {
+            const fs::path file = clientLogFile();
+            if (file.empty() || !readFile(file, text)) {
+                text = "The game has not been run yet: its log shows here, and is kept in the logs folder.";
+            } else if (text.size() > 64 * 1024) {
+                text.erase(0, text.size() - 64 * 1024);
+                const std::size_t lineStart = text.find('\n');
+                if (lineStart != std::string::npos) text.erase(0, lineStart + 1);  // (starts on a whole line)
+            }
         }
         return ok(json{{"text", text}});
     }

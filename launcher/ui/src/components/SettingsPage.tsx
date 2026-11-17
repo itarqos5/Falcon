@@ -45,7 +45,7 @@ export function SettingsPage({ state }: { state: LauncherState }) {
             <Folder size={14} /> Open
           </button>
         </Row>
-        <Row title="Launcher logs" description="What the launcher did, with timings.">
+        <Row title="Client logs" description="What the game did: latest.log while it runs, then a file named by the time it started.">
           <button className="btn small" onClick={() => void call('openFolder', { which: 'logs' })}>
             <Folder size={14} /> Open
           </button>

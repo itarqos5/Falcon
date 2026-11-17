@@ -50,7 +50,8 @@ The client id is the **Minecraft launcher's own public id, `00000000402b5328`**.
 | `account.bin` | the sign-in token, encrypted with Windows DPAPI for your user |
 | `launcher.json` | settings |
 | `webview\` | the web view's profile |
-| `logs\launcher.log` | what the launcher did, with timings (shown in the Logs tab) |
+| `logs\launcher.log` | what the launcher did, with timings |
+| `logs\latest.log` | the game's log while it runs, then `<date>_<time of launch>.log` (shown in the Logs tab; see docs/LOGS.md) |
 
 ## Command line
 
