@@ -120,6 +120,9 @@ public:
     // The same answer for a column whose ground is one piece (no floating islands), in a fraction of the time: starting from the preliminary surface it probes the
     // final density upward in doubling steps to where the solid ends, then halves the gap. Flat ground costs two evaluations instead of a scan of thirty.
     [[nodiscard]] int surfaceHeightQuickAt(int x, int z) const;
+    // The same again, starting from a guess of the height (a neighbour's, say) instead of the preliminary surface, which is only good to a cell of eight blocks: when the guess is right
+    // it costs two evaluations, and when it is a few blocks off, the doubling steps from it find the answer in a handful.
+    [[nodiscard]] int surfaceHeightNear(int x, int z, int guess) const;
     // The preliminary surface level of a column (the game's aquifer surface, "find_top_surface"): one evaluation of a function of x and z only, so far cheaper than
     // surfaceHeightAt, and the terrain's height without the jagged detail that the final density adds (the level LODs far away are drawn from).
     [[nodiscard]] int preliminarySurfaceAt(int x, int z) const;

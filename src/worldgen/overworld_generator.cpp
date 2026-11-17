@@ -536,24 +536,79 @@ int OverworldGenerator::surfaceHeightQuickAt(int x, int z) const {
     }
     // Solid here: the top is above or at p. Gallop up while it stays solid, then bisect between the last solid block and the first air.
     int lastSolid = p, step = 1;
-    int firstAir = -1;
-    while (firstAir < 0) {
+    int firstAir = 0;
+    bool foundAir = false;  // (a height can be negative, so none stands for "not yet")
+    while (!foundAir) {
         const int y = std::min(lastSolid + step, maxY + 1);
         if (y > maxY) {
             firstAir = maxY + 1;
+            foundAir = true;
         } else if (solid(y)) {
             lastSolid = y;
             step *= 2;
         } else {
             firstAir = y;
+            foundAir = true;
         }
     }
     while (firstAir - lastSolid > 1) {
-        const int mid = (lastSolid + firstAir) / 2;
+        const int mid = lastSolid + (firstAir - lastSolid) / 2;
         if (solid(mid)) lastSolid = mid;
         else firstAir = mid;
     }
     return lastSolid;
+}
+
+int OverworldGenerator::surfaceHeightNear(int x, int z, int guess) const {
+    const NoiseSettings& s = router_->settings();
+    const int minY = s.minY, maxY = s.minY + s.height - 1;
+    const DensityFunction& density = router_->finalDensity();
+    const auto solid = [&](int y) { return density.compute(x, y, z) > 0.0f; };
+    const int start = std::clamp(guess, minY, maxY);
+    if (solid(start)) {
+        // The top is at or above the guess: gallop up while it stays solid, then halve the gap between the last solid block and the first air.
+        int lastSolid = start, step = 1, firstAir = 0;
+        bool foundAir = false;  // (heights are negative down to -64, so no height can stand for "not yet")
+        while (!foundAir) {
+            const int y = std::min(lastSolid + step, maxY + 1);
+            if (y > maxY) {
+                firstAir = maxY + 1;
+                foundAir = true;
+            } else if (solid(y)) {
+                lastSolid = y;
+                step *= 2;
+            } else {
+                firstAir = y;
+                foundAir = true;
+            }
+        }
+        while (firstAir - lastSolid > 1) {
+            const int mid = lastSolid + (firstAir - lastSolid) / 2;
+            if (solid(mid)) lastSolid = mid;
+            else firstAir = mid;
+        }
+        return lastSolid;
+    }
+    // Air at the guess: the top is below it. Gallop down to the first solid block, then halve the gap.
+    int lastAir = start, step = 1, firstSolid = 0;
+    bool foundSolid = false;
+    while (!foundSolid) {
+        const int y = lastAir - step;
+        if (y < minY) return minY;  // nothing in the column is solid
+        if (solid(y)) {
+            firstSolid = y;
+            foundSolid = true;
+        } else {
+            lastAir = y;
+            step *= 2;
+        }
+    }
+    while (lastAir - firstSolid > 1) {
+        const int mid = firstSolid + (lastAir - firstSolid) / 2;
+        if (solid(mid)) firstSolid = mid;
+        else lastAir = mid;
+    }
+    return firstSolid;
 }
 
 int OverworldGenerator::preliminarySurfaceAt(int x, int z) const {
