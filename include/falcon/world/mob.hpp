@@ -163,6 +163,9 @@ struct MobTick {
     float darkSteps = 0.0f;          // how many levels of sky light the night takes away
     int dimension = 0;               // 0 overworld, 1 the Nether, 2 the End
     bool spawnMobs = true, spawnMonsters = true, mobGriefing = true, daylightBurns = true;
+    int renderDistance = 12;
+    std::function<bool(int chunkX, int chunkZ)> isChunkVisible;
+    std::function<bool(int chunkX, int chunkZ)> isChunkRendered;
 };
 
 class Mobs {

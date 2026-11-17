@@ -95,6 +95,7 @@ int Mobs::spawnGroup(const std::string& id, int count, int x, int y, int z, cons
     int placed = 0;
     for (int i = 0; i < count * 2 && placed < count; ++i) {
         const int gx = x + (i == 0 ? 0 : randomInt(11) - 5), gz = z + (i == 0 ? 0 : randomInt(11) - 5);
+        if (in.isChunkRendered && !in.isChunkRendered(chunkOf(gx), chunkOf(gz))) continue;
         int gy = y;
         if (flies) {
             if (!airAround(level, gx, gy, gz, 2, 4)) continue;
@@ -123,11 +124,21 @@ int Mobs::spawnGroup(const std::string& id, int count, int x, int y, int z, cons
 
 void Mobs::despawn(const MobTick& in) {
     for (Mob& m : mobs_) {
-        if (m.persistent || m.species->kind == MobKind::Passive || m.dead()) continue;
+        if (m.dead()) continue;
+        if (m.species && (m.species->traits & kMobDragon) != 0) continue;
+        const int mcx = chunkOf(fl(m.x));
+        const int mcz = chunkOf(fl(m.z));
+        if (in.isChunkRendered && !in.isChunkRendered(mcx, mcz)) {
+            m.health = 0.0f;
+            m.deathTime = 100;  // (gone: despawn in unrendered chunks)
+            continue;
+        }
+        if (m.persistent || m.species->kind == MobKind::Passive) continue;
         const double dx = m.x - in.player[0], dy = m.y - in.player[1], dz = m.z - in.player[2];
         const double distSq = dx * dx + dy * dy + dz * dz;
-        // Mob.checkDespawn: beyond 128 blocks at once; beyond 32, after half a minute, one tick in 800.
-        if (distSq > 128.0 * 128.0 || (distSq > 32.0 * 32.0 && m.age > 600 && m.target == 0 && randomInt(800) == 0)) {
+        const double maxDist = in.renderDistance > 0 ? static_cast<double>(in.renderDistance) * 16.0 : 128.0;
+        // Mob.checkDespawn: beyond render distance / 128 blocks at once; beyond 32, after half a minute, one tick in 800.
+        if (distSq > maxDist * maxDist || distSq > 128.0 * 128.0 || (distSq > 32.0 * 32.0 && m.age > 600 && m.target == 0 && randomInt(800) == 0)) {
             m.health = 0.0f;
             m.deathTime = 100;  // (gone: no drops, no sound)
         }
@@ -143,10 +154,15 @@ void Mobs::naturalSpawning(const MobTick& in) {
     }
     if (hostile >= 70) return;
     const Level& level = *in.level;
-    for (int attempt = 0; attempt < 3; ++attempt) {
+    const double maxRadius = in.renderDistance > 0 ? std::max(24.0, (static_cast<double>(in.renderDistance) - 0.5) * 16.0) : 100.0;
+    if (maxRadius <= 24.0) return;
+    for (int attempt = 0; attempt < 6; ++attempt) {
         const double angle = static_cast<double>(random()) * 6.283185307179586;
-        const double radius = 24.0 + static_cast<double>(random()) * 76.0;
+        const double radius = 24.0 + static_cast<double>(random()) * (maxRadius - 24.0);
         const int x = fl(in.player[0] + std::cos(angle) * radius), z = fl(in.player[2] + std::sin(angle) * radius);
+        const int cx = chunkOf(x), cz = chunkOf(z);
+        if (in.isChunkRendered && !in.isChunkRendered(cx, cz)) continue;
+        if (in.isChunkVisible && !in.isChunkVisible(cx, cz)) continue;
         if (!level.isLoaded(x, z)) continue;
         int y;
         if (in.dimension == 0) {
@@ -168,8 +184,11 @@ void Mobs::populateChunks(const MobTick& in) {
     if (tickCount_ % 10 != 0 || !in.spawnMobs) return;
     const Level& level = *in.level;
     const int pcx = chunkOf(fl(in.player[0])), pcz = chunkOf(fl(in.player[2]));
-    for (int cx = pcx - 6; cx <= pcx + 6; ++cx) {
-        for (int cz = pcz - 6; cz <= pcz + 6; ++cz) {
+    const int r = in.renderDistance > 0 ? std::min(in.renderDistance, 6) : 6;
+    for (int cx = pcx - r; cx <= pcx + r; ++cx) {
+        for (int cz = pcz - r; cz <= pcz + r; ++cz) {
+            if (in.isChunkRendered && !in.isChunkRendered(cx, cz)) continue;
+            if (in.isChunkVisible && !in.isChunkVisible(cx, cz)) continue;
             if (populated_.count({cx, cz}) != 0) continue;
             // (every neighbour has to be there too, so the herd's ground and the light are final)
             bool ready = true;

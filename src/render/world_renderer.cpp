@@ -1113,5 +1113,29 @@ bool WorldRenderer::sectionReady(int x, int y, int z) const {
     return meshRequested_.contains(key) && !meshPending_.contains(key);
 }
 
+bool WorldRenderer::isChunkRendered(int chunkX, int chunkZ) const {
+    const int pcx = playerChunkX_.load();
+    const int pcz = playerChunkZ_.load();
+    const int r = wantedRadius_.load();
+    if (r <= 0) return level_.chunk(ChunkPos{chunkX, chunkZ}) != nullptr;
+    const int dx = chunkX - pcx;
+    const int dz = chunkZ - pcz;
+    if (dx * dx + dz * dz > r * r) return false;
+    return level_.chunk(ChunkPos{chunkX, chunkZ}) != nullptr;
+}
+
+bool WorldRenderer::isBlockInRenderedChunk(int x, int z) const {
+    return isChunkRendered(chunkOf(x), chunkOf(z));
+}
+
+bool WorldRenderer::isChunkVisible(int chunkX, int chunkZ) const {
+    if (!isChunkRendered(chunkX, chunkZ)) return false;
+    if (visibleChunks_.count(ChunkPos{chunkX, chunkZ}) != 0) return true;
+    const float ox = static_cast<float>(chunkX * 16 - lastCameraPos_[0]);
+    const float oz = static_cast<float>(chunkZ * 16 - lastCameraPos_[2]);
+    return lastFrustum_.mayContain({ox, static_cast<float>(kMinY - lastCameraPos_[1]), oz},
+                                   {ox + 16.0f, static_cast<float>(kMaxY - lastCameraPos_[1]), oz + 16.0f});
+}
+
 }  // namespace falcon
 

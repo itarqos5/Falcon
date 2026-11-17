@@ -140,6 +140,9 @@ void WorldRenderer::render(const Camera& camera, int framebufferWidth, int frame
     gl::Uniform1f(uInstanced_, 0.0f);
 
     const Frustum frustum = extractFrustum(viewProj);
+    lastViewProj_ = viewProj;
+    lastFrustum_ = frustum;
+    lastCameraPos_ = {camera.x, camera.y, camera.z};
     const float reach = (static_cast<float>(renderDistance) + 1.0f) * 16.0f + 16.0f;
     visible_.clear();
     // Inside solid rock there is no air to walk out of, and the game then draws everything in view (as the game itself does: it turns its
@@ -151,6 +154,10 @@ void WorldRenderer::render(const Camera& camera, int framebufferWidth, int frame
     }
     if (occlusionNow) collectVisibleByTraversal(camera, frustum, reach);
     else collectVisibleByScan(camera, frustum, reach);
+    visibleChunks_.clear();
+    for (const VisibleSection& v : visible_) {
+        visibleChunks_.insert(ChunkPos{v.chunkX, v.chunkZ});
+    }
     // Water and the like are drawn farthest first (they blend over what is behind them).
     translucentOrder_.clear();
     for (const VisibleSection& v : visible_) {
@@ -337,7 +344,7 @@ void WorldRenderer::collectVisibleByScan(const Camera& camera, const Frustum& fr
         if (horizontal2 > reach * reach) continue;  // beyond the render distance
         if (!frustum.mayContain({ox, oy, oz}, {ox + 16.0f, oy + 16.0f, oz + 16.0f})) continue;
         const float cy = oy + 8.0f;
-        visible_.push_back({&section, ox, oy, oz, horizontal2 + cy * cy});
+        visible_.push_back({&section, ox, oy, oz, horizontal2 + cy * cy, key.x, key.z});
     }
     std::sort(visible_.begin(), visible_.end(), [](const VisibleSection& a, const VisibleSection& b) { return a.distance2 < b.distance2; });
 }
@@ -379,7 +386,7 @@ void WorldRenderer::collectVisibleByTraversal(const Camera& camera, const Frustu
             const float oz = static_cast<float>(node.z * 16 - camera.z);
             if (head != 0 || frustum.mayContain({ox, oy, oz}, {ox + 16.0f, oy + 16.0f, oz + 16.0f})) {  // (the others passed when they were reached)
                 const float cx = ox + 8.0f, cy = oy + 8.0f, cz = oz + 8.0f;
-                visible_.push_back({section, ox, oy, oz, cx * cx + cy * cy + cz * cz});
+                visible_.push_back({section, ox, oy, oz, cx * cx + cy * cy + cz * cz, node.x, node.z});
             }
         }
         // Which faces it can be left through.

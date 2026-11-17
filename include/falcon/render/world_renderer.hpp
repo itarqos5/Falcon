@@ -184,6 +184,11 @@ public:
     // True once the section holding the block (x, y, z) is generated and its mesh is on the GPU (or it has nothing to draw):
     // what the game waits for before it takes the loading screen away, so the player never opens their eyes in empty space.
     [[nodiscard]] bool sectionReady(int x, int y, int z) const;
+    // True if the chunk is currently loaded and within the active render distance (not in LOD territory).
+    [[nodiscard]] bool isChunkRendered(int chunkX, int chunkZ) const;
+    [[nodiscard]] bool isBlockInRenderedChunk(int x, int z) const;
+    // True if the chunk is rendered and currently in the view frustum / visible to the camera.
+    [[nodiscard]] bool isChunkVisible(int chunkX, int chunkZ) const;
 
     // Draws the sky and the blocks. The framebuffer must be cleared (depth too); this leaves depth test on.
     void render(const Camera& camera, int framebufferWidth, int framebufferHeight, int renderDistance);
@@ -245,6 +250,7 @@ private:
         const GpuSection* section;
         float ox, oy, oz;
         float distance2;
+        int chunkX = 0, chunkZ = 0;
     };
     struct MeshResult {
         SectionKey key;
@@ -404,6 +410,9 @@ private:
     // Chunks that were let go of, kept compressed (a few KB each) for when the player comes back or raises the Render Distance.
     ChunkCache chunkCache_{128u * 1024u * 1024u};
     std::vector<VisibleSection> visible_;  // reused every frame
+    std::array<double, 3> lastCameraPos_{};
+    Frustum lastFrustum_{};
+    std::unordered_set<ChunkPos, ChunkPosHash> visibleChunks_;
     double gpuMillis_ = 0.0;
     bool gpuTiming_ = false;
 

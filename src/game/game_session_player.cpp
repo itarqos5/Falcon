@@ -91,7 +91,7 @@ void GameSession::tickPlayer(double seconds, bool steering) {
         }
         tickHealth();
         tickBurning();
-        if (ready_ && !remote_) itemEntities_.tick(renderer_.level());  // (on a server the items are the server's: pumpRemote puts them there)
+        if (ready_ && !remote_) itemEntities_.tick(renderer_.level(), [this](int cx, int cz) { return renderer_.isChunkRendered(cx, cz); });  // (on a server the items are the server's: pumpRemote puts them there)
         if (ready_ && !remote_) tickTime();
         if (ready_ && !remote_) tickMobs();
         if (ready_ && !remote_) tickPortal();
@@ -147,6 +147,9 @@ void GameSession::tickMobs() {
     in.spawnMobs = gameRuleOn("spawn_mobs");
     in.spawnMonsters = gameRuleOn("spawn_monsters");
     in.mobGriefing = gameRuleOn("mob_griefing");
+    in.renderDistance = renderDistance();
+    in.isChunkVisible = [this](int cx, int cz) { return renderer_.isChunkVisible(cx, cz); };
+    in.isChunkRendered = [this](int cx, int cz) { return renderer_.isChunkRendered(cx, cz); };
     mobSim_->tick(in);
     static const bool log = std::getenv("FALCON_MOB_LOG") != nullptr;  // (a test aid: what every mob does, once a second)
     if (log && gameTime_ % 20 == 0) {

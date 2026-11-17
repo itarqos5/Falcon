@@ -29,11 +29,15 @@ ItemEntity& ItemEntities::spawn(ItemStack stack, double x, double y, double z, d
 }
 
 // ItemEntity.tick.
-void ItemEntities::tick(const Level& level) {
+void ItemEntities::tick(const Level& level, const std::function<bool(int chunkX, int chunkZ)>& isChunkRendered) {
     ++tickCount_;
     const BlockRegistry& registry = blockRegistry();
     for (ItemEntity& e : items_) {
         if (e.stack.isEmpty()) continue;
+        if (isChunkRendered && !isChunkRendered(chunkOf(blockFloor(e.x)), chunkOf(blockFloor(e.z)))) {
+            e.stack = ItemStack();
+            continue;
+        }
         if (e.pickupDelay > 0 && e.pickupDelay != ItemEntity::kNeverPickUp) --e.pickupDelay;
         e.xo = e.x;
         e.yo = e.y;

@@ -926,6 +926,12 @@ void Mobs::shoot(Projectile::Kind kind, double x, double y, double z, double vx,
 void Mobs::tickShots(const MobTick& in) {
     const Level& level = *in.level;
     for (Projectile& p : shots_) {
+        const int pcx = chunkOf(fl(p.x));
+        const int pcz = chunkOf(fl(p.z));
+        if (in.isChunkRendered && !in.isChunkRendered(pcx, pcz)) {
+            p.age = 10000;
+            continue;
+        }
         p.xo = p.x;
         p.yo = p.y;
         p.zo = p.z;
@@ -1000,9 +1006,13 @@ void Mobs::tick(const MobTick& in) {
     ++tickCount_;
     pathBudget_ = 3;
     for (Mob& m : mobs_) {
+        const int mcx = chunkOf(fl(m.x));
+        const int mcz = chunkOf(fl(m.z));
+        if (in.isChunkRendered && !in.isChunkRendered(mcx, mcz)) continue;
         if (!in.level->isLoaded(fl(m.x), fl(m.z))) continue;  // (frozen where nothing is loaded)
         const double dx = m.x - in.player[0], dz = m.z - in.player[2];
-        if (dx * dx + dz * dz > 128.0 * 128.0 && m.species->kind != MobKind::Passive) continue;
+        const double maxRenderDist = in.renderDistance > 0 ? static_cast<double>(in.renderDistance) * 16.0 : 128.0;
+        if (dx * dx + dz * dz > maxRenderDist * maxRenderDist && m.species->kind != MobKind::Passive) continue;
         tickMob(m, in);
     }
     tickShots(in);

@@ -43,8 +43,15 @@ void GameSession::renderLocalMobs(const std::array<double, 3>& camPos) {
         return d;
     };
     const Matrix4f viewProj = renderer_.viewProjection();
+    const double maxDist = static_cast<double>(renderDistance()) * 16.0;
+    const double maxDistSq = maxDist * maxDist;
     for (const Mob& m : mobSim_->mobs()) {
-        if (!MobRenderer::supports(m.species->id)) continue;
+        if (m.dead() || !MobRenderer::supports(m.species->id)) continue;
+        const int cx = chunkOf(static_cast<int>(std::floor(m.x)));
+        const int cz = chunkOf(static_cast<int>(std::floor(m.z)));
+        if (!renderer_.isChunkRendered(cx, cz)) continue;
+        const double dx = m.x - camPos[0], dz = m.z - camPos[2];
+        if (dx * dx + dz * dz > maxDistSq) continue;
         MobPose pose;
         pose.position = {m.xo + (m.x - m.xo) * partialTick_, m.yo + (m.y - m.yo) * partialTick_, m.zo + (m.z - m.zo) * partialTick_};
         pose.bodyYaw = m.yawo + wrap(m.yaw - m.yawo) * partial;
@@ -64,6 +71,11 @@ void GameSession::renderLocalMobs(const std::array<double, 3>& camPos) {
     }
     std::vector<ItemEntity> fireballs;  // (a fireball is drawn as the item of the fire charge, a sprite: the game has a model of its own)
     for (const Projectile& p : mobSim_->projectiles()) {
+        const int cx = chunkOf(static_cast<int>(std::floor(p.x)));
+        const int cz = chunkOf(static_cast<int>(std::floor(p.z)));
+        if (!renderer_.isChunkRendered(cx, cz)) continue;
+        const double dx = p.x - camPos[0], dz = p.z - camPos[2];
+        if (dx * dx + dz * dz > maxDistSq) continue;
         if (p.kind == Projectile::Kind::Arrow) {
             MobPose pose;
             pose.position = {p.xo + (p.x - p.xo) * partialTick_, p.yo + (p.y - p.yo) * partialTick_, p.zo + (p.z - p.zo) * partialTick_};

@@ -4,6 +4,7 @@
 #include "falcon/world/collision_shapes.hpp"
 #include "falcon/world/item_stack.hpp"
 
+#include <functional>
 #include <vector>
 
 namespace falcon {
@@ -33,7 +34,7 @@ public:
     // Puts an item in the world. `bobOffset` is a random angle in radians (the caller owns the random numbers).
     ItemEntity& spawn(ItemStack stack, double x, double y, double z, double vx, double vy, double vz, int pickupDelay, float bobOffset);
     // One game tick for every item: gravity, water and lava, the move and its friction, merging, ageing, despawning.
-    void tick(const Level& level);
+    void tick(const Level& level, const std::function<bool(int chunkX, int chunkZ)>& isChunkRendered = nullptr);
     [[nodiscard]] std::vector<ItemEntity>& items() { return items_; }
     [[nodiscard]] const std::vector<ItemEntity>& items() const { return items_; }
     void clear() { items_.clear(); }

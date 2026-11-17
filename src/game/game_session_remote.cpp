@@ -867,7 +867,14 @@ void GameSession::renderRemotePlayers(const std::array<double, 3>& camPos) {
         if (d < -180.0f) d += 360.0f;
         return d;
     };
+    const double maxDist = static_cast<double>(renderDistance()) * 16.0;
+    const double maxDistSq = maxDist * maxDist;
     for (const auto& [id, p] : remote_->players()) {
+        const int cx = chunkOf(static_cast<int>(std::floor(p.x)));
+        const int cz = chunkOf(static_cast<int>(std::floor(p.z)));
+        if (!renderer_.isChunkRendered(cx, cz)) continue;
+        const double dx = p.x - camPos[0], dz = p.z - camPos[2];
+        if (dx * dx + dz * dz > maxDistSq) continue;
         if (!remote_->isPlayerEntity(p)) {  // a mob: its model and picture by its type
             const std::string* type = remote_->mobName(p.type);
             if (type == nullptr || !mobs_) continue;

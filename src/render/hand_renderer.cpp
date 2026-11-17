@@ -530,6 +530,9 @@ void HandRenderer::renderGroundItems(WorldRenderer& world, const Matrix4f& viewP
     gl::Disable(gl::BLEND);
     for (const ItemEntity& e : items) {
         if (e.stack.isEmpty()) continue;
+        const int cx = chunkOf(static_cast<int>(std::floor(e.x)));
+        const int cz = chunkOf(static_cast<int>(std::floor(e.z)));
+        if (!world.isChunkRendered(cx, cz)) continue;
         const double px = e.xo + (e.x - e.xo) * partialTick - cam[0];
         const double py = e.yo + (e.y - e.yo) * partialTick - cam[1];
         const double pz = e.zo + (e.z - e.zo) * partialTick - cam[2];
@@ -603,6 +606,9 @@ void HandRenderer::renderBlockEntities(WorldRenderer& world, const Matrix4f& vie
     };
     for (const FallingBlock& e : falling) {
         if (e.id < 0) continue;
+        const int cx = chunkOf(static_cast<int>(std::floor(e.x)));
+        const int cz = chunkOf(static_cast<int>(std::floor(e.z)));
+        if (!world.isChunkRendered(cx, cz)) continue;
         const Item item = itemRegistry().itemOfBlock(registry.state(e.block).block);
         if (item == Item::Air) continue;
         const double px = e.xo + (e.x - e.xo) * partialTick, py = e.yo + (e.y - e.yo) * partialTick, pz = e.zo + (e.z - e.zo) * partialTick;
@@ -618,6 +624,9 @@ void HandRenderer::renderBlockEntities(WorldRenderer& world, const Matrix4f& vie
         const std::uint16_t whiteLayer = models_.layerFor("minecraft:block/white_concrete");
         for (const PrimedTnt& e : tnt) {
             if (e.id < 0 || model.empty) continue;
+            const int cx = chunkOf(static_cast<int>(std::floor(e.x)));
+            const int cz = chunkOf(static_cast<int>(std::floor(e.z)));
+            if (!world.isChunkRendered(cx, cz)) continue;
             const double px = e.xo + (e.x - e.xo) * partialTick, py = e.yo + (e.y - e.yo) * partialTick, pz = e.zo + (e.z - e.zo) * partialTick;
             if ((px - cam[0]) * (px - cam[0]) + (py - cam[1]) * (py - cam[1]) + (pz - cam[2]) * (pz - cam[2]) > 96.0 * 96.0) continue;
             // PrimedTntRenderer: it swells in the last half second, and every five ticks it is a white block.
