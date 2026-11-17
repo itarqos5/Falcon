@@ -1,4 +1,5 @@
 #include "falcon/game/join_multiplayer_screen.hpp"
+#include "falcon/util/log.hpp"
 
 #include "falcon/assets/image.hpp"
 #include "falcon/game/server_screens.hpp"
@@ -343,7 +344,7 @@ void JoinMultiplayerScreen::updateButtons() {
 
 void JoinMultiplayerScreen::join(const std::shared_ptr<ServerEntry>& server) {
     if (!services_.joinServer) return;
-    std::printf("[falcon] joining %s (%s)\n", server->name.c_str(), server->ip.c_str());
+    falcon::log::line("joining %s (%s)\n", server->name.c_str(), server->ip.c_str());
     std::fflush(stdout);
     services_.joinServer(server->ip);
 }

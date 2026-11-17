@@ -1,4 +1,5 @@
 #include "falcon/resource_reloader.hpp"
+#include "falcon/util/log.hpp"
 
 #include "falcon/game/edition_badge.hpp"
 
@@ -188,7 +189,7 @@ std::unique_ptr<ResourceReloader::Job> ResourceReloader::prepare(const Request& 
             try {
                 body();
             } catch (const std::exception& e) {
-                std::printf("[falcon] reload: %s\n", e.what());
+                falcon::log::line("reload: %s\n", e.what());
             }
         };
     };
@@ -277,7 +278,7 @@ bool ResourceReloader::update() {
     stats_.uploadMs = active_->workMs + commitMs;
     stats_.worstFrameMs = std::max(active_->worstSliceMs, commitMs);
     settledId_ = active_->id;
-    std::printf("[falcon] resource packs applied: %d file(s) reloaded; background %.1f ms, "
+    falcon::log::line("resource packs applied: %d file(s) reloaded; background %.1f ms, "
                 "main thread %.1f ms in total (longest single frame %.1f ms)\n",
                 stats_.resources, stats_.prepareMs, stats_.uploadMs, stats_.worstFrameMs);
     active_.reset();

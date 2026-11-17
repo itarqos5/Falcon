@@ -1,4 +1,5 @@
 #include "falcon/game/options_screen.hpp"
+#include "falcon/util/log.hpp"
 
 #include "falcon/game/language_screen.hpp"
 #include "falcon/game/menu_background.hpp"
@@ -119,7 +120,7 @@ std::string OptionsScreen::fovLabel(int fov) const {
 void OptionsScreen::init() {
     const auto stub = [](const char* name) {
         return [name] {
-            std::printf("[falcon] options: '%s' pressed (not implemented yet)\n", name);
+            falcon::log::line("options: '%s' pressed (not implemented yet)\n", name);
             std::fflush(stdout);
         };
     };

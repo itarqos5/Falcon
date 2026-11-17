@@ -1,4 +1,5 @@
 #include "falcon/game/game_session.hpp"
+#include "falcon/util/log.hpp"
 #include "game_session_internal.hpp"
 
 #include "falcon/game/block_placement.hpp"
@@ -228,7 +229,7 @@ void GameSession::playWorldSound(const std::string& event, SoundSource source, f
     }
     pitch = std::clamp(pitch, 0.5f, 2.0f);
     static const bool log = std::getenv("FALCON_SOUND_LOG") != nullptr;  // (for tests, which run muted: what would have been heard)
-    if (log) std::printf("[falcon] sound %s volume %.2f pitch %.2f\n", event.c_str(), static_cast<double>(volume), static_cast<double>(pitch));
+    if (log) falcon::log::line("sound %s volume %.2f pitch %.2f\n", event.c_str(), static_cast<double>(volume), static_cast<double>(pitch));
     services_.sounds.play(event, source, volume, pitch);
 }
 

@@ -1,4 +1,5 @@
 #include "falcon/game/game_session.hpp"
+#include "falcon/util/log.hpp"
 #include "game_session_internal.hpp"
 
 #include "falcon/game/block_placement.hpp"
@@ -48,7 +49,7 @@ std::shared_ptr<const BlockRegistry> loadRegistry(const ScreenServices& services
         if (shapes) {
             installCollisionShapes(std::move(shapes));
         } else {
-            std::printf("[falcon] collision shapes: %s (only full blocks will collide)\n", error.c_str());
+            falcon::log::line("collision shapes: %s (only full blocks will collide)\n", error.c_str());
         }
     }
     // The outline shapes: what the cursor can hit (a torch is a small post, not a block) and the lines drawn round it.
@@ -58,7 +59,7 @@ std::shared_ptr<const BlockRegistry> loadRegistry(const ScreenServices& services
         if (outlines) {
             installBlockOutlines(std::move(outlines));
         } else {
-            std::printf("[falcon] block outlines: %s (every block will be aimed at as a full cube)\n", error.c_str());
+            falcon::log::line("block outlines: %s (every block will be aimed at as a full cube)\n", error.c_str());
         }
     }
     return registry;
@@ -80,14 +81,14 @@ std::shared_ptr<const ItemRegistry> loadItems(const ScreenServices& services, co
         if (auto tabs = CreativeTabs::loadFromGameData(dataDir, *items, tabError)) {
             installCreativeTabs(std::move(tabs));
         } else {
-            std::printf("[falcon] creative tabs: %s\n", tabError.c_str());
+            falcon::log::line("creative tabs: %s\n", tabError.c_str());
         }
         std::thread([items, dataDir, cache] {
             std::string recipeError;
             if (auto recipes = RecipeManager::loadFromGameData(dataDir, cache, *items, recipeError)) {
                 installRecipeManager(std::move(recipes));
             } else {
-                std::printf("[falcon] recipes: %s\n", recipeError.c_str());
+                falcon::log::line("recipes: %s\n", recipeError.c_str());
             }
         }).detach();
     }
@@ -104,12 +105,12 @@ std::shared_ptr<const worldgen::OverworldGenerator> makeOverworld(const Resource
     worldgen::GeneratorOptions options;
     std::string error;
     if (!worldgen::loadWorldPreset(dataDir, preset, options, error)) {
-        std::printf("[falcon] world preset %s unreadable (%s): using the simple terrain\n", preset, error.c_str());
+        falcon::log::line("world preset %s unreadable (%s): using the simple terrain\n", preset, error.c_str());
         return nullptr;
     }
     std::unique_ptr<worldgen::OverworldGenerator> generator = worldgen::OverworldGenerator::create(dataDir, registry, info.seed, error, options);
     if (!generator) {
-        std::printf("[falcon] the world generator could not start (%s): using the simple terrain\n", error.c_str());
+        falcon::log::line("the world generator could not start (%s): using the simple terrain\n", error.c_str());
         return nullptr;
     }
     // After the terrain and its surface: the game's caves and canyons, and the ores (see worldgen/underground.hpp).
@@ -156,7 +157,7 @@ GameSession::GameSession(ScreenServices& services, const ResourceManager& resour
             std::string behaviourError;
             behaviours_ = BlockBehaviours::loadFromGameData(resources.dataRoot(), *registry_, behaviourError);
             if (!behaviours_) {
-                std::printf("[falcon] block behaviours: %s (sand will not fall, fire and TNT will not work)\n", behaviourError.c_str());
+                falcon::log::line("block behaviours: %s (sand will not fall, fire and TNT will not work)\n", behaviourError.c_str());
             } else {
                 BlockPhysics::Host host;
                 host.setBlock = [this](int x, int y, int z, Block b) { return setBlock(x, y, z, b); };
@@ -212,12 +213,12 @@ GameSession::GameSession(ScreenServices& services, const ResourceManager& resour
         {
             std::string commandError;
             commands_ = CommandTree::loadFromGameData(resources.dataRoot(), commandError);
-            if (!commands_) std::printf("[falcon] commands: %s (the chat cannot run commands)\n", commandError.c_str());
+            if (!commands_) falcon::log::line("commands: %s (the chat cannot run commands)\n", commandError.c_str());
         }
         {
             std::string timelineError;
             timeline_ = daycycle::Timeline::loadFromGameData(resources.dataRoot(), timelineError);
-            if (!timeline_) std::printf("[falcon] day cycle: %s (using the approximation)\n", timelineError.c_str());
+            if (!timeline_) falcon::log::line("day cycle: %s (using the approximation)\n", timelineError.c_str());
         }
         blockTags_ = std::make_unique<BlockTags>(resources.dataRoot() / "data" / "minecraft" / "tags" / "block", *registry_);
         mining_ = std::make_unique<MiningRules>(*registry_, *blockTags_);
@@ -255,19 +256,19 @@ GameSession::GameSession(ScreenServices& services, const ResourceManager& resour
             }
             renderer_.setBreakImages(stages);
         }
-        if (!support_) std::printf("[falcon] plant rules: %s (plants will not pop off)\n", supportError.c_str());
+        if (!support_) falcon::log::line("plant rules: %s (plants will not pop off)\n", supportError.c_str());
         std::string previewError;
         playerPreview_ = PlayerPreview::create(resources, resources.dataRoot(), previewError);
-        if (!playerPreview_) std::printf("[falcon] player model: %s (the inventory will not show the player)\n", previewError.c_str());
+        if (!playerPreview_) falcon::log::line("player model: %s (the inventory will not show the player)\n", previewError.c_str());
         std::string bodyError;
         body_ = PlayerBodyRenderer::create(resources, resources.dataRoot(), bodyError);
-        if (!body_) std::printf("[falcon] player model: %s (F5 will not show the player)\n", bodyError.c_str());
+        if (!body_) falcon::log::line("player model: %s (F5 will not show the player)\n", bodyError.c_str());
         std::string mobError;
         mobs_ = MobRenderer::create(resources, resources.dataRoot(), mobError);
-        if (!mobs_) std::printf("[falcon] mobs: %s (they will not be drawn)\n", mobError.c_str());
+        if (!mobs_) falcon::log::line("mobs: %s (they will not be drawn)\n", mobError.c_str());
     }
     const auto spawn = renderer_.findSpawn();
-    std::printf("[falcon] spawn found: %.1f %.1f %.1f (%s)\n", spawn.x, spawn.y, spawn.z, overworld_ ? "game generator" : "simple terrain");
+    falcon::log::line("spawn found: %.1f %.1f %.1f (%s)\n", spawn.x, spawn.y, spawn.z, overworld_ ? "game generator" : "simple terrain");
     spawn_ = {spawn.x, spawn.y, spawn.z};
     player_.setPosition(spawn.x, spawn.y, spawn.z);
     player_.canFly = info.gameType == 1 || info.gameType == 3;  // creative and spectator
@@ -300,10 +301,10 @@ void GameSession::loadSave() {
     WorldSave saved;
     std::string error;
     if (!readWorldSave(savePath_, saved, *edits_, *registry_, error)) {
-        if (!error.empty()) std::printf("[falcon] %s: starting from the spawn\n", error.c_str());
+        if (!error.empty()) falcon::log::line("%s: starting from the spawn\n", error.c_str());
         return;
     }
-    std::printf("[falcon] loaded the save: %zu edited blocks in %zu chunks, %zu items lying about\n", edits_->size(), edits_->chunkCount(), saved.items.size());
+    falcon::log::line("loaded the save: %zu edited blocks in %zu chunks, %zu items lying about\n", edits_->size(), edits_->chunkCount(), saved.items.size());
     if (saved.hasPlayer) {
         const SavedPlayer& p = saved.player;
         if (p.gameType >= 0 && p.gameType != info_.gameType) setGameType(p.gameType);
@@ -387,17 +388,27 @@ void GameSession::save() {
         other.containers = dim.containers;
         other.mobs = dim.mobs;
         const std::string otherError = writeWorldSave(dimensionSavePath(d), other, *dim.edits, *registry_);
-        if (!otherError.empty()) std::printf("[falcon] could not save the %s: %s\n", d == 1 ? "Nether" : "End", otherError.c_str());
+        if (!otherError.empty()) falcon::log::line("could not save the %s: %s\n", d == 1 ? "Nether" : "End", otherError.c_str());
     }
     if (!error.empty()) {
-        std::printf("[falcon] could not save the world: %s\n", error.c_str());
+        falcon::log::line("could not save the world: %s\n", error.c_str());
         return;
     }
     lastSaveTicks_ = playerAgeTicks_;
-    std::printf("[falcon] saved the world: %zu edited blocks in %zu chunks\n", edits_->size(), edits_->chunkCount());
+    falcon::log::line("saved the world: %zu edited blocks in %zu chunks\n", edits_->size(), edits_->chunkCount());
 }
 
 int GameSession::renderDistance() const { return std::clamp(services_.options.renderDistance, kMinRenderDistance, kMaxRenderDistance); }
+
+std::string GameSession::describe() const {
+    static const char* const kModes[] = {"survival", "creative", "adventure", "spectator"};
+    const RenderStats rs = renderer_.stats();
+    char buffer[480];
+    std::snprintf(buffer, sizeof(buffer), "world '%s' (seed %lld), %s, game mode %s, %s at %.1f %.1f %.1f, render distance %d, %d chunks loaded, %d jobs waiting, %.0f fps", info_.name.c_str(),
+                  static_cast<long long>(info_.seed), dimension_ == 0 ? "Overworld" : dimension_ == 1 ? "Nether" : "End", kModes[std::clamp(info_.gameType, 0, 3)], ready_ ? "playing" : "loading", player_.x, player_.y, player_.z,
+                  renderDistance(), rs.chunksLoaded, rs.jobsWaiting, fps_);
+    return buffer;
+}
 
 bool GameSession::isDown(const char* action) const {
     const std::size_t index = keyMappingIndex(action);
@@ -553,6 +564,21 @@ void GameSession::update(double dt, bool active, int framebufferWidth, int frame
     }
     fpsAccumulated_ += dt;
     ++fpsFrames_;
+    renderLogAge_ += dt;
+    if (ready_ && renderLogAge_ >= 10.0) {  // how the world draws, every ten seconds: what a log of a slow or a crashed run is read for
+        renderLogAge_ = 0.0;
+        const RenderStats rs = renderer_.stats();
+        const LodStats ls = renderer_.lodStats();
+        const auto perJob = [](const RenderStats::StageTime& t) { return t.jobs > 0 ? t.milliseconds / static_cast<double>(t.jobs) : 0.0; };
+        falcon::log::info("render", "%.0f fps (%.1f ms); chunks %d, sections %d of %d drawn, %zu of %zu quads, %d draw calls, meshes %.1f MB, block data %.1f MB, textures %.2f MB, process %.0f MB",
+                          fps_, frameMillis_, rs.chunksLoaded, rs.sectionsDrawn, rs.sectionsLoaded, rs.quadsDrawn, rs.quadsTotal, rs.drawCalls, static_cast<double>(rs.meshBytes) / 1048576.0,
+                          static_cast<double>(rs.levelBytes) / 1048576.0, static_cast<double>(rs.textureBytes) / 1048576.0, static_cast<double>(processWorkingSetBytes()) / 1048576.0);
+        falcon::log::info("chunks", "%d jobs waiting, %d in flight; per job: terrain %.1f ms, decoration %.1f ms, light %.1f ms, mesh %.1f ms; %zu cached chunks (%.1f MB)", rs.jobsWaiting, rs.jobsInFlight,
+                          perJob(rs.terrainTime), perJob(rs.decorateTime), perJob(rs.lightTime), perJob(rs.meshTime), rs.cachedChunks, static_cast<double>(rs.cacheBytes) / 1048576.0);
+        if (services_.options.lodsEnabled) {
+            falcon::log::info("lod", "%d tiles drawn of %d loaded (%d being built), %d levels, %ld triangles, %.1f MB", ls.tilesDrawn, ls.tilesLoaded, ls.tilesBuilding, ls.levels, ls.trianglesDrawn, ls.megabytes);
+        }
+    }
     if (fpsAccumulated_ >= 0.5) {
         fps_ = fpsFrames_ / fpsAccumulated_;
         frameMillis_ = 1000.0 * fpsAccumulated_ / fpsFrames_;
@@ -615,8 +641,8 @@ void GameSession::update(double dt, bool active, int framebufferWidth, int frame
             completeArrival();
             renderer_.setActiveWorkers(workerCount());  // playing: about half of the PC (it all made the spawn area)
             progress_ = smoothedProgress_ = 1.0f;
-            if (timedOut && !loaded) std::printf("[falcon] the spawn area did not finish loading in %.0f s: starting anyway\n", loadElapsed_);
-            std::printf("[falcon] spawn area loaded in %.2f s\n", loadElapsed_);
+            if (timedOut && !loaded) falcon::log::line("the spawn area did not finish loading in %.0f s: starting anyway\n", loadElapsed_);
+            falcon::log::line("spawn area loaded in %.2f s\n", loadElapsed_);
         }
         return;
     }
@@ -774,7 +800,7 @@ void GameSession::setGameType(int gameType) {
     gameType = std::clamp(gameType, 0, 3);
     if (gameType == info_.gameType) return;
     static constexpr const char* kModeNames[4] = {"survival", "creative", "adventure", "spectator"};
-    std::printf("[falcon] game mode: %s -> %s\n", kModeNames[info_.gameType], kModeNames[gameType]);
+    falcon::log::line("game mode: %s -> %s\n", kModeNames[info_.gameType], kModeNames[gameType]);
     previousGameType_ = info_.gameType;
     info_.gameType = gameType;
     inventory_.infiniteMaterials = gameType == 1;

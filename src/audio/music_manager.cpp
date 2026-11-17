@@ -1,4 +1,5 @@
 #include "falcon/audio/music_manager.hpp"
+#include "falcon/util/log.hpp"
 
 #include <algorithm>
 #include <climits>
@@ -62,7 +63,7 @@ void MusicManager::startPlaying() {
     const auto status = sounds_.startMusic(event);
     currentMusic_ = true;  // the game keeps the instance even if it failed to start
     if (status != SoundSystem::MusicStatus::NotStarted) ++tracksStarted_;
-    std::printf("[falcon] music: %s (%s)\n", sounds_.currentMusicTrack().c_str(),
+    falcon::log::line("music: %s (%s)\n", sounds_.currentMusicTrack().c_str(),
                 status == SoundSystem::MusicStatus::Started
                     ? "started"
                     : (status == SoundSystem::MusicStatus::StartedSilently ? "started silently"

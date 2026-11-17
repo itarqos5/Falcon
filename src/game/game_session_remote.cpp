@@ -6,6 +6,7 @@
 #include "falcon/render/mob_renderer.hpp"
 #include "falcon/render/player_body.hpp"
 #include "falcon/util/text_util.hpp"
+#include "falcon/util/log.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -439,7 +440,7 @@ bool GameSession::connectRemote(const std::string& host, int port, const std::st
         lastHeldSent_ = inventory_.selected;
     };
     h.disconnect = [this](const std::string& why) {
-        std::printf("[falcon] left the server: %s\n", why.c_str());
+        falcon::log::line("left the server: %s\n", why.c_str());
         addChatMessage("\xC2\xA7" "cDisconnected: " + why);
         remoteLost_ = why;
     };
@@ -448,7 +449,7 @@ bool GameSession::connectRemote(const std::string& host, int port, const std::st
         renderer_.setRemote(false);
         return false;
     }
-    std::printf("[falcon] connecting to %s:%d as %s\n", host.c_str(), port, username.c_str());
+    falcon::log::line("connecting to %s:%d as %s\n", host.c_str(), port, username.c_str());
     return true;
 }
 

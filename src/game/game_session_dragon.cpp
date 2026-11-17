@@ -1,6 +1,7 @@
 // GameSession: the fight in the End. The first time the player arrives the Ender Dragon is there, with an end crystal on top of each of the ten pillars; the crystals heal it; when it is
 // dead the exit portal opens at the middle of the island, with the dragon egg above it. (EnderDragonFight, in a simpler form: the phases of the dragon are in world/mob.cpp.)
 #include "falcon/game/game_session.hpp"
+#include "falcon/util/log.hpp"
 
 #include "falcon/render/hand_renderer.hpp"
 #include "falcon/world/nether_decoration.hpp"
@@ -27,7 +28,7 @@ void GameSession::startDragonFight() {
     if (findDragon(*mobSim_) != nullptr) return;  // (it was saved with the End: it is there already)
     if (Mob* dragon = mobSim_->spawn("ender_dragon", 0.5, 96.0, 0.5, true)) dragon->yaw = dragon->yawo = 180.0f;
     for (const EndSpike& spike : endSpikes(info_.seed)) mobSim_->spawn("end_crystal", spike.centerX + 0.5, static_cast<double>(spike.height) + 1.0, spike.centerZ + 0.5, true);
-    std::printf("[falcon] the Ender Dragon and its ten crystals are in the End\n");
+    falcon::log::line("the Ender Dragon and its ten crystals are in the End\n");
 }
 
 // EndPodiumFeature: the bedrock dish of the exit portal at the middle of the island, a column of bedrock with torches, and (once the dragon is dead) the portal in the dish.
@@ -71,7 +72,7 @@ void GameSession::tickDragonFight() {
         dragonDead_ = true;
         makeExitPortal(true);
         playWorldSound("entity.ender_dragon.death", SoundSource::Hostile, 5.0f, 1.0f);
-        std::printf("[falcon] the Ender Dragon is dead: the exit portal is open\n");
+        falcon::log::line("the Ender Dragon is dead: the exit portal is open\n");
     }
 }
 

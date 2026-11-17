@@ -1,4 +1,5 @@
 #include "falcon/game/select_world_screen.hpp"
+#include "falcon/util/log.hpp"
 
 #include "falcon/game/create_world_screen.hpp"
 #include "falcon/ui/confirm_screen.hpp"
@@ -214,7 +215,7 @@ void SelectWorldScreen::pollScan() {
     if (!scan_.valid() || scan_.wait_for(std::chrono::seconds(0)) != std::future_status::ready) return;
     ScanResult result = scan_.get();
     if (!result) {
-        std::printf("[falcon] could not read the saves folder %s\n", savesDir().string().c_str());
+        falcon::log::line("could not read the saves folder %s\n", savesDir().string().c_str());
         loaded_ = true;  // show an empty list rather than loading forever
         levels_.clear();
     } else {
@@ -300,7 +301,7 @@ void SelectWorldScreen::updateButtons() {
 }
 
 void SelectWorldScreen::notImplemented(const char* what) const {
-    std::printf("[falcon] '%s' pressed (not implemented yet)\n", what);
+    falcon::log::line("'%s' pressed (not implemented yet)\n", what);
     std::fflush(stdout);
 }
 
@@ -311,7 +312,7 @@ void SelectWorldScreen::joinSelected() {
     const std::string folder = s->id;
     const auto info = readLevelInfo(savesDir() / pathFromUtf8(folder));
     if (!info) {
-        std::printf("[falcon] cannot open world '%s': level.dat cannot be read\n", folder.c_str());
+        falcon::log::line("cannot open world '%s': level.dat cannot be read\n", folder.c_str());
         return;
     }
     if (info->madeByFalcon) {
@@ -338,7 +339,7 @@ void SelectWorldScreen::deleteSelected() {
         navigator_, lang.get("selectWorld.deleteQuestion"),
         formatLanguageString(lang.get("selectWorld.deleteWarning"), {s->displayName()}),
         lang.get("selectWorld.deleteButton"), lang.get("gui.cancel"), [this, id](bool yes) {
-            if (yes && !deleteWorld(savesDir(), id)) std::printf("[falcon] could not delete world '%s'\n", id.c_str());
+            if (yes && !deleteWorld(savesDir(), id)) falcon::log::line("could not delete world '%s'\n", id.c_str());
             startScan();  // the old rows stay until the new scan arrives, like the game
         }));
 }

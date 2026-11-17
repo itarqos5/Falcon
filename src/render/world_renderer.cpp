@@ -1,4 +1,5 @@
 #include "falcon/render/world_renderer.hpp"
+#include "falcon/util/log.hpp"
 #include "world_renderer_internal.hpp"
 
 #include "falcon/assets/image.hpp"
@@ -419,7 +420,7 @@ WorldRenderer::WorldRenderer(BlockModels& models, std::int64_t seed, TerrainStyl
         gl::GenVertexArrays(1, &arenaVaoInstanced_);
         setupArenaVao();  // (both vertex arrays)
     }
-    std::printf("[falcon] world drawing: %s, %s, light map %s, face directions %s\n", useMultiDraw_ ? "multi-draw (one call per pass)" : "one draw per section",
+    falcon::log::line("world drawing: %s, %s, light map %s, face directions %s\n", useMultiDraw_ ? "multi-draw (one call per pass)" : "one draw per section",
                 useOcclusion_ ? "occlusion culling" : "frustum culling only", optionOff("FALCON_NO_LIGHTLUT") ? "per pixel" : "from a 16x16 picture",
                 optionOff("FALCON_NO_FLATNORMAL") ? "from screen derivatives" : "from the mesh");
 }
@@ -509,7 +510,7 @@ void WorldRenderer::arenaMaybeShrink() {
     std::size_t target = (live + live / 4 + kStep - 1) / kStep * kStep;  // a quarter of room to grow into
     target = std::max(target, kMinimum);
     if (target >= arenaCapacity_) return;
-    std::printf("[falcon] mesh buffer shrunk from %zu MB to %zu MB (%zu MB of meshes in use)\n", arenaCapacity_ * sizeof(MeshVertex) >> 20, target * sizeof(MeshVertex) >> 20,
+    falcon::log::line("mesh buffer shrunk from %zu MB to %zu MB (%zu MB of meshes in use)\n", arenaCapacity_ * sizeof(MeshVertex) >> 20, target * sizeof(MeshVertex) >> 20,
                 live * sizeof(MeshVertex) >> 20);
     arenaCompact(target);
 }
@@ -1158,6 +1159,7 @@ bool WorldRenderer::refreshZoom(int pcx, int pcz, int renderDistance) {
     const int angle = static_cast<int>(std::lround(std::atan2(static_cast<double>(c.dirZ), static_cast<double>(c.dirX)) * 57.29577951308232 / 3.0));
     const std::array<int, 6> key = {active ? 1 : 0, pcx, pcz, active ? angle : 0, active ? c.reach : 0, active ? static_cast<int>(std::lround(c.halfAngle)) : 0};
     if (key == zoomKey_) return false;
+    const bool wasActive = zoomKey_[0] == 1;
     zoomKey_ = key;
     zoomReach_ = active ? c.reach : 0;
     auto wanted = std::make_shared<ChunkSet>();
@@ -1191,10 +1193,15 @@ bool WorldRenderer::refreshZoom(int pcx, int pcz, int renderDistance) {
         }
         std::sort(zoomOrder_.begin(), zoomOrder_.end(), [](const auto& a, const auto& b) { return a.second < b.second; });
     }
+    const std::size_t wantedCount = wanted->size();
     {
         std::lock_guard<std::mutex> lock(zoomMutex_);
         zoomWanted_ = std::move(wanted);
         zoomGenerate_ = std::move(generate);
+    }
+    if (active != wasActive) {
+        if (active) falcon::log::info("zoom", "a zoom is up: a cone of %zu chunks beyond the render distance (reach %d chunks, %.0f degrees either side), %zu chunks to make", wantedCount, c.reach, static_cast<double>(c.halfAngle), zoomOrder_.size());
+        else falcon::log::info("zoom", "the zoom is down: its chunks go to the cache");
     }
     return true;
 }

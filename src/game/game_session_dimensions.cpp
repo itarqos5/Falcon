@@ -1,6 +1,7 @@
 // GameSession: the dimensions. The Overworld, the Nether and the End each have a generator, the blocks the player changed in them, the items, mobs and containers that are in them, and a
 // file of their own; the player is in one of them at a time, and travelling to another puts the loading screen up while its chunks are made.
 #include "falcon/game/game_session.hpp"
+#include "falcon/util/log.hpp"
 #include "game_session_internal.hpp"
 
 #include "falcon/render/hand_renderer.hpp"
@@ -33,7 +34,7 @@ bool GameSession::prepareDimension(int dimension) {
     std::string error;
     std::unique_ptr<worldgen::OverworldGenerator> generator = worldgen::OverworldGenerator::create(dataRoot_, *registry_, info_.seed, error, options);
     if (!generator) {
-        std::printf("[falcon] the %s could not be made (%s)\n", dimension == 1 ? "Nether" : "End", error.c_str());
+        falcon::log::line("the %s could not be made (%s)\n", dimension == 1 ? "Nether" : "End", error.c_str());
         return false;
     }
     dim.generator = std::move(generator);
@@ -107,7 +108,7 @@ void GameSession::travelTo(int dimension, double x, double y, double z, bool por
     portalOverlay_ = 0.0f;
     portalLocked_ = true;
     fogSmoothSet_ = false;  // (the first fog of a dimension is the right one at once)
-    std::printf("[falcon] travelling to the %s at %.1f %.1f %.1f\n", dimension == 0 ? "Overworld" : dimension == 1 ? "Nether" : "End", x, y, z);
+    falcon::log::line("travelling to the %s at %.1f %.1f %.1f\n", dimension == 0 ? "Overworld" : dimension == 1 ? "Nether" : "End", x, y, z);
 }
 
 // A teleport far from the loaded area (/tp): the loading screen holds the player, as the game waits for the chunks of a place it sends someone to, so that they do not fall through

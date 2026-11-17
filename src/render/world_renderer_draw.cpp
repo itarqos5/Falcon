@@ -1,4 +1,5 @@
 #include "falcon/render/world_renderer.hpp"
+#include "falcon/util/log.hpp"
 #include "world_renderer_internal.hpp"
 
 #include "falcon/world/block_outlines.hpp"
@@ -312,7 +313,7 @@ void WorldRenderer::render(const Camera& camera, int framebufferWidth, int frame
         static bool reported = false;
         if (const gl::GLenum error = gl::GetError(); error != 0 && !reported) {
             reported = true;
-            std::printf("[falcon] OpenGL error 0x%04X after drawing the world (%s)\n", error, useMultiDraw_ ? "multi-draw" : "one draw per section");
+            falcon::log::line("OpenGL error 0x%04X after drawing the world (%s)\n", error, useMultiDraw_ ? "multi-draw" : "one draw per section");
         }
     }
     stats_.sectionsDrawn = static_cast<int>(visible_.size());

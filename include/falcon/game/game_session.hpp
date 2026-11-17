@@ -154,6 +154,8 @@ public:
     // The game mode: 0 survival, 1 creative, 2 adventure, 3 spectator; and the one before it (-1 until it has changed).
     [[nodiscard]] int gameType() const { return info_.gameType; }
     [[nodiscard]] int previousGameType() const { return previousGameType_; }
+    // One line on what the game is doing (the world, the dimension, where the player is, how it draws): for the log and the crash report. Reads only; safe from a crash handler.
+    [[nodiscard]] std::string describe() const;
     // Survival and adventure show hearts, food and the experience bar (Hud: gameMode.canHurtPlayer / hasExperience); creative and spectator do not.
     [[nodiscard]] bool survivalBars() const { return info_.gameType == 0 || info_.gameType == 2; }
     // What the bars show (nothing changes health, food or experience yet, see Vitals); `--vitals` sets it for screenshots.
@@ -597,6 +599,7 @@ private:
     std::unique_ptr<BlockLoot> loot_;
     double placeCooldown_ = 0.0;
     double fps_ = 0.0;
+    double renderLogAge_ = 0.0;  // seconds since the log last said how the world draws (every ten while a world is open)
     double frameMillis_ = 0.0;
     double cpuMillis_ = 0.0;
     double fpsAccumulated_ = 0.0;

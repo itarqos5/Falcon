@@ -1,4 +1,5 @@
 #include "falcon/game/create_world_screen.hpp"
+#include "falcon/util/log.hpp"
 
 #include "falcon/util/text_util.hpp"
 
@@ -311,11 +312,11 @@ void CreateWorldScreen::create() {
     std::string error;
     if (!createWorldFolder(savesDir(), folder, settings_, seed, now, error)) {
         // The game shows a toast here; this client has none yet, so the screen simply stays open.
-        std::printf("[falcon] could not create the world '%s': %s\n", folder.c_str(), error.c_str());
+        falcon::log::line("could not create the world '%s': %s\n", folder.c_str(), error.c_str());
         std::fflush(stdout);
         return;
     }
-    std::printf("[falcon] created world '%s' in %s (seed %lld)\n",
+    falcon::log::line("created world '%s' in %s (seed %lld)\n",
                 folder.c_str(), savesDir().string().c_str(), static_cast<long long>(seed));
     std::fflush(stdout);
     navigator_.pop();

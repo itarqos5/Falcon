@@ -1,4 +1,5 @@
 #include "falcon/game/options_screens.hpp"
+#include "falcon/util/log.hpp"
 
 #include "falcon/game/options_video_screens.hpp"
 #include "falcon/util/text_util.hpp"
@@ -19,7 +20,7 @@ std::string fixed(double v, int decimals) {
 // Options that need a world, a signed-in account or a feature that does not exist here are shown
 // but cannot be pressed; this is what the not-yet-built screens print.
 void notImplemented(const char* what) {
-    std::printf("[falcon] '%s' pressed (not implemented yet)\n", what);
+    falcon::log::line("'%s' pressed (not implemented yet)\n", what);
     std::fflush(stdout);
 }
 

@@ -1,4 +1,5 @@
 #include "falcon/render/block_models.hpp"
+#include "falcon/util/log.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -292,7 +293,7 @@ std::uint16_t BlockModels::layerFor(const std::string& texture) const {
     }
     const bool missing = tile.empty();
     if (missing) {
-        std::printf("[falcon] block texture %s not found\n", name.c_str());
+        falcon::log::line("block texture %s not found\n", name.c_str());
         tile = missingTile(tile_);
     }
     const auto layer = static_cast<std::uint16_t>(layers_.size());

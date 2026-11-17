@@ -1,5 +1,6 @@
 #include "falcon/net/multiplayer_client.hpp"
 #include "falcon/world/boat.hpp"
+#include "falcon/util/log.hpp"
 
 #include "falcon/net/crypto.hpp"
 
@@ -196,7 +197,7 @@ void MultiplayerClient::pump(RemoteHandler& h) {
             chatKeys_ = std::move(keys.keys);
             haveChatKeys_ = true;
         } else {
-            std::printf("[falcon] chat is not signed: %s\n", keys.error.c_str());
+            falcon::log::line("chat is not signed: %s\n", keys.error.c_str());
         }
     }
     if (haveChatKeys_ && !chatSessionSent_ && phase_ == Phase::Play) sendChatSession();
@@ -738,7 +739,7 @@ void MultiplayerClient::handlePlay(const Packet& p, RemoteHandler& h) {
             if (auto chunk = decodeChunk(r, static_cast<int>(registry_.stateCount()), error)) {
                 if (h.chunk) h.chunk({cx, cz}, std::move(chunk));
             } else {
-                std::printf("[falcon] chunk %d, %d: %s\n", cx, cz, error.c_str());
+                falcon::log::line("chunk %d, %d: %s\n", cx, cz, error.c_str());
             }
             break;
         }
@@ -768,7 +769,7 @@ void MultiplayerClient::handlePlay(const Packet& p, RemoteHandler& h) {
         }
         case 4: break;  // block_changed_ack
         case 16: {      // commands: the command tree (only to know which arguments are messages)
-            if (!commands_.read(r)) std::printf("[falcon] the server's command tree could not be read: commands with messages go unsigned\n");
+            if (!commands_.read(r)) falcon::log::line("the server's command tree could not be read: commands with messages go unsigned\n");
             break;
         }
         case 18: {      // container_set_content: only the player's own inventory (container 0) is followed
@@ -1469,7 +1470,7 @@ void MultiplayerClient::sendChat(const std::string& text) {
             const Bytes payload = chatSignaturePayload(selfId_, chatSessionId_, chatIndex_, salt, millis / 1000, text, seen.seen);
             std::string error;
             if (rsaSign(chatKeys_.privateKey, payload, signature, error)) ++chatIndex_;
-            else std::printf("[falcon] a chat message could not be signed: %s\n", error.c_str());
+            else falcon::log::line("a chat message could not be signed: %s\n", error.c_str());
         }
     }
     Writer w;
@@ -1506,7 +1507,7 @@ void MultiplayerClient::sendCommand(const std::string& text) {
                 std::string error;
                 const Bytes payload = chatSignaturePayload(selfId_, chatSessionId_, index, salt, millis / 1000, argument.value, seen.seen);
                 if (!rsaSign(chatKeys_.privateKey, payload, signature, error)) {
-                    std::printf("[falcon] a command could not be signed: %s\n", error.c_str());
+                    falcon::log::line("a command could not be signed: %s\n", error.c_str());
                     signedAll = false;
                     break;
                 }

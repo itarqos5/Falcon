@@ -1,4 +1,5 @@
 #include "falcon/client.hpp"
+#include "falcon/util/log.hpp"
 #include "client_internal.hpp"
 
 #include "falcon/audio/audio_engine.hpp"
@@ -155,7 +156,7 @@ int Client::run() {
         }
         return 2;
     }
-    std::printf("[falcon] assets: %s (%s)\n", search.location->root.generic_string().c_str(),
+    falcon::log::line("assets: %s (%s)\n", search.location->root.generic_string().c_str(),
                 search.location->source.c_str());
     if (options_.audioDevices) return runAudioDevices();
     if (options_.audioTest) return runAudioTest(ResourceManager(search.location->root));
@@ -207,7 +208,7 @@ int Client::run() {
         if (optionsFile.save(optionsPath)) {
             savedOptionsText = text;
         } else {
-            std::printf("[falcon] could not save %s\n", optionsPath.string().c_str());
+            falcon::log::line("could not save %s\n", optionsPath.string().c_str());
         }
     };
 
@@ -259,9 +260,9 @@ int Client::run() {
     // The Graphics API setting: what was chosen, and what the game really draws with (only OpenGL can draw it so far).
     {
         const std::string& apiNote = window.graphicsApiNote();
-        std::printf("[falcon] graphics API: %s%s%s\n", std::string(graphicsApiId(window.graphicsApi())).c_str(), apiNote.empty() ? "" : " - ", apiNote.c_str());
+        falcon::log::line("graphics API: %s%s%s\n", std::string(graphicsApiId(window.graphicsApi())).c_str(), apiNote.empty() ? "" : " - ", apiNote.c_str());
     }
-    std::printf("[falcon] %s%s on %s\n", window.graphicsApi() == GraphicsApi::Vulkan ? "" : "OpenGL ", reinterpret_cast<const char*>(gl::GetString(gl::VERSION)),
+    falcon::log::line("%s%s on %s\n", window.graphicsApi() == GraphicsApi::Vulkan ? "" : "OpenGL ", reinterpret_cast<const char*>(gl::GetString(gl::VERSION)),
                 reinterpret_cast<const char*>(gl::GetString(gl::RENDERER)));
 
     {
@@ -271,27 +272,36 @@ int Client::run() {
         int fh = 0;
         window.windowSize(ww, wh);
         window.framebufferSize(fw, fh);
-        std::printf("[falcon] window %dx%d, framebuffer %dx%d\n", ww, wh, fw, fh);
+        falcon::log::line("window %dx%d, framebuffer %dx%d\n", ww, wh, fw, fh);
+        const auto glText = [](gl::GLenum name) {
+            const auto* text = reinterpret_cast<const char*>(gl::GetString(name));
+            return text != nullptr ? std::string(text) : std::string("unknown");
+        };
+        falcon::log::info("gpu", "vendor %s; renderer %s; version %s; shading language %s", glText(gl::VENDOR).c_str(), glText(gl::RENDERER).c_str(), glText(gl::VERSION).c_str(),
+                          glText(0x8B8C).c_str());  // (GL_SHADING_LANGUAGE_VERSION)
+        falcon::log::info("options", "render distance %d, simulation %d, LODs %s (%d chunks, detail %d), vsync %s, max framerate %d, GUI scale %d, language %s", gameOptions.renderDistance,
+                          gameOptions.simulationDistance, gameOptions.lodsEnabled ? "on" : "off", gameOptions.lodChunkRadius, gameOptions.lodDetail, gameOptions.enableVsync ? "on" : "off",
+                          gameOptions.framerateLimit, gameOptions.guiScale, gameOptions.language.c_str());
     }
 
     // ---- turn the loaded data into GL objects and screens ---------------------------------
     LoadedLanguage loadedLanguage = languageLoad.get();
     if (!loadedLanguage.warning.empty()) {
-        std::printf("[falcon] language %s: %s; using English\n", gameOptions.language.c_str(), loadedLanguage.warning.c_str());
+        falcon::log::line("language %s: %s; using English\n", gameOptions.language.c_str(), loadedLanguage.warning.c_str());
         gameOptions.language = loadedLanguage.code;
     }
     Language language = std::move(loadedLanguage.language);
     memStage("language");
     Font font = Font::fromData(fontLoad.get());
     memStage("font");
-    for (const std::string& w : font.warnings()) std::printf("[falcon] font: %s\n", w.c_str());
-    std::printf("[falcon] loaded %zu language strings\n", language.size());
+    for (const std::string& w : font.warnings()) falcon::log::line("font: %s\n", w.c_str());
+    falcon::log::line("loaded %zu language strings\n", language.size());
 
     TextureManager textures(resources);
     if (!options_.keepJavaEdition) {
         const std::optional<Image> badge = badgeLoad.get();
         if (badge) textures.add(kEditionTexturePath, *badge);
-        std::printf("[falcon] title badge: %s\n",
+        falcon::log::line("title badge: %s\n",
                     badge ? "C++ EDITION" : "kept the original (unexpected edition.png layout)");
     }
     memStage("textures + badge");
@@ -328,7 +338,7 @@ int Client::run() {
     const bool silent = options_.mute || (options_.capturePath && !options_.forceAudio);
     AudioEngine audio(silent ? AudioEngine::Mode::Offline : AudioEngine::Mode::Deferred);
     if (silent) {
-        std::printf("[falcon] audio: muted\n");
+        falcon::log::line("audio: muted\n");
     } else {
         audio.selectDevice(gameOptions.audioDevice);
         audio.refreshDevices();  // so the Device button already knows the outputs when it is opened
@@ -337,7 +347,7 @@ int Client::run() {
     const unsigned soundSeed = options_.seed ? *options_.seed : std::random_device{}();
     SoundSystem sounds(resources, audio, gameOptions, soundSeed, soundsLoad.get());
     MusicManager music(sounds, gameOptions, soundSeed + 1);
-    std::printf("[falcon] sounds.json: %zu events\n", sounds.registry().size());
+    falcon::log::line("sounds.json: %zu events\n", sounds.registry().size());
     memStage("sounds.json");
 
     ClientNavigator navigator(window, [&sounds] { sounds.playButtonClick(); });
@@ -366,7 +376,7 @@ int Client::run() {
         std::filesystem::create_directories(gameDir / "resourcepacks", ignored);
     }
     PackRepository packs = PackRepository::load(language, search.location->root, gameDir, std::move(extraPackFolders));
-    std::printf("[falcon] resource packs: %zu available\n", packs.packs().size());
+    falcon::log::line("resource packs: %zu available\n", packs.packs().size());
     memStage("resource pack list");
 
     // Applies a new pack selection in the background; update() below swaps it in between frames.
@@ -405,6 +415,24 @@ int Client::run() {
     std::optional<std::pair<std::string, std::string>> disconnected;  // a server session that ended: the title (a language key) and the reason, shown once the world is gone
     std::vector<std::unique_ptr<Screen>> screens;  // [0] is the main menu; others open on top
     screens.push_back(std::make_unique<TitleScreen>(navigator, services, titleOptions));
+    // What a crash report says the client was doing (asked when the program crashes, so they only read): the screen, the window and the world. The guard takes them out again before what
+    // they look at is gone.
+    struct ContextGuard {
+        ~ContextGuard() {
+            for (const char* name : {"screen", "window", "options", "world"}) falcon::log::removeContext(name);
+        }
+    } contextGuard;
+    falcon::log::addContext("screen", [&screens] { return screens.empty() ? std::string("(none)") : falcon::log::typeName(typeid(*screens.back())); });
+    falcon::log::addContext("window", [&window] {
+        int w = 0, h = 0;
+        window.framebufferSize(w, h);
+        return std::to_string(w) + "x" + std::to_string(h) + " framebuffer, " + std::string(graphicsApiId(window.graphicsApi())) + (window.focused() ? ", focused" : ", not focused");
+    });
+    falcon::log::addContext("options", [&gameOptions] {
+        return "render distance " + std::to_string(gameOptions.renderDistance) + ", LODs " + (gameOptions.lodsEnabled ? std::to_string(gameOptions.lodChunkRadius) + " chunks" : std::string("off")) +
+               ", language " + gameOptions.language;
+    });
+    falcon::log::addContext("world", [&session] { return session ? session->describe() : std::string("no world is open"); });
 
     // ---- input ----------------------------------------------------------------------------
     int guiScale = 1;
@@ -526,17 +554,35 @@ int Client::run() {
         const double millis = std::chrono::duration<double, std::milli>(now - start).count();
         const auto deltaTicks = static_cast<float>(
             std::chrono::duration<double, std::milli>(now - last).count() / 50.0);
+        const double frameMillis = deltaTicks * 50.0;
         last = now;
+        // A frame that took more than a quarter of a second while a world is open (not one that waited for the window to come back): the log says what the game was doing.
+        if (session != nullptr && session->ready() && frameMillis > 250.0 && frameMillis < 5000.0 && !window.background()) {
+            static double lastHitch = -1.0e9;
+            if (millis - lastHitch > 2000.0) {
+                lastHitch = millis;
+                falcon::log::warn("perf", "a frame took %.0f ms (%s)", frameMillis, session->describe().c_str());
+            }
+        }
 
         nowMillis = millis;
+        // (A test aid for the crash report: FALCON_TEST_CRASH=null|abort|throw|thread makes the client fail four seconds after it starts, the way the kind says.)
+        if (static const char* const crashKind = std::getenv("FALCON_TEST_CRASH"); crashKind != nullptr && millis > 4000.0) {
+            falcon::log::warn("test", "FALCON_TEST_CRASH=%s: failing now", crashKind);
+            const std::string kind = crashKind;
+            if (kind == "null") *static_cast<volatile int*>(nullptr) = 1;
+            if (kind == "abort") std::abort();
+            if (kind == "throw") throw std::runtime_error("a test error (FALCON_TEST_CRASH=throw)");
+            if (kind == "thread") std::thread([] { throw std::logic_error("a test exception on a worker thread"); }).join();
+        }
         music.update(deltaTicks);
         if (!silent && !audioReported && (audio.available() || !audio.error().empty())) {
             audioReported = true;
             if (audio.available()) {
-                std::printf("[falcon] audio: '%s' at %d Hz (ready %.0f ms after launch)\n", audio.deviceName().c_str(),
+                falcon::log::line("audio: '%s' at %d Hz (ready %.0f ms after launch)\n", audio.deviceName().c_str(),
                             audio.sampleRate(), millisSinceProcessStart());
             } else {
-                std::printf("[falcon] audio: unavailable (%s); continuing without sound\n", audio.error().c_str());
+                falcon::log::line("audio: unavailable (%s); continuing without sound\n", audio.error().c_str());
             }
         }
 
@@ -605,7 +651,7 @@ int Client::run() {
                 session = std::make_unique<GameSession>(services, resources, window, info);
                 std::string error;
                 if (!session->connectRemote(address, port, options_.username.value_or(services.playerName), error)) {
-                    std::printf("[falcon] cannot join %s:%d: %s\n", address.c_str(), port, error.c_str());
+                    falcon::log::line("cannot join %s:%d: %s\n", address.c_str(), port, error.c_str());
                     session.reset();
                     leftWorld = true;  // (a --capture run does not wait for a world that is not coming)
                     screens.push_back(std::make_unique<DisconnectedScreen>(navigator, services, "connect.failed", error));
@@ -617,7 +663,7 @@ int Client::run() {
                     screens.back()->resize(guiWidth, guiHeight);
                 }
             } catch (const std::exception& e) {
-                std::printf("[falcon] could not start the session: %s\n", e.what());
+                falcon::log::line("could not start the session: %s\n", e.what());
                 session.reset();
             }
         }
@@ -632,7 +678,7 @@ int Client::run() {
             if (levelInfo && options_.gameType) levelInfo->gameType = *options_.gameType;  // --gamemode
             if (levelInfo && options_.cheats) levelInfo->allowCommands = true;               // --cheats
             if (!levelInfo) {
-                std::printf("[falcon] cannot open world '%s': no readable level.dat\n", folder.c_str());
+                falcon::log::line("cannot open world '%s': no readable level.dat\n", folder.c_str());
             } else if (session == nullptr) {
                 try {
                     session = std::make_unique<GameSession>(services, resources, window, *levelInfo);
@@ -647,10 +693,10 @@ int Client::run() {
                     if (options_.holdLoading) session->setMinLoadSeconds(*options_.holdLoading);
                     screens.push_back(std::make_unique<InGameScreen>(navigator, services));
                     screens.back()->resize(guiWidth, guiHeight);
-                    std::printf("[falcon] playing world '%s' (%s, seed %lld)\n", levelInfo->name.c_str(),
+                    falcon::log::line("playing world '%s' (%s, seed %lld)\n", levelInfo->name.c_str(),
                                 levelInfo->style == TerrainStyle::Flat ? "flat" : "hills", static_cast<long long>(levelInfo->seed));
                 } catch (const std::exception& e) {
-                    std::printf("[falcon] could not start the world: %s\n", e.what());
+                    falcon::log::line("could not start the world: %s\n", e.what());
                     services.session = nullptr;
                     session.reset();
                     // (Not only on the console: someone who started Falcon from the launcher has none.)
@@ -668,7 +714,10 @@ int Client::run() {
 
         // Screen changes requested by buttons / Escape; a new top screen is laid out first.
         const bool screenChanged = navigator.apply(screens) || appliedEarly;
-        if (screenChanged) saveOptions();  // leaving a settings screen saves the settings
+        if (screenChanged) {
+            saveOptions();  // leaving a settings screen saves the settings
+            falcon::log::debug("ui", "screen: %s (%d open)", falcon::log::typeName(typeid(*screens.back())).c_str(), static_cast<int>(screens.size()));
+        }
         panorama.setSpeed(static_cast<float>(gameOptions.panoramaSpeed));
         if (windowResized || screenChanged || resourcesReloaded) screens.back()->resize(guiWidth, guiHeight);
 
@@ -757,7 +806,7 @@ int Client::run() {
         }
         if (session != nullptr && session->ready() && !pendingGives.empty()) {  // --give
             for (const std::string& spec : pendingGives) {
-                if (!session->giveItem(spec)) std::printf("[falcon] --give: no item called '%s'\n", spec.c_str());
+                if (!session->giveItem(spec)) falcon::log::line("--give: no item called '%s'\n", spec.c_str());
             }
             pendingGives.clear();
         }
@@ -824,7 +873,7 @@ int Client::run() {
             if (const std::size_t at = pattern.find("%s"); at != std::string::npos) pattern.replace(at, 2, shown);
             overlayMessage = pattern;
             overlayUntilMillis = millis + 5000.0;
-            std::printf("[falcon] %s\n", pattern.c_str());
+            falcon::log::line("%s\n", pattern.c_str());
         }
         window.setCursor(graphics.requestedCursor());
 
@@ -842,12 +891,12 @@ int Client::run() {
                                           (session != nullptr && session->ready() && !options_.benchmark);
         if (options_.capturePath && millis >= options_.captureAfterSeconds * 1000.0 && worldReadyForCapture) {
             if (!silent && audio.available()) {
-                std::printf("[falcon] audio summary: %llu sounds started, music playing: %s, peak %.3f\n",
+                falcon::log::line("audio summary: %llu sounds started, music playing: %s, peak %.3f\n",
                             static_cast<unsigned long long>(audio.stats().soundsStarted),
                             audio.musicPlaying() ? "yes" : "no", static_cast<double>(audio.takePeak()));
             }
             const bool ok = saveFrame(*options_.capturePath, fbW, fbH);
-            std::printf("[falcon] %s %dx%d frame %s %s\n", ok ? "saved" : "FAILED to save", fbW, fbH,
+            falcon::log::line("%s %dx%d frame %s %s\n", ok ? "saved" : "FAILED to save", fbW, fbH,
                         ok ? "to" : "at", options_.capturePath->generic_string().c_str());
             saveOptions();
             return ok ? 0 : 3;
@@ -872,7 +921,7 @@ int Client::run() {
         }
         // The benchmark: report and leave once the flight is over.
         if (session != nullptr && session->benchmarkDone()) {
-            for (const std::string& line : session->benchmarkReport()) std::printf("[falcon] %s\n", line.c_str());
+            for (const std::string& line : session->benchmarkReport()) falcon::log::line("%s\n", line.c_str());
             std::fflush(stdout);
             return 0;
         }

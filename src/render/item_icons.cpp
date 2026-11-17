@@ -1,4 +1,5 @@
 #include "falcon/render/item_icons.hpp"
+#include "falcon/util/log.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -633,7 +634,7 @@ ItemIcons::Rendered ItemIcons::renderPart(const IconPart& part, int size, int st
                 chestModelTried_ = true;
                 std::string error;
                 chestModel_ = loadEntityModel(models_.resources().dataRoot(), "minecraft:chest#main", error);
-                if (!chestModel_) std::printf("[falcon] chest icon: %s\n", error.c_str());
+                if (!chestModel_) falcon::log::line("chest icon: %s\n", error.c_str());
             }
             const std::string textureName = "entity/chest/" + (part.specialTexture.empty() ? std::string("normal") : part.specialTexture);
             auto it = textures_.find(textureName);
