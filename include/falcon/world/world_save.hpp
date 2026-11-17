@@ -66,6 +66,8 @@ struct WorldSave {
     std::vector<ItemEntity> items;
     std::map<std::string, std::string> gameRules;  // the game rules that differ from their defaults (/gamerule)
     int difficulty = -1;                           // -1: not stored
+    std::map<std::string, std::int64_t> stats;     // the statistics ("custom/jump", "mined/stone", ...)
+    std::vector<std::string> advancements;         // the advancements that are done ("story/mine_stone")
     NbtTag mobs;                                   // the mobs and the chunks that had their animals (Mobs::toNbt); type End: none stored
     int dragonState = 0;                           // 0 the Ender Dragon has not been met, 1 it is in the End, 2 it was killed
     int dimension = 0;                             // the dimension the player is in: 0 Overworld, 1 Nether, 2 End

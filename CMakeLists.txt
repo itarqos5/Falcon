@@ -391,6 +391,8 @@ add_library(falcon_core
     src/game/game_options_screen.cpp
     src/game/options_screens.cpp
     src/game/options_video_screens.cpp
+    src/game/advancements.cpp
+    src/game/progress_screens.cpp
     src/game/language_screen.cpp
     src/game/select_world_screen.cpp
     src/game/key_binds_screen.cpp

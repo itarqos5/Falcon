@@ -5,6 +5,7 @@
 #include "falcon/game/chat_screen.hpp"
 #include "falcon/game/inventory_screen.hpp"
 #include "falcon/game/options_screen.hpp"
+#include "falcon/game/progress_screens.hpp"
 
 namespace falcon {
 
@@ -78,10 +79,10 @@ PauseLayout computePauseLayout(int width, int height) {
 void PauseScreen::init() {
     const PauseLayout l = computePauseLayout(width_, height_);
     addButton(text("menu.returnToGame"), l.back, [this] { onClose(); });
-    addLockedButton(text("gui.advancements"), l.advancements);
-    addLockedButton(text("gui.stats"), l.statistics);
+    addButton(text("gui.advancements"), l.advancements, openScreen<AdvancementsScreen>(navigator_, services_));
+    addButton(text("gui.stats"), l.statistics, openScreen<StatisticsScreen>(navigator_, services_));
     addButton(text("menu.options"), l.options, openScreen<OptionsScreen>(navigator_, services_));
-    addLockedButton(text("options.worldOptions.button"), l.worldOptions);
+    addButton(text("options.worldOptions.button"), l.worldOptions, openScreen<WorldOptionsScreen>(navigator_, services_));
     addButton(text("menu.returnToMenu"), l.quit, [this] {
         if (services_.quitWorld) services_.quitWorld();
     });

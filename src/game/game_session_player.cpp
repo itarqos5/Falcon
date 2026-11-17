@@ -57,6 +57,7 @@ void GameSession::tickPlayer(double seconds, bool steering) {
     const int limit = remote_ ? kMaxRemoteTicksPerFrame : kMaxTicksPerFrame;
     for (int i = 0; i < std::min(due, limit); ++i) {
         playerAgeTicks_ += 1.0;
+        bool jumpedThisTick = false;
         if (!pinnedPose_) {  // (a pinned camera, for screenshots, freezes the player; the world goes on)
             const double vx = player_.vx, vy = player_.vy, vz = player_.vz;  // (what it was going at, for a splash)
             if (riding()) {
@@ -66,7 +67,9 @@ void GameSession::tickPlayer(double seconds, bool steering) {
                 tickUsingItem();
                 player_.usingItem = usingItem_;
                 player_.gliderEquipped = gliderUsable();
+                const bool wasOnGround = player_.onGround;
                 player_.tick(input, renderer_.level());
+                jumpedThisTick = input.jump && wasOnGround && !player_.onGround && player_.vy > 0.0;
                 tickGlide();
                 sendRemoteTick(input);
             }
@@ -79,6 +82,7 @@ void GameSession::tickPlayer(double seconds, bool steering) {
                 wasInWater_ = player_.inWater;
                 tickBody();
                 pickUpItems();
+                tickStatistics(jumpedThisTick);
             }
         }
         tickHealth();
@@ -323,12 +327,62 @@ bool GameSession::hurt(float amount, bool bypassCooldown, bool bypassArmor) {
         hurtDirection_ = randomFloat() < 0.5f ? 0.0f : 180.0f;  // (a hit with no attacker tilts the view to a random side)
         if (vitals_.health - applied > 0.0f) playWorldSound("entity.player.hurt", SoundSource::Players, 1.0f, 1.0f + (randomFloat() - randomFloat()) * 0.2f);
     }
+    stats_["custom/damage_taken"] += static_cast<std::int64_t>(std::lround(applied * 10.0f));
     vitals_.health = std::max(0.0f, vitals_.health - applied);
     if (vitals_.health <= 0.0f) die();
     return true;
 }
 
+// The statistics and the advancements, once a tick (Player.checkMovementStatistics and the counters of ServerStatsCounter): the time, then how far the player went this tick and
+// by what means, in centimetres, and every second the advancements are checked against what the player has.
+void GameSession::tickStatistics(bool jumped) {
+    ++stats_["custom/play_time"];
+    ++stats_["custom/total_world_time"];
+    ++stats_["custom/time_since_death"];
+    if (jumped) ++stats_["custom/jump"];
+    const std::array<double, 3> now = {player_.x, player_.y, player_.z};
+    if (statPositionKnown_ && !riding()) {
+        const double dx = now[0] - statPosition_[0], dy = now[1] - statPosition_[1], dz = now[2] - statPosition_[2];
+        const double flat = std::hypot(dx, dz);
+        if (flat < 10.0 && std::abs(dy) < 10.0) {  // (a jump of more than that is a teleport or a portal, not a walk)
+            const auto add = [this](const char* key, double centimetres) {
+                const auto cm = static_cast<std::int64_t>(std::lround(centimetres));
+                if (cm > 0) stats_[key] += cm;
+            };
+            if (player_.isUnderWater()) add("custom/walk_under_water_one_cm", flat * 100.0);
+            else if (player_.inWater) add("custom/swim_one_cm", flat * 100.0);
+            else if (player_.flying) add("custom/fly_one_cm", flat * 100.0);
+            else if (player_.onGround) {
+                if (player_.sprinting) add("custom/sprint_one_cm", flat * 100.0);
+                else if (player_.sneaking) add("custom/crouch_one_cm", flat * 100.0);
+                else add("custom/walk_one_cm", flat * 100.0);
+            }
+            if (dy < 0.0 && !player_.onGround && !player_.inWater && !player_.flying) add("custom/fall_one_cm", -dy * 100.0);
+        }
+    }
+    statPosition_ = now;
+    statPositionKnown_ = true;
+    if (gameTime_ % 20 == 0) checkAdvancements();
+}
+
+// Every second: what the player holds and where they are, against the advancements that are not done.
+void GameSession::checkAdvancements() {
+    if (!advancementTree_ || remote_) return;
+    AdvancementContext context;
+    for (int slot = 0; slot < Inventory::kSize; ++slot) {
+        const ItemStack& stack = inventory_.item(slot);
+        if (!stack.isEmpty()) context.items.insert(stack.type().name);
+    }
+    context.dimension = dimension_ == 1 ? "the_nether" : dimension_ == 2 ? "the_end" : "overworld";
+    advancementTree_->evaluate(advancements_, context, [this](const AdvancementDef& d) {
+        advancements_.erase(d.id);  // (grantAdvancement adds it again and tells the chat)
+        grantAdvancement(d.id);
+    });
+}
+
 void GameSession::die() {
+    ++stats_["custom/deaths"];
+    stats_["custom/time_since_death"] = 0;
     dead_ = true;
     deathRequested_ = true;
     playWorldSound("entity.player.death", SoundSource::Players, 1.0f, 1.0f + (randomFloat() - randomFloat()) * 0.2f);
@@ -433,8 +487,10 @@ void GameSession::pickUpItems() {
     for (ItemEntity& e : itemEntities_.items()) {
         if (e.pickupDelay > 0 || e.stack.isEmpty() || !e.box().intersects(reach)) continue;
         const int before = e.stack.count;
+        const std::string pickedName = e.stack.type().name;
         inventory_.add(e.stack);
         const int taken = before - (e.stack.isEmpty() ? 0 : e.stack.count);
+        if (taken > 0) stats_["picked_up/" + pickedName] += taken;
         if (taken > 0) playWorldSound("entity.item.pickup", SoundSource::Players, 0.2f, ((randomFloat() - randomFloat()) * 0.7f + 1.0f) * 2.0f);
     }
 }

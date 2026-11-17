@@ -830,6 +830,32 @@ void GameSession::applyGameRule(const std::string& rule, const std::string& valu
     else if (rule == "fire_spread_radius_around_player" && physics_) physics_->setFireSpreadRadius(std::atoi(value.c_str()));
 }
 
+const std::map<std::string, std::string>& GameSession::knownGameRules() { return gameRuleDefaults(); }
+
+std::string GameSession::gameRuleValue(const std::string& rule) const {
+    const auto it = gameRules_.find(rule);
+    if (it != gameRules_.end()) return it->second;
+    const auto known = gameRuleDefaults().find(rule);
+    return known != gameRuleDefaults().end() ? known->second : std::string();
+}
+
+void GameSession::setGameRule(const std::string& rule, const std::string& value) {
+    if (gameRuleDefaults().count(rule) == 0) return;
+    gameRules_[rule] = value;
+    applyGameRule(rule, value);
+}
+
+// A new advancement: remembered, and told to the chat the way the game does ("<name> has made the advancement [Title]") unless the game rule says not to.
+bool GameSession::grantAdvancement(const std::string& id) {
+    if (!advancements_.insert(id).second) return false;
+    if (gameRuleOn("show_advancement_messages")) {
+        const std::string slash = id.find('/') == std::string::npos ? id : id.substr(0, id.find('/')) + "." + id.substr(id.find('/') + 1);
+        const std::string title = services_.language.get("advancements." + slash + ".title");
+        addChatMessage(fill(services_.language.get("chat.type.advancement.task"), {services_.playerName, "[" + title + "]"}));
+    }
+    return true;
+}
+
 bool GameSession::gameRuleOn(const std::string& rule) const {
     const auto it = gameRules_.find(rule);
     if (it != gameRules_.end()) return it->second == "true";

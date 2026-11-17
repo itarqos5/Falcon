@@ -203,6 +203,12 @@ std::string writeWorldSave(const std::filesystem::path& file, const WorldSave& s
         for (const auto& [name, value] : save.gameRules) rules.put(name, NbtTag::ofString(value));
         root.put("gameRules", std::move(rules));
         root.put("difficulty", integer(save.difficulty));
+        NbtTag stats = NbtTag::compound();
+        for (const auto& [name, value] : save.stats) stats.put(name, NbtTag::ofInteger(NbtTag::Type::Long, value));
+        root.put("stats", std::move(stats));
+        NbtTag done = NbtTag::compound();
+        for (const std::string& id : save.advancements) done.put(id, integer(1));
+        root.put("advancements", std::move(done));
         if (save.mobs.type == NbtTag::Type::Compound) root.put("mobs", save.mobs);
         root.put("dayTime", NbtTag::ofInteger(NbtTag::Type::Long, save.dayTime));
         root.put("dimension", integer(save.dimension));
@@ -268,6 +274,12 @@ bool readWorldSave(const std::filesystem::path& file, WorldSave& save, WorldEdit
             for (const auto& [name, value] : rules->fields) loaded.gameRules[name] = value.text;
         }
         loaded.difficulty = static_cast<int>(root->getInt("difficulty", -1));
+        if (const NbtTag* stats = root->get("stats"); stats != nullptr && stats->type == NbtTag::Type::Compound) {
+            for (const auto& [name, value] : stats->fields) loaded.stats[name] = value.integer;
+        }
+        if (const NbtTag* done = root->get("advancements"); done != nullptr && done->type == NbtTag::Type::Compound) {
+            for (const auto& field : done->fields) loaded.advancements.push_back(field.first);
+        }
         loaded.dayTime = root->getInt("dayTime", -1);
         loaded.dimension = static_cast<int>(root->getInt("dimension", 0));
         loaded.dragonState = static_cast<int>(root->getInt("dragonState", 0));

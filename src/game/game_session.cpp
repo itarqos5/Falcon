@@ -133,6 +133,7 @@ GameSession::GameSession(ScreenServices& services, const ResourceManager& resour
       renderer_(models_, info.seed, info.style, loadWorkerCount(), overworld_) {
     (void)loadItems(services, resources, *registry_);
     dataRoot_ = resources.dataRoot();
+    advancementTree_ = AdvancementTree::load(dataRoot_);
     if (!services.playerUuid.empty()) {  // the account's own skin (what anyone sees of an account is public)
         localSkins_ = std::make_unique<net::SkinFetcher>();
         localSkins_->requestProfile(services.playerUuid);
@@ -328,6 +329,8 @@ void GameSession::loadSave() {
         applyGameRule(rule, value);
     }
     if (saved.difficulty >= 0 && saved.difficulty <= 3) difficulty_ = saved.difficulty;
+    stats_ = saved.stats;
+    advancements_.insert(saved.advancements.begin(), saved.advancements.end());
     if (mobSim_ && saved.mobs.type == NbtTag::Type::Compound) mobSim_->fromNbt(saved.mobs);
     dayTime_ = saved.dayTime >= 0 ? saved.dayTime : daycycle::kNoon;  // (a world from before there was a clock was always noon)
     gameTime_ = saved.gameTime;
@@ -367,6 +370,8 @@ void GameSession::save() {
     }
     out.gameRules = gameRules_;
     out.difficulty = difficulty_;
+    out.stats = stats_;
+    out.advancements.assign(advancements_.begin(), advancements_.end());
     out.dayTime = dayTime_;
     out.mobs = dims_[0].mobs;
     out.dimension = dead_ ? 0 : dimension_;

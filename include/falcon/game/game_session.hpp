@@ -3,6 +3,7 @@
 #include <chrono>
 
 #include "falcon/assets/resource_manager.hpp"
+#include "falcon/game/advancements.hpp"
 #include "falcon/game/chat.hpp"
 #include "falcon/game/command_tree.hpp"
 #include "falcon/game/screen_services.hpp"
@@ -42,7 +43,9 @@
 #include "falcon/world/loot.hpp"
 
 #include <array>
+#include <cstdint>
 #include <map>
+#include <set>
 #include <filesystem>
 #include <memory>
 #include <optional>
@@ -159,6 +162,27 @@ public:
     // Whether the game mode may be changed from here (Minecraft.canSwitchGameMode plus the /gamemode permission): the world has cheats
     // on (Create New World: Allow Cheats).
     [[nodiscard]] bool canSwitchGameMode() const { return ready_ && info_.allowCommands; }
+
+    // ---- the pause menu's World Options, Statistics and Advancements screens ----
+    [[nodiscard]] int difficulty() const { return difficulty_; }  // 0 peaceful .. 3 hard
+    void setDifficulty(int level) { difficulty_ = level < 0 ? 0 : level > 3 ? 3 : level; }
+    [[nodiscard]] bool allowCommands() const { return info_.allowCommands; }
+    void setAllowCommands(bool on) { info_.allowCommands = on; }
+    [[nodiscard]] std::string gameRuleValue(const std::string& rule) const;     // what /gamerule says: the value set, or the default
+    void setGameRule(const std::string& rule, const std::string& value);        // /gamerule without the chat line
+    [[nodiscard]] static const std::map<std::string, std::string>& knownGameRules();  // every game rule with the value a new world has
+    // Statistics, by the game's own names ("custom/jump", "mined/stone", "killed/zombie", ...): distances in centimetres, times in ticks, damage in tenths of a heart.
+    void addStat(const std::string& key, std::int64_t amount = 1) { stats_[key] += amount; }
+    [[nodiscard]] std::int64_t stat(const std::string& key) const {
+        const auto it = stats_.find(key);
+        return it == stats_.end() ? 0 : it->second;
+    }
+    [[nodiscard]] const std::map<std::string, std::int64_t>& stats() const { return stats_; }
+    // Advancements: the ids ("story/mine_stone") of the ones that are done. A grant says whether it is new, and tells the chat.
+    bool grantAdvancement(const std::string& id);
+    [[nodiscard]] const AdvancementTree* advancementTree() const { return advancementTree_.get(); }
+    [[nodiscard]] bool hasAdvancement(const std::string& id) const { return advancements_.count(id) != 0; }
+    [[nodiscard]] const std::set<std::string>& advancements() const { return advancements_; }
     // The game mode switcher and F3 + N ask for a mode: it changes if the world allows it. setGameType() changes it unconditionally.
     void requestGameType(int gameType);
     void setGameType(int gameType);
@@ -261,6 +285,8 @@ private:
     void loadSave();
     void tickHealth();
     void pickUpItems();
+    void tickStatistics(bool jumped);     // the time, the distances and, every second, the advancements (game_session_player.cpp)
+    void checkAdvancements();
     // ---- the blocks of a world played here that hold items or open a window (game_session_containers.cpp) ----
     bool useBlockContainer(int x, int y, int z);  // the right click on a crafting table, chest, furnace ...: opens its window (true if the block was one)
     void openLocalMenu(RemoteMenuKind kind, int rows, Container* storage, bool local, const std::string& title, StorageKind storageKind, const std::array<int, 3>* at);
@@ -517,6 +543,11 @@ private:
     std::shared_ptr<const CommandTree> commands_;
     mutable std::map<std::string, std::vector<std::string>> registryNames_;  // the ids of a registry, for the argument checks and the suggestions
     std::map<std::string, std::string> gameRules_;                           // game rules set by /gamerule (the others have their defaults)
+    std::map<std::string, std::int64_t> stats_;                              // the statistics (see addStat), saved with the world
+    std::set<std::string> advancements_;                                     // the advancements that are done ("story/mine_stone") and the criteria that are met ("story/mine_stone#cobblestone"), saved
+    std::shared_ptr<const AdvancementTree> advancementTree_;                 // what the game's advancements are (read once)
+    std::array<double, 3> statPosition_{0.0, 0.0, 0.0};                      // where the player was a tick ago: the distances are the steps from it
+    bool statPositionKnown_ = false;
     int difficulty_ = 2;
     long long dayTime_ = 0;   // a new world starts at sunrise, as the game's do
     long long gameTime_ = 0;

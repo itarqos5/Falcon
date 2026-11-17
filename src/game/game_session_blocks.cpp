@@ -64,7 +64,26 @@ void GameSession::attackMob(int id) {
     if (strong && player_.sprinting) knockback += 0.5f;
     const std::string sound = crit ? "entity.player.attack.crit" : strong ? (player_.sprinting ? "entity.player.attack.knockback" : "entity.player.attack.strong") : "entity.player.attack.weak";
     playWorldSound(sound, SoundSource::Players, 1.0f, 1.0f);
-    if (mobSim_) mobSim_->hurt(id, damage, player_.x, player_.z, knockback, true);
+    if (mobSim_) {
+        std::string species;  // (what the blow killed, for the statistics)
+        bool wasAlive = false;
+        for (const Mob& m : mobSim_->mobs()) {
+            if (m.id == id) {
+                wasAlive = !m.dead();
+                species = m.species->id;
+            }
+        }
+        mobSim_->hurt(id, damage, player_.x, player_.z, knockback, true);
+        stats_["custom/damage_dealt"] += static_cast<std::int64_t>(std::lround(damage * 10.0f));
+        if (wasAlive) {
+            for (const Mob& m : mobSim_->mobs()) {
+                if (m.id == id && m.dead()) {
+                    ++stats_["custom/mob_kills"];
+                    ++stats_["killed/" + species];
+                }
+            }
+        }
+    }
     if (!creative()) damageHeldTool(held.type().maxDamage > 0 && held.type().attackDamageBonus > 0.0f ? 1 : 0);
 }
 
@@ -83,6 +102,7 @@ void GameSession::breakBlockAt(int x, int y, int z, bool survival) {
     setBlock(x, y, z, Block::Air);
     swingArm();
     if (registry_->isAir(broken)) return;
+    ++stats_["mined/" + registry_->type(broken).name];
     {  // the break sound of the block, heard where it was (a fire put out hisses instead)
         const std::array<double, 3> where = {x + 0.5, y + 0.5, z + 0.5};
         const BlockType& type = registry_->type(broken);
