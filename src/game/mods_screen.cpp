@@ -225,7 +225,25 @@ ModsScreen::ModsScreen(ScreenNavigator& navigator, ScreenServices& services) : S
         mods_.push_back(std::move(listed));
     }
     icons_.resize(mods_.size());
+    reports_.resize(mods_.size());
     if (!mods_.empty()) selected_ = 0;
+}
+
+// What the VM makes of a Fabric or Quilt mod's start-up code (a few milliseconds); nothing for the others, and for a mod Falcon does not support.
+const jvm::ModReport* ModsScreen::reportOf(std::size_t index) {
+    if (index >= mods_.size()) return nullptr;
+    const Listed& mod = mods_[index];
+    if (mod.verdict.blocked || (mod.info.loader != "Fabric" && mod.info.loader != "Quilt")) return nullptr;
+    if (!reports_[index]) {
+        try {
+            reports_[index] = jvm::runMod(mod.info.file);
+        } catch (...) {
+            jvm::ModReport failed;
+            failed.notRun = "the VM could not read it";
+            reports_[index] = failed;
+        }
+    }
+    return &*reports_[index];
 }
 
 const Texture2D& ModsScreen::iconTexture(std::size_t index, GuiGraphics& graphics) {
@@ -277,6 +295,15 @@ void ModsScreen::showDetails() {
     }
     if (!mod.info.license.empty()) {
         descriptions_->addEntry<FactEntry>(font(), "Licensed under", mod.info.license, width);
+        gap();
+    }
+    if (const jvm::ModReport* report = reportOf(static_cast<std::size_t>(selected_))) {
+        heading("What it does:");  // (read from its start-up code by Falcon's VM: nothing of it is loaded)
+        std::vector<std::string> lines;
+        for (const std::string& line : jvm::summarize(*report)) {
+            for (const std::string& piece : wrapped(font(), line, width - 8)) lines.push_back(piece);
+        }
+        descriptions_->addEntry<LinesEntry>(std::move(lines), kModDescription);
         gap();
     }
     heading("Details:");

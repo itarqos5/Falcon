@@ -103,6 +103,7 @@ void GameSession::tickPlayer(double seconds, bool steering) {
         if (ready_ && physics_) physics_->tick();
         if (ready_ && redstone_) redstone_->tick();
         if (ready_) tickContainers();
+        if (ready_) tickMods();
     }
     // Out of the world (below the void line) the void hurts a survival player (4 a tick, through any protection) until they die; anyone else
     // starts again at the spawn.

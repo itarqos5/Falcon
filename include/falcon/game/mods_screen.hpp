@@ -2,6 +2,7 @@
 
 #include "falcon/game/screen_services.hpp"
 #include "falcon/gfx/texture.hpp"
+#include "falcon/jvm/mod_runtime.hpp"
 #include "falcon/mods/mod_info.hpp"
 #include "falcon/mods/optimization_mods.hpp"
 #include "falcon/ui/scroll_list.hpp"
@@ -68,10 +69,12 @@ protected:
 private:
     void populate();
     void showDetails();
+    [[nodiscard]] const jvm::ModReport* reportOf(std::size_t index);
 
     ScreenServices& services_;
     std::vector<Listed> mods_;
     std::vector<std::unique_ptr<Texture2D>> icons_;  // by mod; made when first drawn
+    std::vector<std::optional<jvm::ModReport>> reports_;  // by mod: what the VM found in its start-up code (made when the mod is first selected)
     ModsLayout layout_;
     ScrollList* list_ = nullptr;
     ScrollList* descriptions_ = nullptr;
