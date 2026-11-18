@@ -161,6 +161,7 @@ public:
     // How many of the worker threads make chunks (the rest sleep): all of them while the world loads, fewer while it is played.
     void setActiveWorkers(unsigned n) { pool_.setActive(n); }
     [[nodiscard]] unsigned activeWorkers() const { return pool_.activeCount(); }
+    void reloadChunks() { remeshAll(); }  // F3 + A: every section is built again
     // The Leaves video option: true draws leaves see-through (Cutout), false solid (Opaque). Re-meshes the world on a change.
     void setCutoutLeaves(bool on);
     // The world's edits: every block changed through setBlock() is recorded in them, and every chunk made (again) has its edits put back before it is
@@ -202,6 +203,15 @@ public:
 
     // Draws the sky and the blocks. The framebuffer must be cleared (depth too); this leaves depth test on.
     void render(const Camera& camera, int framebufferWidth, int framebufferHeight, int renderDistance);
+    // Coloured lines in the world (the F3 + G chunk borders, the F3 + B hitboxes). Positions are world coordinates; `width` is in pixels (1 is a plain line, more is drawn as a strip
+    // that keeps its width on the screen); `onTop` lines are not hidden by the world.
+    struct DebugLine {
+        double ax, ay, az, bx, by, bz;
+        float r, g, b, a;
+        float width = 1.0f;
+        bool onTop = false;
+    };
+    void drawDebugLines(const Camera& camera, int framebufferWidth, int framebufferHeight, const std::vector<DebugLine>& lines);
     // Black outline of one block (the one the player looks at).
     void drawSelection(const Camera& camera, int framebufferWidth, int framebufferHeight, int x, int y, int z);
     // The ten pictures of a block being dug (destroy_stage_0..9); without them no cracks are drawn.

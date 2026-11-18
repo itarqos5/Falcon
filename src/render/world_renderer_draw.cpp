@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <functional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -575,7 +576,7 @@ void WorldRenderer::drawSelection(const Camera& camera, int framebufferWidth, in
     }
     constexpr float e = 0.003f;
     std::vector<float> lines;
-    lines.reserve(outline.edges.size() * 6);
+    lines.reserve(outline.edges.size() * 14);
     const double origin[3] = {x - camera.x + offsetX, y - camera.y, z - camera.z + offsetZ};
     for (const std::array<float, 6>& edge : outline.edges) {
         for (int end = 0; end < 2; ++end) {
@@ -584,6 +585,7 @@ void WorldRenderer::drawSelection(const Camera& camera, int framebufferWidth, in
                 const float pushed = p > center[a] + 1.0e-4f ? p + e : p < center[a] - 1.0e-4f ? p - e : p;
                 lines.push_back(static_cast<float>(origin[a] + static_cast<double>(pushed)));
             }
+            for (const float c : {0.0f, 0.0f, 0.0f, 0.6f}) lines.push_back(c);  // (the outline is black, a little see-through)
         }
     }
     gl::Enable(gl::DEPTH_TEST);
@@ -594,8 +596,80 @@ void WorldRenderer::drawSelection(const Camera& camera, int framebufferWidth, in
     gl::BindVertexArray(lineVao_);
     gl::BindBuffer(gl::ARRAY_BUFFER, lineVbo_);
     gl::BufferData(gl::ARRAY_BUFFER, static_cast<gl::GLsizeiptr>(lines.size() * sizeof(float)), lines.data(), gl::STREAM_DRAW);
-    gl::DrawArrays(gl::LINES, 0, static_cast<gl::GLsizei>(lines.size() / 3));
+    gl::DrawArrays(gl::LINES, 0, static_cast<gl::GLsizei>(lines.size() / 7));
     gl::BindVertexArray(0);
+    gl::Disable(gl::BLEND);
+}
+
+void WorldRenderer::drawDebugLines(const Camera& camera, int framebufferWidth, int framebufferHeight, const std::vector<DebugLine>& lines) {
+    if (lines.empty()) return;
+    const float aspect = static_cast<float>(framebufferWidth) / static_cast<float>(std::max(1, framebufferHeight));
+    const float farPlane = farPlaneFor(std::max(lastRadius_, zoomReach_), camera.y);
+    const Matrix4f viewProj = perspective(camera.fov, aspect, 0.05f, farPlane) * cameraView(camera);
+    // The size of a pixel at one block from the eyes, for the lines that are more than a pixel wide.
+    const float pixel = 2.0f * std::tan(camera.fov * 0.5f * 0.017453292f) / static_cast<float>(std::max(1, framebufferHeight));
+    // Per kind: plain lines, strips, and each of those for the ones that are not hidden by the world and the ones that are.
+    std::vector<float> thin[2], strips[2];
+    const auto vertex = [](std::vector<float>& out, const float p[3], const DebugLine& l) {
+        out.insert(out.end(), {p[0], p[1], p[2], l.r, l.g, l.b, l.a});
+    };
+    for (const DebugLine& l : lines) {
+        const float a[3] = {static_cast<float>(l.ax - camera.x), static_cast<float>(l.ay - camera.y), static_cast<float>(l.az - camera.z)};
+        const float b[3] = {static_cast<float>(l.bx - camera.x), static_cast<float>(l.by - camera.y), static_cast<float>(l.bz - camera.z)};
+        const int pass = l.onTop ? 1 : 0;
+        if (l.width <= 1.0f) {
+            vertex(thin[pass], a, l);
+            vertex(thin[pass], b, l);
+            continue;
+        }
+        // A strip across the line, square to the way it is seen: a side vector from the line and the direction to its middle. Its width follows the distance (a pixel wide on the screen
+        // at either end), so a line that runs past the eyes is cut in pieces until a piece is short against its distance.
+        const std::function<void(const std::array<float, 3>&, const std::array<float, 3>&, int)> strip = [&](const std::array<float, 3>& pa, const std::array<float, 3>& pb, int depth) {
+            const float d[3] = {pb[0] - pa[0], pb[1] - pa[1], pb[2] - pa[2]};
+            const float m[3] = {(pa[0] + pb[0]) * 0.5f, (pa[1] + pb[1]) * 0.5f, (pa[2] + pb[2]) * 0.5f};
+            const float lengthOf = std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+            const float distanceOf = std::sqrt(m[0] * m[0] + m[1] * m[1] + m[2] * m[2]);
+            if (depth < 9 && lengthOf > 0.5f * distanceOf && lengthOf > 0.25f) {
+                const std::array<float, 3> mid = {m[0], m[1], m[2]};
+                strip(pa, mid, depth + 1);
+                strip(mid, pb, depth + 1);
+                return;
+            }
+            float n[3] = {d[1] * m[2] - d[2] * m[1], d[2] * m[0] - d[0] * m[2], d[0] * m[1] - d[1] * m[0]};
+            const float length = std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+            if (length < 1.0e-6f) return;  // (a line seen end on)
+            for (float& c : n) c /= length;
+            const auto half = [&](const std::array<float, 3>& q) { return 0.5f * l.width * pixel * std::sqrt(q[0] * q[0] + q[1] * q[1] + q[2] * q[2]); };
+            const float ha = half(pa), hb = half(pb);
+            const float a0[3] = {pa[0] - n[0] * ha, pa[1] - n[1] * ha, pa[2] - n[2] * ha}, a1[3] = {pa[0] + n[0] * ha, pa[1] + n[1] * ha, pa[2] + n[2] * ha};
+            const float b0[3] = {pb[0] - n[0] * hb, pb[1] - n[1] * hb, pb[2] - n[2] * hb}, b1[3] = {pb[0] + n[0] * hb, pb[1] + n[1] * hb, pb[2] + n[2] * hb};
+            for (const float* q : {a0, a1, b1, a0, b1, b0}) vertex(strips[pass], q, l);
+        };
+        strip({a[0], a[1], a[2]}, {b[0], b[1], b[2]}, 0);
+    }
+    gl::Enable(gl::BLEND);
+    gl::BlendFuncSeparate(gl::SRC_ALPHA, gl::ONE_MINUS_SRC_ALPHA, gl::ONE, gl::ONE_MINUS_SRC_ALPHA);
+    gl::Disable(gl::CULL_FACE);  // (a strip faces either way)
+    gl::DepthMask(gl::FALSE_);
+    lines_.use();
+    gl::UniformMatrix4fv(lineViewProj_, 1, 0, viewProj.m.data());
+    gl::BindVertexArray(lineVao_);
+    gl::BindBuffer(gl::ARRAY_BUFFER, lineVbo_);
+    const auto draw = [&](const std::vector<float>& data, gl::GLenum mode) {
+        if (data.empty()) return;
+        gl::BufferData(gl::ARRAY_BUFFER, static_cast<gl::GLsizeiptr>(data.size() * sizeof(float)), data.data(), gl::STREAM_DRAW);
+        gl::DrawArrays(mode, 0, static_cast<gl::GLsizei>(data.size() / 7));
+    };
+    for (int pass = 0; pass < 2; ++pass) {
+        if (pass == 0) gl::Enable(gl::DEPTH_TEST);
+        else gl::Disable(gl::DEPTH_TEST);
+        draw(strips[pass], gl::TRIANGLES);
+        draw(thin[pass], gl::LINES);
+    }
+    gl::BindVertexArray(0);
+    gl::Enable(gl::DEPTH_TEST);
+    gl::Enable(gl::CULL_FACE);
+    gl::DepthMask(gl::TRUE_);
     gl::Disable(gl::BLEND);
 }
 
