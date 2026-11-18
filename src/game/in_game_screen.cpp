@@ -1,15 +1,21 @@
 #include "falcon/game/in_game_screen.hpp"
 
+#include "falcon/game/chat_screen.hpp"
 #include "falcon/game/game_session.hpp"
 #include "falcon/game/gamemode_switcher_screen.hpp"
-#include "falcon/game/chat_screen.hpp"
 #include "falcon/game/inventory_screen.hpp"
+#include "falcon/game/mod_screen.hpp"
 #include "falcon/game/options_screen.hpp"
 #include "falcon/game/progress_screens.hpp"
+#include "falcon/jvm/mod_runtime.hpp"
 
 namespace falcon {
 
 void InGameScreen::render(GuiGraphics& graphics, int, int, const FrameTime& time) {
+    if (services_.mods && services_.mods->hasActiveScreen()) {
+        navigator_.push(std::make_unique<ModScreen>(navigator_, services_));
+        return;
+    }
     if (services_.session == nullptr) return;
     if (!services_.session->ready()) {
         services_.session->renderLoading(graphics, width_, height_, time.deltaTicks);  // "Loading terrain..." until the world is ready
@@ -44,6 +50,10 @@ bool InGameScreen::keyPressed(int key, int mods) {
             return true;
         }
         services_.session->onKey(key, mods);
+        if (services_.mods && services_.mods->hasActiveScreen()) {
+            navigator_.push(std::make_unique<ModScreen>(navigator_, services_));
+            return true;
+        }
         if (services_.session->consumeGameModeSwitcherRequest()) navigator_.push(std::make_unique<GameModeSwitcherScreen>(navigator_, services_));  // F3 + F4
     }
     return Screen::keyPressed(key, mods);

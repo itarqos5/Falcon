@@ -1,5 +1,6 @@
 // Where the platform jar comes from (modapi/falcon-modapi.jar: Falcon's own Java classes for the game and the mod loader's API, see modapi/build.ps1).
 #include "falcon/jvm/modapi.hpp"
+#include "falcon/platform/dirs.hpp"
 
 #include <cstdlib>
 #include <filesystem>
@@ -16,6 +17,12 @@ std::shared_ptr<const ZipArchive> modApiJar() {
 #ifdef FALCON_MODAPI_DEV_JAR
         candidates.emplace_back(FALCON_MODAPI_DEV_JAR);  // (the one in the source tree: for runs from a build folder)
 #endif
+        if (const auto dir = falcon::falconDataDir()) {
+            candidates.emplace_back(*dir / "falcon-modapi.jar");
+            candidates.emplace_back(*dir / "modapi" / "falcon-modapi.jar");
+        }
+        candidates.emplace_back("falcon-modapi.jar");
+        candidates.emplace_back("modapi/falcon-modapi.jar");
         for (const auto& path : candidates) {
             std::error_code ec;
             if (!std::filesystem::is_regular_file(path, ec)) continue;

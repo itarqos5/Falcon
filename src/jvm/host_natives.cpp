@@ -120,6 +120,11 @@ void installHostNatives(Vm& vm) {
         if (v.host.sendCommand) v.host.sendCommand(textOf(v, a[0].a));
         return Value();
     });
+    nat("openScreen", "(ZLjava/lang/String;)V", [](Vm& v, Value* a) {
+        v.capture.screenOpen = a[0].i != 0;
+        v.capture.screenTitle = textOf(v, a[1].a);
+        return Value();
+    });
     nat("consumeClick", "(Ljava/lang/String;)Z", [](Vm& v, Value* a) { return valueOfInt(v.host.consumeClick && v.host.consumeClick(textOf(v, a[0].a)) ? 1 : 0); });
     nat("isDown", "(Ljava/lang/String;)Z", [](Vm& v, Value* a) { return valueOfInt(v.host.isDown && v.host.isDown(textOf(v, a[0].a)) ? 1 : 0); });
 
@@ -339,13 +344,13 @@ void installHostNatives(Vm& vm) {
     const std::string R = "net/falcon/Reflect";
     const auto rnat = [&](const char* name, const char* desc, NativeFn fn) { vm.defineHostNative(R, name, desc, std::move(fn)); };
     rnat("fields", "(Ljava/lang/String;)[Ljava/lang/String;", [](Vm& v, Value* a) {
-        // the instance fields that are not transient, the class's own first and then each superclass's, in the order they were declared: "name descriptor signature"
+        // the instance fields that are not transient, the class's own first and then each superclass's, in the order they were declared: "name\0descriptor\0signature"
         std::vector<std::string> out;
         for (Class* c = v.loadClass(textOf(v, a[0].a)); c != nullptr && !c->shim; c = c->super) {
             for (const std::string& name : c->fieldOrder) {
                 const FieldInfo& f = c->fields.at(name);
                 if (f.isStatic || (f.access & 0x0080) != 0 || (f.access & 0x1000) != 0) continue;  // static, transient, synthetic
-                out.push_back(name + ' ' + f.desc + ' ' + f.signature);
+                out.push_back(name + '\0' + f.desc + '\0' + f.signature);
             }
         }
         return ref(stringArray(v, out));

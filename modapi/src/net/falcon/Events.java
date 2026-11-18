@@ -12,6 +12,7 @@ import net.fabricmc.fabric.api.client.rendering.v1.level.LevelRenderEvents;
 import net.minecraft.client.Camera;
 import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.renderer.SubmitNodeCollector;
 import net.minecraft.network.chat.Component;
@@ -62,7 +63,7 @@ public final class Events {
     public static void disconnect() { Minecraft mc = Minecraft.getInstance(); ClientPlayConnectionEvents.DISCONNECT.invoker().onPlayDisconnect(mc.getConnection(), mc); }
 
     public static void hud(float partialTick) {
-        GuiGraphicsExtractor graphics = Minecraft.getInstance().gui.extractor();
+        GuiGraphics graphics = Minecraft.getInstance().gui.extractor();
         graphics.begin();
         DeltaTracker delta = new DeltaTracker(partialTick);
         HudRenderCallback.EVENT.invoker().onHudRender(graphics, delta);

@@ -56,10 +56,10 @@ int listReferences(const char* path, bool gaps, bool api = false) {
                     } else if (cf->utf8(nt.a) == "<init>") {
                         have = c->methods.count(cf->utf8(nt.a) + cf->utf8(nt.b)) != 0;
                     } else {
-                        const std::string key = cf->utf8(nt.a) + cf->utf8(nt.b);
+                        const std::string mkey = cf->utf8(nt.a) + cf->utf8(nt.b);
                         const std::function<bool(falcon::jvm::Class*)> declared = [&](falcon::jvm::Class* k) -> bool {  // (declared anywhere above it, abstract or not)
                             if (k == nullptr) return false;
-                            if (k->methods.count(key) != 0) return true;
+                            if (k->methods.count(mkey) != 0) return true;
                             for (falcon::jvm::Class* i : k->interfaces) {
                                 if (declared(i)) return true;
                             }
@@ -157,6 +157,14 @@ int simulate(const char* jar, const char* gameDir, int ticks, const std::vector<
     const auto hud = mod.renderHud(0.5f);
     std::printf("hud: %zu command(s)\n", hud.size());
     for (std::size_t i = 0; i < hud.size() && i < 12; ++i) std::printf("  %d (%.0f,%.0f)-(%.0f,%.0f) %s\n", static_cast<int>(hud[i].kind), hud[i].x0, hud[i].y0, hud[i].x1, hud[i].y1, hud[i].text.c_str());
+    if (mod.hasActiveScreen()) {
+        std::printf("screen active: \"%s\"\n", mod.activeScreenTitle().c_str());
+        const auto screen = mod.renderScreen(100, 100, 0.5f);
+        std::printf("screen: %zu command(s)\n", screen.size());
+        for (std::size_t i = 0; i < screen.size() && i < 20; ++i) {
+            std::printf("  %d (%.0f,%.0f)-(%.0f,%.0f) text:\"%s\" col:0x%08X\n", static_cast<int>(screen[i].kind), screen[i].x0, screen[i].y0, screen[i].x1, screen[i].y1, screen[i].text.c_str(), screen[i].color);
+        }
+    }
     for (const std::string& u : mod.report().unsupported) std::printf("unsupported %s\n", u.c_str());
     for (const std::string& l : mod.report().log) std::printf("log %s\n", l.c_str());
     if (!mod.report().error.empty()) std::printf("error: %s\n", mod.report().error.c_str());

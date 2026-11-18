@@ -470,6 +470,135 @@ void ModInstance::pressWidget(int id) {
     }
 }
 
+std::vector<DrawCmd> ModInstance::renderScreen(int mouseX, int mouseY, float partialTick) {
+    std::vector<DrawCmd> out;
+    if (!vm_ || !platform_) return out;
+    vm_->capture.draw.clear();
+    Value args[3] = {valueOfInt(mouseX), valueOfInt(mouseY), valueOfFloat(partialTick)};
+    vm_->budget = vm_->instructionsRun() + 20'000'000;
+    try {
+        bool found = false;
+        vm_->callStatic("net/falcon/Screens", "render", "(IIF)V", args, 3, &found);
+    } catch (const JavaThrow& thrown) {
+        report_.error += (report_.error.empty() ? "" : "; ") + std::string("screen render: ") + vm_->toJavaString(thrown.exception) + " at " + vm_->stackTrace(vm_->throwDepth(), 6);
+    } catch (const BudgetExceeded& over) {
+        report_.error += (report_.error.empty() ? "" : "; ") + std::string("screen render: ") + over.why;
+    }
+    out.swap(vm_->capture.draw);
+    collect();
+    return out;
+}
+
+void ModInstance::screenResize(int width, int height) {
+    if (!vm_ || !platform_) return;
+    Value args[2] = {valueOfInt(width), valueOfInt(height)};
+    vm_->budget = vm_->instructionsRun() + 5'000'000;
+    try {
+        vm_->callStatic("net/falcon/Screens", "resize", "(II)V", args, 2);
+    } catch (...) {}
+}
+
+void ModInstance::screenTick() {
+    if (!vm_ || !platform_) return;
+    vm_->budget = vm_->instructionsRun() + 5'000'000;
+    try {
+        vm_->callStatic("net/falcon/Screens", "tick", "()V", nullptr, 0);
+    } catch (...) {}
+}
+
+bool ModInstance::screenMouseClicked(double x, double y, int button, bool doubleClick) {
+    if (!vm_ || !platform_) return false;
+    Value args[4] = {valueOfDouble(x), valueOfDouble(y), valueOfInt(button), valueOfInt(doubleClick ? 1 : 0)};
+    vm_->budget = vm_->instructionsRun() + 10'000'000;
+    try {
+        bool found = false;
+        const Value r = vm_->callStatic("net/falcon/Screens", "mouseClicked", "(DDIZ)Z", args, 4, &found);
+        return found && r.i != 0;
+    } catch (...) {}
+    return false;
+}
+
+bool ModInstance::screenMouseReleased(double x, double y, int button) {
+    if (!vm_ || !platform_) return false;
+    Value args[3] = {valueOfDouble(x), valueOfDouble(y), valueOfInt(button)};
+    vm_->budget = vm_->instructionsRun() + 10'000'000;
+    try {
+        bool found = false;
+        const Value r = vm_->callStatic("net/falcon/Screens", "mouseReleased", "(DDI)Z", args, 3, &found);
+        return found && r.i != 0;
+    } catch (...) {}
+    return false;
+}
+
+bool ModInstance::screenMouseDragged(double x, double y, int button, double dx, double dy) {
+    if (!vm_ || !platform_) return false;
+    Value args[5] = {valueOfDouble(x), valueOfDouble(y), valueOfInt(button), valueOfDouble(dx), valueOfDouble(dy)};
+    vm_->budget = vm_->instructionsRun() + 10'000'000;
+    try {
+        bool found = false;
+        const Value r = vm_->callStatic("net/falcon/Screens", "mouseDragged", "(DDIDD)Z", args, 5, &found);
+        return found && r.i != 0;
+    } catch (...) {}
+    return false;
+}
+
+bool ModInstance::screenMouseScrolled(double mouseX, double mouseY, double horizontal, double vertical) {
+    if (!vm_ || !platform_) return false;
+    Value args[4] = {valueOfDouble(mouseX), valueOfDouble(mouseY), valueOfDouble(horizontal), valueOfDouble(vertical)};
+    vm_->budget = vm_->instructionsRun() + 10'000'000;
+    try {
+        bool found = false;
+        const Value r = vm_->callStatic("net/falcon/Screens", "mouseScrolled", "(DDDD)Z", args, 4, &found);
+        return found && r.i != 0;
+    } catch (...) {}
+    return false;
+}
+
+bool ModInstance::screenKeyPressed(int key, int scancode, int modifiers) {
+    if (!vm_ || !platform_) return false;
+    Value args[3] = {valueOfInt(key), valueOfInt(scancode), valueOfInt(modifiers)};
+    vm_->budget = vm_->instructionsRun() + 10'000'000;
+    try {
+        bool found = false;
+        const Value r = vm_->callStatic("net/falcon/Screens", "keyPressed", "(III)Z", args, 3, &found);
+        return found && r.i != 0;
+    } catch (...) {}
+    return false;
+}
+
+bool ModInstance::screenKeyReleased(int key, int scancode, int modifiers) {
+    if (!vm_ || !platform_) return false;
+    Value args[3] = {valueOfInt(key), valueOfInt(scancode), valueOfInt(modifiers)};
+    vm_->budget = vm_->instructionsRun() + 10'000'000;
+    try {
+        bool found = false;
+        const Value r = vm_->callStatic("net/falcon/Screens", "keyReleased", "(III)Z", args, 3, &found);
+        return found && r.i != 0;
+    } catch (...) {}
+    return false;
+}
+
+bool ModInstance::screenCharTyped(int codePoint, int modifiers) {
+    if (!vm_ || !platform_) return false;
+    Value args[2] = {valueOfInt(codePoint), valueOfInt(modifiers)};
+    vm_->budget = vm_->instructionsRun() + 10'000'000;
+    try {
+        bool found = false;
+        const Value r = vm_->callStatic("net/falcon/Screens", "charTyped", "(II)Z", args, 2, &found);
+        return found && r.i != 0;
+    } catch (...) {}
+    return false;
+}
+
+void ModInstance::screenClose() {
+    if (!vm_ || !platform_) return;
+    vm_->budget = vm_->instructionsRun() + 10'000'000;
+    try {
+        vm_->callStatic("net/falcon/Screens", "close", "()V", nullptr, 0);
+    } catch (...) {}
+    vm_->capture.screenOpen = false;
+}
+
 ModReport runMod(const std::filesystem::path& jar, const RunOptions& options) { return ModInstance(jar, options).report(); }
 
 ModHost::~ModHost() = default;
@@ -621,6 +750,81 @@ void ModHost::setHost(const HostState& state) {
         h.mouseX = state.mouseX; h.mouseY = state.mouseY; h.gameTime = state.gameTime;
         h.dimension = state.dimension; h.worldName = state.worldName; h.playerName = state.playerName; h.playerUuid = state.playerUuid; h.worldKind = state.worldKind;
         h.blockAt = state.blockAt; h.blockFlags = state.blockFlags; h.keyDown = state.keyDown; h.sendChat = state.sendChat; h.sendCommand = state.sendCommand;
+    }
+}
+
+bool ModHost::hasActiveScreen() const {
+    for (const auto& m : mods_) {
+        if (m->hasActiveScreen()) return true;
+    }
+    return false;
+}
+
+std::string ModHost::activeScreenTitle() const {
+    for (const auto& m : mods_) {
+        if (m->hasActiveScreen()) return m->activeScreenTitle();
+    }
+    return {};
+}
+
+ModInstance* ModHost::activeScreenMod() const {
+    for (const auto& m : mods_) {
+        if (m->hasActiveScreen()) return m.get();
+    }
+    return nullptr;
+}
+
+std::vector<DrawCmd> ModHost::renderScreen(int mouseX, int mouseY, float partialTick) {
+    if (auto* m = activeScreenMod()) return m->renderScreen(mouseX, mouseY, partialTick);
+    return {};
+}
+
+void ModHost::screenResize(int width, int height) {
+    if (auto* m = activeScreenMod()) m->screenResize(width, height);
+}
+
+void ModHost::screenTick() {
+    if (auto* m = activeScreenMod()) m->screenTick();
+}
+
+bool ModHost::screenMouseClicked(double x, double y, int button, bool doubleClick) {
+    if (auto* m = activeScreenMod()) return m->screenMouseClicked(x, y, button, doubleClick);
+    return false;
+}
+
+bool ModHost::screenMouseReleased(double x, double y, int button) {
+    if (auto* m = activeScreenMod()) return m->screenMouseReleased(x, y, button);
+    return false;
+}
+
+bool ModHost::screenMouseDragged(double x, double y, int button, double dx, double dy) {
+    if (auto* m = activeScreenMod()) return m->screenMouseDragged(x, y, button, dx, dy);
+    return false;
+}
+
+bool ModHost::screenMouseScrolled(double mouseX, double mouseY, double horizontal, double vertical) {
+    if (auto* m = activeScreenMod()) return m->screenMouseScrolled(mouseX, mouseY, horizontal, vertical);
+    return false;
+}
+
+bool ModHost::screenKeyPressed(int key, int scancode, int modifiers) {
+    if (auto* m = activeScreenMod()) return m->screenKeyPressed(key, scancode, modifiers);
+    return false;
+}
+
+bool ModHost::screenKeyReleased(int key, int scancode, int modifiers) {
+    if (auto* m = activeScreenMod()) return m->screenKeyReleased(key, scancode, modifiers);
+    return false;
+}
+
+bool ModHost::screenCharTyped(int codePoint, int modifiers) {
+    if (auto* m = activeScreenMod()) return m->screenCharTyped(codePoint, modifiers);
+    return false;
+}
+
+void ModHost::screenClose() {
+    for (const auto& m : mods_) {
+        if (m->hasActiveScreen()) m->screenClose();
     }
 }
 

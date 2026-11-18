@@ -80,6 +80,21 @@ public:
     // Whether the mod runs on the platform's own Java classes (modapi/falcon-modapi.jar) instead of stand-ins for the game.
     [[nodiscard]] bool onPlatform() const { return platform_; }
 
+    // Interactive mod screen support (screens opened via Minecraft.setScreen / Screens.opened)
+    [[nodiscard]] bool hasActiveScreen() const { return vm_ != nullptr && vm_->capture.screenOpen; }
+    [[nodiscard]] std::string activeScreenTitle() const { return vm_ != nullptr ? vm_->capture.screenTitle : std::string(); }
+    [[nodiscard]] std::vector<DrawCmd> renderScreen(int mouseX, int mouseY, float partialTick = 0.0f);
+    void screenResize(int width, int height);
+    void screenTick();
+    bool screenMouseClicked(double x, double y, int button, bool doubleClick = false);
+    bool screenMouseReleased(double x, double y, int button);
+    bool screenMouseDragged(double x, double y, int button, double dx, double dy);
+    bool screenMouseScrolled(double mouseX, double mouseY, double horizontal, double vertical);
+    bool screenKeyPressed(int key, int scancode, int modifiers);
+    bool screenKeyReleased(int key, int scancode, int modifiers);
+    bool screenCharTyped(int codePoint, int modifiers);
+    void screenClose();
+
     // A button a mod put on a screen (ScreenEvents.AFTER_INIT and Screens.getButtons(screen).add(Button.builder(...).bounds(...).build())).
     struct ScreenWidget {
         std::string label;
@@ -151,6 +166,21 @@ public:
     void setHost(const HostState& state);
     // A key a mod asked for (by its name, "key.examplemod.open") was pressed or let go: the mods' KeyMapping.consumeClick and isDown answer from this.
     void keyEvent(const std::string& keyName, bool pressed);
+
+    [[nodiscard]] bool hasActiveScreen() const;
+    [[nodiscard]] std::string activeScreenTitle() const;
+    [[nodiscard]] ModInstance* activeScreenMod() const;
+    [[nodiscard]] std::vector<DrawCmd> renderScreen(int mouseX, int mouseY, float partialTick = 0.0f);
+    void screenResize(int width, int height);
+    void screenTick();
+    bool screenMouseClicked(double x, double y, int button, bool doubleClick = false);
+    bool screenMouseReleased(double x, double y, int button);
+    bool screenMouseDragged(double x, double y, int button, double dx, double dy);
+    bool screenMouseScrolled(double mouseX, double mouseY, double horizontal, double vertical);
+    bool screenKeyPressed(int key, int scancode, int modifiers);
+    bool screenKeyReleased(int key, int scancode, int modifiers);
+    bool screenCharTyped(int codePoint, int modifiers);
+    void screenClose();
 
 private:
     std::vector<std::unique_ptr<ModInstance>> mods_;

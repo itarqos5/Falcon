@@ -241,6 +241,8 @@ struct Capture {
     std::vector<std::string> calls;      // every other call a stand-in took, "Class.method(args)" (the first few hundred)
     std::vector<std::string> log;        // what the mod wrote (its logger, System.out)
     std::set<std::string> unsupported;   // library classes and methods the mod used that this machine does not have
+    bool screenOpen = false;
+    std::string screenTitle;
 };
 
 class Vm {

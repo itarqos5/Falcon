@@ -57,4 +57,5 @@ public final class Host {
     public static native void decodeImage(byte[] png, int[] pixels);
     public static native void sendChat(String text);
     public static native void sendCommand(String command);
+    public static native void openScreen(boolean open, String title);
 }

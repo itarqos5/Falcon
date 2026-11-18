@@ -31,6 +31,7 @@
 #include "falcon/game/remote_container_screen.hpp"
 #include "falcon/gfx/frame_queue.hpp"
 #include "falcon/game/in_game_screen.hpp"
+#include "falcon/game/mod_screen.hpp"
 #include "falcon/game/lighting_audit.hpp"
 #include "falcon/game/vanilla_compare.hpp"
 #include "falcon/game/screen_services.hpp"
@@ -860,11 +861,15 @@ int Client::run() {
         if (leftDown) screens.back()->mouseDragged(mouseX, mouseY);
 
         // The world first (3D, with depth), then everything else on top of it as 2D.
-        window.setCursorCaptured(steering);
+        if (services.mods && services.mods->hasActiveScreen() && dynamic_cast<ModScreen*>(screens.back().get()) == nullptr) {
+            navigator.push(std::make_unique<ModScreen>(navigator, services));
+        }
+        const bool activeSteering = session != nullptr && dynamic_cast<InGameScreen*>(screens.back().get()) != nullptr;
+        window.setCursorCaptured(activeSteering);
         if (session != nullptr) {
             // The inventory leaves the world running behind it (singleplayer does not pause for it): only the player cannot steer.
-            const bool keepTicking = !steering && screens.back()->keepsWorldTicking();
-            session->update(static_cast<double>(deltaTicks) * 0.05, steering, fbW, fbH, keepTicking);
+            const bool keepTicking = !activeSteering && screens.back()->keepsWorldTicking();
+            session->update(static_cast<double>(deltaTicks) * 0.05, activeSteering, fbW, fbH, keepTicking);
             if (session->consumeDeathRequest()) navigator.push(std::make_unique<DeathScreen>(navigator, services));  // "You Died!"
             if (session->consumeContainerOpen() && session->remoteMenu() != nullptr) {  // a chest, a furnace ... that the server opened
                 auto containerScreen = std::make_unique<RemoteContainerScreen>(navigator, services, *session->remoteMenu(), session->remoteMenuTitle());

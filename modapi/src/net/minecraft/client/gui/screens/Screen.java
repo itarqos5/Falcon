@@ -96,6 +96,10 @@ public class Screen implements ContainerEventHandler, Renderable {
         graphics.fillGradient(0, 0, width, height, 0xC0101010, 0xD0101010);
     }
 
+    public void render(net.minecraft.client.gui.GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
+        extractRenderState(graphics != null ? graphics.extractor() : null, mouseX, mouseY, partialTick);
+    }
+
     @Override
     public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partialTick) {
         renderBackground(graphics, mouseX, mouseY, partialTick);

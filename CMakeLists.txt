@@ -414,6 +414,7 @@ add_library(falcon_core
     src/game/key_binds_screen.cpp
     src/game/game_session.cpp
     src/game/in_game_screen.cpp
+    src/game/mod_screen.cpp
     src/game/death_screen.cpp
     src/game/lighting_audit.cpp
     src/game/vanilla_compare.cpp

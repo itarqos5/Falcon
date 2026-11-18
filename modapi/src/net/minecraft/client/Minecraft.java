@@ -88,7 +88,13 @@ public class Minecraft {
     public int getFps() { return 60; }
     public void execute(Runnable r) { r.run(); }
     public void schedule(Runnable r) { scheduled.add(r); }
-    public void setScreen(Screen s) { screen = s; net.falcon.Screens.opened(s); }
+    public void setScreen(Screen s) {
+        if (screen != null && screen != s) {
+            screen.removed();
+        }
+        screen = s;
+        net.falcon.Screens.opened(s);
+    }
     public void setScreenAndShow(Screen s) { setScreen(s); }
     public boolean isRunning() { return true; }
     public net.minecraft.client.renderer.entity.EntityRenderDispatcher getEntityRenderDispatcher() { return null; }
