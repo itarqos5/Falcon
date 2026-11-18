@@ -3,6 +3,8 @@
 #include "falcon/mods/mod_info.hpp"
 #include "falcon/mods/optimization_mods.hpp"
 
+#include "shim_util.hpp"
+
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
@@ -157,6 +159,19 @@ ModInstance::ModInstance(const std::filesystem::path& jarPath, const RunOptions&
         }
     }
 
+    // What the mod put into the game's creative tabs: each tab's handlers are given the tab's entries and add to them.
+    for (const EventHandler& h : std::vector<EventHandler>(vm.capture.handlers)) {
+        if (h.event.rfind("ItemGroupEvents.modifyEntries.", 0) != 0) continue;
+        try {
+            vm.budget = vm.instructionsRun() + 200'000;
+            Value tabEntries = valueOfRef(vm.makeShim("net/fabricmc/fabric/api/itemgroup/v1/FabricItemGroupEntries", h.event));
+            vm.callHandler(h.handler, {"modifyEntries"}, "A", &tabEntries);
+        } catch (const JavaThrow&) {
+        } catch (const BudgetExceeded&) {
+        }
+    }
+    content_ = extractContent(vm, report.modId);
+
     report.registrations = vm.capture.registrations;
     for (Registration& r : report.registrations) r.object = nullptr;  // (the objects go with the VM)
     report.events = vm.capture.events;
@@ -173,25 +188,166 @@ std::vector<std::string> ModInstance::tick() {
     std::vector<std::string> said;
     if (!vm_ || vm_->capture.handlers.empty()) return said;
     Vm& vm = *vm_;
-    if (client_ == nullptr) client_ = vm.makeShim("net/minecraft/client/Minecraft");
     off_.resize(vm.capture.handlers.size(), false);
     for (std::size_t i = 0; i < vm.capture.handlers.size(); ++i) {
         const EventHandler& h = vm.capture.handlers[i];
         if (off_[i] || h.event.find("CLIENT_TICK") == std::string::npos) continue;
         vm.budget = vm.instructionsRun() + 100'000;  // what one tick of one handler may spend
         try {
-            Value arg = valueOfRef(client_);
-            vm.callInterface(h.handler, "onEndTick", "(Ljava/lang/Object;)V", &arg, 1);
+            Value arg = valueOfRef(vm.client());
+            vm.callHandler(h.handler, {"onEndTick", "onStartTick", "onTick"}, "A", &arg);
         } catch (const JavaThrow& thrown) {
-            off_[i] = true;
-            report_.error += (report_.error.empty() ? "" : "; ") + std::string("a tick handler was switched off: ") + vm.toJavaString(thrown.exception);
+            switchOff(i, vm.toJavaString(thrown.exception));
         } catch (const BudgetExceeded& over) {
-            off_[i] = true;
-            report_.error += (report_.error.empty() ? "" : "; ") + std::string("a tick handler was switched off: ") + over.why;
+            switchOff(i, over.why);
         }
     }
     said.swap(vm.capture.chat);
+    collect();
     return said;
+}
+
+void ModInstance::switchOff(std::size_t handler, const std::string& why) {
+    off_[handler] = true;
+    report_.error += (report_.error.empty() ? "" : "; ") + std::string("a handler was switched off: ") + why;
+}
+
+void ModInstance::collect() {
+    if (vm_->heapSize() < gcAt_) return;
+    vm_->collectGarbage();
+    gcAt_ = std::max<std::size_t>(50'000, vm_->heapSize() * 2);
+}
+
+std::vector<DrawCmd> ModInstance::renderHud() {
+    std::vector<DrawCmd> out;
+    if (!vm_) return out;
+    Vm& vm = *vm_;
+    if (graphics_ == nullptr) {
+        graphics_ = vm.makeShim("net/minecraft/client/gui/GuiGraphics");
+        delta_ = vm.makeShim("net/minecraft/client/DeltaTracker");
+        vm.pin(graphics_);
+        vm.pin(delta_);
+    }
+    off_.resize(vm.capture.handlers.size(), false);
+    vm.capture.draw.clear();
+    vm.host.pose.assign(1, {0.0f, 0.0f, 1.0f, 1.0f});
+    for (std::size_t i = 0; i < vm.capture.handlers.size(); ++i) {
+        const EventHandler& h = vm.capture.handlers[i];
+        if (off_[i] || (h.event != "HudElement" && h.event.rfind("HudRenderCallback", 0) != 0 && h.event.rfind("HudLayerRegistrationCallback", 0) != 0)) continue;
+        vm.budget = vm.instructionsRun() + 200'000;  // what one frame of one HUD may spend
+        try {
+            Value args[2] = {valueOfRef(graphics_), valueOfRef(delta_)};
+            vm.callHandler(h.handler, {"render", "onHudRender"}, "AA", args);
+        } catch (const JavaThrow& thrown) {
+            switchOff(i, vm.toJavaString(thrown.exception));
+        } catch (const BudgetExceeded& over) {
+            switchOff(i, over.why);
+        }
+        vm.host.pose.assign(1, {0.0f, 0.0f, 1.0f, 1.0f});
+    }
+    out.swap(vm.capture.draw);
+    collect();
+    return out;
+}
+
+namespace {
+
+// A button the mod made: from Button.builder(message, onPress).bounds(...).build(), or from new Button(x, y, w, h, message, onPress, ...).
+bool readButton(Vm& vm, Object* button, ModInstance::ScreenWidget& out, Object*& onPress) {
+    if (button == nullptr || !button->shim) return false;
+    out.width = 150;
+    out.height = 20;
+    onPress = nullptr;
+    Object* message = nullptr;
+    if (const auto it = button->shim->fields.find("builder"); it != button->shim->fields.end() && it->second != nullptr && it->second->shim) {
+        const Object* builder = it->second;
+        if (const auto m = builder->shim->fields.find("message"); m != builder->shim->fields.end()) message = m->second;
+        if (const auto p = builder->shim->fields.find("onPress"); p != builder->shim->fields.end()) onPress = p->second;
+        for (const ShimCall& c : builder->shim->calls) {
+            const auto int_ = [&](std::size_t i) { return c.kinds[i] == 'F' ? static_cast<int>(c.raw[i].f) : c.raw[i].i; };
+            if (c.method == "bounds" && c.raw.size() >= 4) out = {out.label, int_(0), int_(1), int_(2), int_(3), 0};
+            else if (c.method == "pos" && c.raw.size() >= 2) out.x = int_(0), out.y = int_(1);
+            else if (c.method == "size" && c.raw.size() >= 2) out.width = int_(0), out.height = int_(1);
+            else if (c.method == "width" && !c.raw.empty()) out.width = int_(0);
+        }
+    } else if (const ShimCall* init = firstCall(button, "<init>")) {
+        int ints = 0;
+        for (std::size_t i = 0; i < init->raw.size(); ++i) {
+            if (init->kinds[i] == 'I' && ints < 4) {
+                (ints == 0 ? out.x : ints == 1 ? out.y : ints == 2 ? out.width : out.height) = init->raw[i].i;
+                ++ints;
+            } else if (init->kinds[i] == 'A' && init->raw[i].a != nullptr) {
+                if (message == nullptr && (init->raw[i].a->kind == Kind::String || shimClassHas(init->raw[i].a, "Component"))) message = init->raw[i].a;
+                else if (onPress == nullptr) onPress = init->raw[i].a;
+            }
+        }
+    } else {
+        return false;
+    }
+    out.label = textOf(vm, message);
+    return onPress != nullptr;
+}
+
+}  // namespace
+
+std::vector<ModInstance::ScreenWidget> ModInstance::screenOpened(const std::string& screenClass, int width, int height) {
+    std::vector<ScreenWidget> out;
+    if (!vm_) return out;
+    Vm& vm = *vm_;
+    off_.resize(vm.capture.handlers.size(), false);
+    Object* screen = nullptr;
+    for (std::size_t i = 0; i < vm.capture.handlers.size(); ++i) {
+        const EventHandler& h = vm.capture.handlers[i];
+        if (off_[i] || (h.event != "ScreenEvents.AFTER_INIT" && h.event != "ScreenEvents.BEFORE_INIT")) continue;
+        if (screen == nullptr) {
+            screen = vm.makeShim(screenClass);
+            Shim& s = vm.shimOf(screen);
+            s.values["width"] = valueOfInt(width);
+            s.values["height"] = valueOfInt(height);
+            vm.pin(screen);
+        }
+        vm.budget = vm.instructionsRun() + 200'000;
+        try {
+            Value args[4] = {valueOfRef(vm.client()), valueOfRef(screen), valueOfInt(width), valueOfInt(height)};
+            vm.callHandler(h.handler, {"afterInit", "beforeInit"}, "AAII", args);
+        } catch (const JavaThrow& thrown) {
+            switchOff(i, vm.toJavaString(thrown.exception));
+        } catch (const BudgetExceeded& over) {
+            switchOff(i, over.why);
+        }
+    }
+    if (screen != nullptr) {
+        if (const auto it = vm.shimOf(screen).fields.find("#buttons"); it != vm.shimOf(screen).fields.end() && it->second != nullptr) {
+            for (const Value& e : it->second->elems) {
+                ScreenWidget w;
+                Object* onPress = nullptr;
+                if (!readButton(vm, e.a, w, onPress)) continue;
+                w.id = nextWidget_++;
+                widgets_[w.id] = {e.a, onPress};
+                vm.pin(e.a);
+                vm.pin(onPress);
+                out.push_back(std::move(w));
+            }
+        }
+        while (widgets_.size() > 256) widgets_.erase(widgets_.begin());  // (an old screen's buttons)
+    }
+    collect();
+    return out;
+}
+
+void ModInstance::pressWidget(int id) {
+    const auto it = widgets_.find(id);
+    if (it == widgets_.end() || !vm_) return;
+    Vm& vm = *vm_;
+    vm.budget = vm.instructionsRun() + 200'000;
+    try {
+        Value arg = valueOfRef(it->second.button);
+        vm.callHandler(it->second.onPress, {"onPress", "run", "accept"}, "A", &arg);
+    } catch (const JavaThrow& thrown) {
+        report_.error += (report_.error.empty() ? "" : "; ") + std::string("a button's handler failed: ") + vm.toJavaString(thrown.exception);
+    } catch (const BudgetExceeded& over) {
+        report_.error += (report_.error.empty() ? "" : "; ") + std::string("a button's handler failed: ") + over.why;
+    }
 }
 
 ModReport runMod(const std::filesystem::path& jar, const RunOptions& options) { return ModInstance(jar, options).report(); }
@@ -218,6 +374,42 @@ std::vector<ModHost::Said> ModHost::tick() {
         for (std::string& text : mod->tick()) out.push_back({mod->report().name.empty() ? mod->report().modId : mod->report().name, std::move(text)});
     }
     return out;
+}
+
+std::vector<DrawCmd> ModHost::renderHud() {
+    std::vector<DrawCmd> out;
+    for (const auto& mod : mods_) {
+        std::vector<DrawCmd> drawn = mod->renderHud();
+        out.insert(out.end(), std::make_move_iterator(drawn.begin()), std::make_move_iterator(drawn.end()));
+    }
+    return out;
+}
+
+std::vector<ModHost::HostWidget> ModHost::screenOpened(const std::string& screenClass, int width, int height) {
+    std::vector<HostWidget> out;
+    for (const auto& mod : mods_) {
+        for (ModInstance::ScreenWidget& w : mod->screenOpened(screenClass, width, height)) out.push_back({mod.get(), std::move(w)});
+    }
+    return out;
+}
+
+void ModHost::setHost(const HostState& state) {
+    for (const auto& mod : mods_) {
+        HostState& h = mod->host();
+        h.x = state.x;
+        h.y = state.y;
+        h.z = state.z;
+        h.yaw = state.yaw;
+        h.pitch = state.pitch;
+        h.guiWidth = state.guiWidth;
+        h.guiHeight = state.guiHeight;
+        h.health = state.health;
+        h.food = state.food;
+        h.textWidth = state.textWidth;
+        h.consumeClick = state.consumeClick;
+        h.isDown = state.isDown;
+        h.translate = state.translate;
+    }
 }
 
 std::vector<std::string> summarize(const ModReport& r) {

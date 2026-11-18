@@ -1,6 +1,7 @@
 #pragma once
 
 #include "falcon/jvm/class_file.hpp"
+#include "falcon/jvm/mod_content.hpp"
 #include "falcon/jvm/vm.hpp"
 
 #include <filesystem>
@@ -50,11 +51,44 @@ public:
     // One client tick: the mod's tick handlers run, each with a budget of its own (one that fails or runs out of it is switched off); what the mod said to the player is returned.
     [[nodiscard]] std::vector<std::string> tick();
 
+    // What the mod added (items, blocks, keys), as facts.
+    [[nodiscard]] const ModContent& content() const { return content_; }
+    // What the client lends the mod: the player's place, the window's size, the keys. Set before each call that runs the mod's code.
+    [[nodiscard]] HostState& host() { return vm_->host; }
+    [[nodiscard]] bool running() const { return vm_ != nullptr; }
+
+    // The mod's HUD (HudRenderCallback, HudElementRegistry): its handlers run once, and what they drew is returned for the client to draw. A handler that fails or overruns is switched off.
+    [[nodiscard]] std::vector<DrawCmd> renderHud();
+
+    // A button a mod put on a screen (ScreenEvents.AFTER_INIT and Screens.getButtons(screen).add(Button.builder(...).bounds(...).build())).
+    struct ScreenWidget {
+        std::string label;
+        int x = 0, y = 0, width = 150, height = 20;
+        int id = 0;  // for pressWidget
+    };
+    // A screen was built for this window size: the mod's handlers for it run, and the buttons they added are returned. `screenClass` is the game's class of the screen
+    // ("net/minecraft/client/gui/screens/TitleScreen").
+    [[nodiscard]] std::vector<ScreenWidget> screenOpened(const std::string& screenClass, int width, int height);
+    // The player pressed one of those buttons: the handler the mod gave it runs (what it says to the player is returned by the next tick()).
+    void pressWidget(int id);
+
 private:
+    void collect();
+    void switchOff(std::size_t handler, const std::string& why);
+
     ModReport report_;
+    ModContent content_;
     std::unique_ptr<Vm> vm_;
-    Object* client_ = nullptr;
     std::vector<bool> off_;  // by handler: switched off
+    Object* graphics_ = nullptr;
+    Object* delta_ = nullptr;
+    struct Pressable {
+        Object* button = nullptr;
+        Object* onPress = nullptr;
+    };
+    std::map<int, Pressable> widgets_;
+    int nextWidget_ = 1;
+    std::size_t gcAt_ = 50'000;
 };
 
 // Runs the entry points of a Fabric or Quilt mod (its `main`, then its `client`) in a VM of its own, and reads its Mixin classes.
@@ -70,6 +104,15 @@ public:
     };
     [[nodiscard]] std::vector<Said> tick();
     [[nodiscard]] const std::vector<std::unique_ptr<ModInstance>>& mods() const { return mods_; }
+    // The mods' HUDs, drawn in the order the mods were started.
+    [[nodiscard]] std::vector<DrawCmd> renderHud();
+    struct HostWidget {
+        ModInstance* mod = nullptr;
+        ModInstance::ScreenWidget widget;
+    };
+    [[nodiscard]] std::vector<HostWidget> screenOpened(const std::string& screenClass, int width, int height);
+    // Lends every mod the same view of the client (position, window, keys), before they run.
+    void setHost(const HostState& state);
 
 private:
     std::vector<std::unique_ptr<ModInstance>> mods_;

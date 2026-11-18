@@ -2,6 +2,8 @@
 // is recorded as it is (vm.cpp, shimCall), so these are only the ones whose result the mod's own code goes on to use, or that the client wants to read.
 #include "falcon/jvm/vm.hpp"
 
+#include "shim_util.hpp"
+
 #include <algorithm>
 #include <cctype>
 
@@ -42,7 +44,10 @@ Object* makeIdentifier(Vm& vm, const std::string& className, const std::string& 
 
 }  // namespace
 
+void installGameShims(Vm& vm);
+
 void installShims(Vm& vm) {
+    installGameShims(vm);
     // ---- registering ----
     // Registry.register(registry, id, thing): what a mod adds to the game. The thing keeps the calls its constructor made (its properties), so the client can read what it is.
     vm.defineShimHandler("net/minecraft/core/Registry.register", [](Vm& v, Value* a, const MethodRef& r, Value& result) {
@@ -117,18 +122,29 @@ void installShims(Vm& vm) {
     });
 
     // ---- texts ----
-    for (const char* method : {"literal", "translatable", "nullToEmpty"}) {
-        vm.defineShimHandler(std::string("net/minecraft/network/chat/Component.") + method, [](Vm& v, Value* a, const MethodRef&, Value& result) {
-            Object* c = v.makeShim("net/minecraft/network/chat/MutableComponent");
+    for (const char* method : {"literal", "translatable", "nullToEmpty", "translatableEscape"}) {
+        const bool translatable = std::string(method).rfind("translatable", 0) == 0;
+        vm.defineShimHandler(std::string("net/minecraft/network/chat/Component.") + method, [translatable](Vm& v, Value* a, const MethodRef&, Value& result) {
+            Object* c = v.makeShim("net/minecraft/network/chat/MutableComponent", translatable ? "translatable" : "");  // (a translatable text is looked up when it is shown)
             c->str = a[0].a != nullptr && a[0].a->kind == Kind::String ? a[0].a->str : std::string();
             result = valueOfRef(c);
             return true;
         });
     }
+    vm.defineShimHandler("net/minecraft/network/chat/Component.empty", [](Vm& v, Value*, const MethodRef&, Value& result) {
+        result = valueOfRef(v.makeShim("net/minecraft/network/chat/MutableComponent"));
+        return true;
+    });
 
     // ---- events, keys ----
     // An event handler: `register` on an object that came from a static field of an event class (ClientTickEvents.END_CLIENT_TICK): the handler is a lambda or a method of the mod, said by name.
     vm.defineShimHandler("*.register", [](Vm& v, Value* a, const MethodRef& r, Value& result) {
+        if (r.cls->name.find("Category") != std::string::npos && r.params.size() == 1 && r.params[0] == 'A') {  // KeyMapping.Category.register(id) (26.x): a category that carries its text
+            Object* c = v.makeShim(r.cls->name);
+            c->str = a[0].a != nullptr ? (a[0].a->str.empty() ? v.describeObject(a[0].a) : a[0].a->str) : std::string();
+            result = valueOfRef(c);
+            return true;
+        }
         if (r.params.size() < 1 || a[0].a == nullptr || !a[0].a->shim || a[0].a->shim->origin.empty()) return false;
         v.capture.events.push_back(a[0].a->shim->origin + ": " + v.describe(a[1], 'A'));
         if (a[1].a != nullptr) v.capture.handlers.push_back({a[0].a->shim->origin, a[1].a});
@@ -148,7 +164,45 @@ void installShims(Vm& vm) {
         vm.defineShimHandler(name, [](Vm& v, Value* a, const MethodRef& r, Value& result) {
             if (r.params.size() != 1 || a[0].a == nullptr) return false;
             v.capture.keys.push_back(v.describeObject(a[0].a));
+            v.capture.keyObjects.push_back(a[0].a);
             result = a[0];
+            return true;
+        });
+    }
+
+    // ---- the HUD, and the game's creative tabs ----
+    // Fabric's HUD registry (26.x): addLast(id, element), addFirst, attachElementBefore/After(other id, id, element).
+    for (const char* name : {"*.addLast", "*.addFirst", "*.attachElementBefore", "*.attachElementAfter"}) {
+        vm.defineShimHandler(name, [](Vm& v, Value* a, const MethodRef& r, Value&) {
+            if (r.cls->name.find("HudElementRegistry") == std::string::npos || r.params.empty()) return false;
+            Object* element = a[r.params.size() - 1].a;
+            if (element != nullptr) v.capture.handlers.push_back({"HudElement", element});
+            v.capture.events.push_back("HudElementRegistry: " + v.describe(valueOfRef(element), 'A'));
+            return true;
+        });
+    }
+    // ItemGroupEvents.modifyEntriesEvent(tab): the event of one tab, whose handlers are given the tab's entries and add items to them.
+    vm.defineShimHandler("*.modifyEntriesEvent", [](Vm& v, Value* a, const MethodRef&, Value& result) {
+        const std::string tab = a[0].a == nullptr ? std::string() : (a[0].a->shim && !a[0].a->shim->origin.empty() ? a[0].a->shim->origin.substr(a[0].a->shim->origin.find_last_of('.') + 1) : a[0].a->str);
+        result = valueOfRef(v.makeShim("net/fabricmc/fabric/api/event/Event", "ItemGroupEvents.modifyEntries." + tab));
+        return true;
+    });
+    for (const char* name : {"*.accept", "*.add", "*.addAfter", "*.addBefore", "*.prepend"}) {
+        const bool anchored = std::string(name) == "*.addAfter" || std::string(name) == "*.addBefore";  // (their first item is the one to put the others after)
+        vm.defineShimHandler(name, [anchored](Vm& v, Value* a, const MethodRef& r, Value&) {
+            if (!shimClassHas(a[0].a, "Entries") || a[0].a->shim->origin.empty()) return false;
+            const std::string& origin = a[0].a->shim->origin;
+            const std::string group = origin.substr(origin.find_last_of('.') + 1);
+            int slot = 1;
+            for (std::size_t i = 0; i < r.params.size(); ++i) {
+                Object* o = r.params[i] == 'A' ? a[slot].a : nullptr;
+                if (o != nullptr && o->kind == Kind::Array) {
+                    for (const Value& e : o->elems) v.capture.groupItems.push_back({group, e.a});
+                } else if (o != nullptr && !(anchored && i == 0)) {
+                    v.capture.groupItems.push_back({group, o});
+                }
+                slot += r.params[i] == 'J' || r.params[i] == 'D' ? 2 : 1;
+            }
             return true;
         });
     }

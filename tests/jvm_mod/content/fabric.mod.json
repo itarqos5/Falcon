@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "id": "vmcontent",
+  "version": "1.0.0",
+  "name": "VM Content Mod",
+  "description": "Adds a ruby block, a ruby, a ruby sword, a key, a HUD and a title screen button.",
+  "authors": [
+    "Falcon"
+  ],
+  "license": "MIT",
+  "environment": "client",
+  "entrypoints": {
+    "main": [
+      "com.example.content.ContentMod"
+    ],
+    "client": [
+      "com.example.content.ContentMod"
+    ]
+  },
+  "depends": {
+    "fabricloader": ">=0.15.0"
+  }
+}

@@ -77,6 +77,7 @@ add_custom_target(check
 add_executable(falcon_jvm_tests EXCLUDE_FROM_ALL test_jvm.cpp)
 target_link_libraries(falcon_jvm_tests PRIVATE falcon::core falcon_warnings)
 target_compile_definitions(falcon_jvm_tests PRIVATE FALCON_JVM_TEST_JAR="${CMAKE_CURRENT_SOURCE_DIR}/data/jvm/vmtest.jar")
+target_compile_definitions(falcon_jvm_tests PRIVATE FALCON_JVM_CONTENT_JAR="${CMAKE_CURRENT_SOURCE_DIR}/data/jvm/vmcontent.jar")
 add_test(NAME falcon_jvm_tests COMMAND falcon_jvm_tests)
 
 # Runs the start-up code of mods through the VM (jvm/vm.hpp) and says what they did.

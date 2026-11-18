@@ -387,7 +387,7 @@ Value Vm::run(Method* m, Value* locals) {
                     }
                     case 0xC1: {
                         Object* o = sp[-1].a;
-                        sp[-1] = valueOfInt(instanceOf(o, classAt(rdu16(bc + pc + 1))) ? 1 : 0);
+                        sp[-1] = valueOfInt(isInstance(o, classAt(rdu16(bc + pc + 1))) ? 1 : 0);
                         pc += 3;
                         break;
                     }

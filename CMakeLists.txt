@@ -205,6 +205,8 @@ add_library(falcon_base
     src/jvm/interp.cpp
     src/jvm/natives.cpp
     src/jvm/shims.cpp
+    src/jvm/shims_game.cpp
+    src/jvm/mod_content.cpp
     src/jvm/mod_runtime.cpp
     src/text/text_layout.cpp
     src/text/styled_text.cpp

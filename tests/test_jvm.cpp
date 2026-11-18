@@ -75,6 +75,69 @@ void test_tick_handlers() {
     CHECK(mod.report().error.empty());
 }
 
+// What a mod adds, read as facts: items with their properties, a block, the tabs the items are listed in, a key; and the HUD, the key and the button at work.
+void test_content() {
+    ModInstance mod(FALCON_JVM_CONTENT_JAR);
+    CHECK(mod.report().supported && mod.report().error.empty());
+    const ModContent& c = mod.content();
+    CHECK(c.modId == "vmcontent");
+    CHECK(c.blocks.size() == 1);
+    if (c.blocks.size() == 1) {
+        const ModBlockDef& b = c.blocks[0];
+        CHECK(b.id == "vmcontent:ruby_block" && b.hardness == 3.0f && b.resistance == 6.0f && b.light == 7 && b.sound == "amethyst_block");
+    }
+    CHECK(c.items.size() == 3);
+    const auto item = [&](const char* id) -> const ModItemDef* {
+        for (const ModItemDef& i : c.items) {
+            if (i.id == id) return &i;
+        }
+        return nullptr;
+    };
+    const ModItemDef* block = item("vmcontent:ruby_block");
+    const ModItemDef* ruby = item("vmcontent:ruby");
+    const ModItemDef* sword = item("vmcontent:ruby_sword");
+    CHECK(block != nullptr && ruby != nullptr && sword != nullptr);
+    if (block != nullptr && ruby != nullptr && sword != nullptr) {
+        CHECK(block->block == "vmcontent:ruby_block" && block->tab == "minecraft:building_blocks");
+        CHECK(ruby->stacksTo == 16 && ruby->food && ruby->nutrition == 4 && ruby->saturation > 0.29f && ruby->saturation < 0.31f && ruby->tab == "minecraft:ingredients");
+        CHECK(sword->durability == 250 && sword->stacksTo == 1 && sword->rarity == "epic" && sword->tab == "minecraft:tools_and_utilities");
+    }
+    CHECK(c.keys.size() == 1);
+    if (c.keys.size() == 1) CHECK(c.keys[0].name == "key.vmcontent.hello" && c.keys[0].key == 72 && c.keys[0].category == "key.categories.vmcontent" && !c.keys[0].mouse);
+
+    // the HUD: a rectangle and a text, in the coordinates the mod gave them
+    std::vector<DrawCmd> hud = mod.renderHud();
+    CHECK(hud.size() == 2);
+    if (hud.size() == 2) {
+        CHECK(hud[0].kind == DrawCmd::Kind::Fill && hud[0].x0 == 4 && hud[0].y0 == 4 && hud[0].x1 == 96 && hud[0].y1 == 16 && hud[0].color == 0x90000000u);
+        CHECK(hud[1].kind == DrawCmd::Kind::Text && hud[1].text == "Ruby HUD 0" && hud[1].x0 == 8 && hud[1].y0 == 6 && hud[1].color == 0xFFFF5555u);
+    }
+    // the key: pressed once, it makes one line of chat on the next tick
+    int clicks = 1;
+    mod.host().consumeClick = [&](const std::string& name) {
+        if (name != "key.vmcontent.hello" || clicks == 0) return false;
+        --clicks;
+        return true;
+    };
+    CHECK(mod.tick() == std::vector<std::string>{"the key was pressed 1"});
+    CHECK(mod.tick().empty());
+    hud = mod.renderHud();
+    CHECK(hud.size() == 2 && hud[1].text == "Ruby HUD 2");
+
+    // the button: only on the title screen, where the mod put it, and its handler runs when it is pressed
+    CHECK(mod.screenOpened("net/minecraft/client/gui/screens/PauseScreen", 427, 240).empty());
+    const auto buttons = mod.screenOpened("net/minecraft/client/gui/screens/TitleScreen", 427, 240);
+    CHECK(buttons.size() == 1);
+    if (buttons.size() == 1) {
+        CHECK(buttons[0].label == "Ruby Button" && buttons[0].x == 427 / 2 + 104 && buttons[0].y == 240 / 4 + 48 && buttons[0].width == 98 && buttons[0].height == 20);
+        mod.pressWidget(buttons[0].id);
+        CHECK(mod.tick() == std::vector<std::string>{"the ruby button was pressed"});
+    }
+    // a handler that runs every frame does not make the heap grow for ever
+    for (int i = 0; i < 20000; ++i) (void)mod.renderHud();
+    CHECK(mod.report().error.empty());
+}
+
 void test_speed_and_limits() {
     auto jar = falcon::ZipArchive::open(FALCON_JVM_TEST_JAR);
     CHECK(jar.has_value());
@@ -131,6 +194,7 @@ void test_speed_and_limits() {
 int main() {
     test_mod_start_up();
     test_tick_handlers();
+    test_content();
     test_speed_and_limits();
     if (g_failures != 0) {
         std::fprintf(stderr, "%d check(s) failed\n", g_failures);

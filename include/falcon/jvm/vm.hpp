@@ -17,6 +17,7 @@
 #include <set>
 #include <string>
 #include <unordered_map>
+#include <array>
 #include <vector>
 
 namespace falcon::jvm {
@@ -56,12 +57,15 @@ struct BudgetExceeded {
 struct ShimCall {
     std::string method;  // "<init>" for the constructor
     std::vector<std::string> args;
+    std::vector<Value> raw;  // the same arguments as values, one each (a number as it is, an object as its pointer)
+    std::string kinds;       // and what each is: I J F D or A
 };
 struct Shim {
     std::string className;       // "net/minecraft/world/item/Item$Properties"
     std::string origin;          // where it came from when it is a static field of a stand-in class: "BuiltInRegistries.ITEM"
     std::vector<ShimCall> calls; // what was done to it, in order
     std::map<std::string, Object*> fields;  // its fields, made when first read (client.player is one stand-in, the same every time)
+    std::map<std::string, Value> values;    // its number fields, when the client set them (a screen's width and height)
 };
 
 enum class Kind : std::uint8_t { Plain, String, Array, Box, Lambda, Class, Iterator, Entry };
@@ -84,6 +88,7 @@ struct Object {
     int handleKind = 0;                         // a lambda: how its target is called (REF_invokeStatic ...)
     int position = 0;                           // an Iterator's place
     int hash = 0;
+    bool marked = false;                        // the collector's mark
 };
 
 using NativeFn = std::function<Value(Vm&, Value*)>;  // the arguments one Value each (this first), whatever their type
@@ -151,13 +156,47 @@ struct Registration {
     std::string text;      // the object as the stand-ins recorded it: Item[<init>(Item$Properties[stacksTo(16)])]
     Object* object = nullptr;
 };
+// One thing a mod drew on the screen (through the GuiGraphics stand-in), in the GUI's own coordinates with the mod's translate and scale already applied.
+struct DrawCmd {
+    enum class Kind : std::uint8_t { Fill, Gradient, Text, Blit, Item, ScissorOn, ScissorOff } kind = Kind::Fill;
+    float x0 = 0, y0 = 0, x1 = 0, y1 = 0;  // a rectangle (Text: x0, y0 is where it starts)
+    std::uint32_t color = 0xFFFFFFFF, color2 = 0xFFFFFFFF;  // ARGB
+    bool shadow = true;
+    bool centered = false;  // Text: x0 is the middle
+    float scale = 1.0f;     // Text: the mod's scale
+    std::string text;       // Text: what it says; Blit: the texture ("ns:textures/gui/x.png"); Item: the item's id
+    float u = 0, v = 0, regionW = 0, regionH = 0;  // Blit: the part of the picture, in its pixels
+    int texW = 256, texH = 256;
+};
+
+// What the client lends the VM: where the player is, how big the screen is, which keys are down. Every field has a harmless default.
+struct HostState {
+    double x = 0, y = 0, z = 0;
+    float yaw = 0, pitch = 0;
+    int guiWidth = 427, guiHeight = 240;
+    int health = 20, food = 20;
+    std::function<int(const std::string& text)> textWidth;                // the font's width of a text, 0 for the VM's guess
+    std::function<bool(const std::string& keyName)> consumeClick;         // KeyMapping.consumeClick: a press not yet taken
+    std::function<bool(const std::string& keyName)> isDown;               // KeyMapping.isDown
+    std::function<std::string(const std::string& key)> translate;         // a translation key in the player's language
+    std::vector<std::array<float, 4>> pose{{0.0f, 0.0f, 1.0f, 1.0f}};     // the mod's translate and scale while it draws: x offset, y offset, x scale, y scale
+};
+
 // A handler a mod registered for an event: the object (a lambda, or a mod's own object) and the event's name.
 struct EventHandler {
     std::string event;
     Object* handler = nullptr;
 };
+// An item a mod put into one of the game's creative tabs (ItemGroupEvents.modifyEntriesEvent(tab).register(entries -> entries.accept(item))).
+struct GroupItem {
+    std::string group;  // "INGREDIENTS"
+    Object* item = nullptr;
+};
 struct Capture {
+    std::vector<GroupItem> groupItems;
+    std::vector<Object*> keyObjects;     // the key mappings a mod registered
     std::vector<EventHandler> handlers;
+    std::vector<DrawCmd> draw;           // what the mod drew since the client last took it
     std::vector<std::string> chat;       // what the mod said to the player (displayClientMessage and the like), until the client takes it
     std::vector<Registration> registrations;
     std::vector<std::string> events;     // "ClientTickEvents.END_CLIENT_TICK: handler lambda$onInitializeClient$0"
@@ -201,10 +240,14 @@ public:
     [[nodiscard]] bool equalsJava(Object* a, Object* b);
     [[nodiscard]] int hashJava(Object* o);
     [[nodiscard]] bool instanceOf(Object* o, Class* target);
+    // The instanceof operator: like instanceOf, but a stand-in is an instance only of the game classes it can be (its own, and a few well-known bases), so a screen is not every kind of screen.
+    [[nodiscard]] bool isInstance(Object* o, Class* target);
     [[nodiscard]] Shim& shimOf(Object* o);
     [[nodiscard]] std::string describe(Value v, char kind, int depth = 0);
     [[nodiscard]] std::string describeObject(Object* o, int depth = 0);
     [[nodiscard]] Object* makeShim(const std::string& className, const std::string& origin = {});
+    // The one Minecraft (the client) every mod sees: Minecraft.getInstance(), the same each time.
+    [[nodiscard]] Object* client();
     // A field of a stand-in: made the first time it is read (an object for a reference, zero for the rest), and the same after.
     [[nodiscard]] Value shimField(Object* o, const std::string& name, const std::string& desc);
     // What stands for a value of a class nobody gave the mod: an empty collection or string for the library types, a stand-in for the rest.
@@ -220,7 +263,17 @@ public:
     void defineShimHandler(const std::string& ownerAndName, ShimHandler handler) { shimHandlers_[ownerAndName] = std::move(handler); }
     [[nodiscard]] static std::string stripKey(const std::string& desc);
 
+    // Calls what a mod registered as an event handler or a HUD element: a lambda, or an object of the mod that has a method of one of these names (and as many parameters as there are arguments). Kinds says what each argument is: I J F D or A.
+    Value callHandler(Object* fn, const std::vector<std::string>& names, const std::string& kinds, const Value* args);
+
+    // Frees what nothing reaches any more (a handler that runs every frame makes objects every frame). Only between calls: the roots are the classes' statics, the stand-ins' fields, what the
+    // capture holds, and what was pinned. Values are not typed, so every one is looked at as if it could be a pointer (an int that equals an address only keeps one object alive a little longer).
+    void collectGarbage();
+    [[nodiscard]] std::size_t heapSize() const { return heap_.size(); }
+    void pin(Object* o) { pins_.push_back(o); }
+
     Capture capture;
+    HostState host;
     std::string modId;                        // for the log lines
     std::uint64_t budget = 200'000'000;       // instructions
     [[nodiscard]] std::uint64_t instructionsRun() const { return instructions_; }
@@ -264,6 +317,8 @@ private:
     Class* objectClass_ = nullptr;
     Class* stringClass_ = nullptr;
     Class* classClass_ = nullptr;
+    Object* client_ = nullptr;
+    std::vector<Object*> pins_;
 };
 
 void installNatives(Vm& vm);

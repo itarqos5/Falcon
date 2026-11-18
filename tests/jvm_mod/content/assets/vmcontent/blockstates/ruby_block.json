@@ -1,0 +1,7 @@
+{
+  "variants": {
+    "": {
+      "model": "vmcontent:block/ruby_block"
+    }
+  }
+}

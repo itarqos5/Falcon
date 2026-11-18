@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <unordered_set>
 
 namespace falcon::jvm {
 
@@ -346,8 +347,13 @@ Object* Vm::makeShim(const std::string& className, const std::string& origin) {
 }
 
 Value Vm::shimField(Object* o, const std::string& name, const std::string& desc) {
-    if (desc.empty() || (desc[0] != 'L' && desc[0] != '[')) return Value();
     Shim& shim = shimOf(o);
+    if (desc.empty() || (desc[0] != 'L' && desc[0] != '[')) {
+        if (const auto set = shim.values.find(name); set != shim.values.end()) return set->second;
+        if (name == "lineHeight") return valueOfInt(9);  // Font.lineHeight
+        return Value();
+    }
+    if (name == "screen") return valueOfRef(nullptr);  // (a HUD runs with no screen open)
     if (const auto it = shim.fields.find(name); it != shim.fields.end()) return valueOfRef(it->second);
     Object* field = desc[0] == '[' ? newArray('L', 0) : makeDefault(desc.substr(1, desc.size() - 2), (o->cls->simpleName()) + "." + name);
     shim.fields[name] = field;
@@ -369,6 +375,85 @@ Object* Vm::makeDefault(const std::string& name, const std::string& origin) {
     if (name == "java/util/Map" || name == "java/util/concurrent/ConcurrentMap") return newObject("java/util/HashMap");
     if (name == "java/util/Optional") return newObject("java/util/Optional");
     return makeShim(name, origin);
+}
+
+void Vm::collectGarbage() {
+    if (depth_ != 0) return;
+    std::unordered_set<const void*> live;
+    live.reserve(heap_.size() * 2);
+    for (const auto& o : heap_) {
+        o->marked = false;
+        live.insert(o.get());
+    }
+    std::vector<Object*> work;
+    const auto reach = [&](Object* o) {
+        if (o != nullptr && live.count(o) != 0 && !o->marked) {
+            o->marked = true;
+            work.push_back(o);
+        }
+    };
+    const auto reachValue = [&](const Value& v) { reach(reinterpret_cast<Object*>(static_cast<std::uintptr_t>(v.raw))); };
+    for (const auto& [name, cls] : classes_) {
+        for (const Value& v : cls->statics) reachValue(v);
+        for (const auto& [field, o] : cls->shimStatics) reach(o);
+    }
+    for (const auto& [text, o] : interned_) reach(o);
+    for (const auto& [name, o] : classObjects_) reach(o);
+    for (const auto& site : sites_) {
+        for (Object* o : site->constants) reach(o);
+    }
+    reach(client_);
+    for (Object* o : pins_) reach(o);
+    for (const Registration& r : capture.registrations) reach(r.object);
+    for (const EventHandler& h : capture.handlers) reach(h.handler);
+    for (const GroupItem& g : capture.groupItems) reach(g.item);
+    for (Object* o : capture.keyObjects) reach(o);
+    while (!work.empty()) {
+        Object* o = work.back();
+        work.pop_back();
+        for (const Value& v : o->fields) reachValue(v);
+        for (const Value& v : o->elems) reachValue(v);
+        for (const auto& [k, v] : o->map) {
+            reachValue(k);
+            reachValue(v);
+        }
+        for (const Value& v : o->captured) reachValue(v);
+        reachValue(o->prim);
+        if (o->shim) {
+            for (const auto& [name, f] : o->shim->fields) reach(f);
+            for (const auto& [name, v] : o->shim->values) reachValue(v);
+            for (const ShimCall& c : o->shim->calls) {
+                for (const Value& v : c.raw) reachValue(v);
+            }
+        }
+    }
+    heap_.erase(std::remove_if(heap_.begin(), heap_.end(), [](const std::unique_ptr<Object>& o) { return !o->marked; }), heap_.end());
+}
+
+Object* Vm::client() {
+    if (client_ == nullptr) client_ = makeShim("net/minecraft/client/Minecraft");
+    return client_;
+}
+
+// What a game class is known to be, for the instanceof operator: the base classes mods test against.
+bool Vm::isInstance(Object* o, Class* target) {
+    if (o == nullptr) return false;
+    if (o->shim && target->shim && o->cls->shim) {
+        const std::string& have = o->shim->className;
+        if (have == target->name) return true;
+        const auto endsWith = [](const std::string& s, const char* suffix) {
+            const std::string t = suffix;
+            return s.size() >= t.size() && s.compare(s.size() - t.size(), t.size(), t) == 0;
+        };
+        const std::string& want = target->name;
+        if (endsWith(want, "/Screen")) return endsWith(have, "Screen");
+        if (endsWith(want, "/Entity") || endsWith(want, "/LivingEntity")) return endsWith(have, "Player") || endsWith(have, "Entity") || endsWith(have, "Mob");
+        if (endsWith(want, "/Player")) return endsWith(have, "Player");
+        if (endsWith(want, "/Component")) return endsWith(have, "Component");
+        if (endsWith(want, "/AbstractWidget")) return endsWith(have, "Button") || endsWith(have, "Widget") || endsWith(have, "Checkbox") || endsWith(have, "EditBox");
+        return false;
+    }
+    return instanceOf(o, target);
 }
 
 bool Vm::instanceOf(Object* o, Class* target) {
@@ -646,11 +731,25 @@ Value Vm::shimCall(MethodRef& r, int op, Value* args) {
     }
     if (owner.rfind("java/", 0) == 0 || owner.rfind("javax/", 0) == 0) unsupported(owner + "." + r.name);
     if (op == kSpecialOp && r.name == "<init>") {  // the constructor of a stand-in, run for an object of the mod's or for one of its own
-        shimOf(self).calls.push_back({"<init>", std::move(described)});
+        ShimCall call{"<init>", std::move(described), {}, {}};
+        slot = 1;
+        for (const char k : r.params) {
+            call.raw.push_back(args[slot]);
+            call.kinds.push_back(k);
+            slot += k == 'J' || k == 'D' ? 2 : 1;
+        }
+        shimOf(self).calls.push_back(std::move(call));
         return Value();
     }
     if (self != nullptr && (self->shim || self->cls->shim || !self->cls->file)) {
-        shimOf(self).calls.push_back({r.name, described});
+        ShimCall call{r.name, described, {}, {}};
+        slot = 1;
+        for (const char k : r.params) {
+            call.raw.push_back(args[slot]);
+            call.kinds.push_back(k);
+            slot += k == 'J' || k == 'D' ? 2 : 1;
+        }
+        shimOf(self).calls.push_back(std::move(call));
     } else if (capture.calls.size() < 400) {
         std::string line = r.cls->simpleName() + "." + r.name + "(";
         for (std::size_t i = 0; i < described.size(); ++i) line += (i ? ", " : "") + described[i];
@@ -768,6 +867,29 @@ Value Vm::callInterface(Object* fn, const std::string& name, const std::string& 
         k += ref.params[i] == 'J' || ref.params[i] == 'D' ? 2 : 1;
     }
     return lambdaInvoke(fn, ref, slots);
+}
+
+Value Vm::callHandler(Object* fn, const std::vector<std::string>& names, const std::string& kinds, const Value* args) {
+    if (fn == nullptr) return Value();
+    const int count = static_cast<int>(kinds.size());
+    if (fn->kind == Kind::Lambda) {
+        // the lambda's own target does the work: the descriptor only has to say how many arguments there are, and of what kind (an object each)
+        std::string desc = "(";
+        for (const char k : kinds) desc += k == "A"[0] ? std::string("Ljava/lang/Object;") : std::string(1, k);
+        return callInterface(fn, names.empty() ? std::string("run") : names[0], desc + ")V", args, count);
+    }
+    for (Class* c = fn->cls; c != nullptr; c = c->super) {
+        for (auto& entry : c->methods) {
+            Method* m = entry.second.get();
+            if (m->isStatic() || !m->callable() || static_cast<int>(m->params.size()) != count) continue;
+            if (std::find(names.begin(), names.end(), m->name) == names.end()) continue;
+            std::vector<Value> full;
+            full.push_back(valueOfRef(fn));
+            for (int i = 0; i < count; ++i) full.push_back(args[i]);
+            return invoke(m, full.data(), count + 1);
+        }
+    }
+    return Value();
 }
 
 // ---- invokedynamic -----------------------------------------------------------------------------------------------------------------------------------------------
