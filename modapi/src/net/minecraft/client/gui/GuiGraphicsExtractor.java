@@ -39,6 +39,7 @@ public class GuiGraphicsExtractor {
     public void centeredText(Font font, FormattedCharSequence text, int x, int y, int argb) { centeredText(font, text.text(), x, y, argb); }
 
     public void blit(RenderPipeline pipeline, Identifier texture, int x, int y, float u, float v, int w, int h, int texW, int texH) { blit(pipeline, texture, x, y, u, v, w, h, w, h, texW, texH); }
+    public void blit(RenderPipeline pipeline, Identifier texture, int x, int y, float u, float v, int w, int h, int texW, int texH, int argb) { blit(pipeline, texture, x, y, u, v, w, h, w, h, texW, texH, argb); }
     public void blit(RenderPipeline pipeline, Identifier texture, int x, int y, float u, float v, int w, int h, int regionW, int regionH, int texW, int texH) { blit(pipeline, texture, x, y, u, v, w, h, regionW, regionH, texW, texH, -1); }
     public void blit(RenderPipeline pipeline, Identifier texture, int x, int y, float u, float v, int w, int h, int regionW, int regionH, int texW, int texH, int argb) {
         Host.drawTexture(texture.toString(), tx(x, y), ty(x, y), tx(x + w, y + h), ty(x + w, y + h), u, v, regionW, regionH, texW, texH, argb);
