@@ -56,6 +56,14 @@ public:
     // (Re)builds the widgets for a GUI-scaled window size.
     void resize(int width, int height);
 
+    // Called after any screen has built its widgets (each time it is built for a window size): this is where the mods add their buttons (ScreenEvents.AFTER_INIT in Fabric).
+    using PostInitHook = std::function<void(Screen&)>;
+    static void setPostInitHook(PostInitHook hook);
+    [[nodiscard]] int width() const { return width_; }
+    [[nodiscard]] int height() const { return height_; }
+    // A button put on the screen from outside (a mod's), on top of the screen's own.
+    Button& addExternalButton(const std::string& label, const Rect& rect, std::function<void()> onPress) { return addButton(label, rect, std::move(onPress)); }
+
     virtual void render(GuiGraphics& graphics, int mouseX, int mouseY, const FrameTime& time);
     // Plays the click sound for a pressed button (sliders click on release instead).
     virtual bool mouseClicked(double x, double y, int button);

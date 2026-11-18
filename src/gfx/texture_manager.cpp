@@ -5,6 +5,8 @@
 namespace falcon {
 
 ResourceLocation TextureManager::locationOf(const std::string& path) {
+    const std::size_t colon = path.find(':');  // (a mod's texture: "examplemod:gui/icon.png")
+    if (colon != std::string::npos) return ResourceLocation(path.substr(0, colon), "textures/" + path.substr(colon + 1));
     return ResourceLocation("minecraft", "textures/" + path);
 }
 

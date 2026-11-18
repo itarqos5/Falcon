@@ -385,6 +385,8 @@ private:
     bool debugChord(int key);  // the rest of the F3 chords (D, C, A, B, G, Q), with the chat feedback the game gives; true if the key was one (it is then not a key of the game as well)
     void debugMessage(const std::string& text);
     void tickMods();  // the mods' tick handlers, run by the VM (src/game/game_session_mods.cpp)
+    void renderModHud(GuiGraphics& graphics, int guiWidth, int guiHeight);  // what the mods' HUDs draw
+    void modKeyEvent(const KeyId& key, bool pressed);                       // a key a mod asked for was pressed or let go
     void tickTime();  // the clock: a tick of the day, unless the game rule advance_time is off
     void pumpRemote();
     // What LocalPlayer.sendChanges says each tick. A rider (`riding`) sends how it looks round and nothing of its position; one who steers a boat also sends the boat's place.
@@ -521,8 +523,6 @@ private:
     SystemMemory systemMemory_;
     double systemMemoryAge_ = 1.0e9;
     bool advancedTooltips_ = false;
-    std::unique_ptr<jvm::ModHost> modHost_;  // the Fabric and Quilt mods of the mods folder, started in the VM when the world is ready
-    bool modsStarted_ = false;
     bool showHitboxes_ = false;      // F3 + B
     bool showChunkBorders_ = false;  // F3 + G
     int droppedCount_ = 0;

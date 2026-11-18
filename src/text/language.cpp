@@ -11,9 +11,13 @@ namespace {
 
 // Adds the entries of every copy of lang/<code>.json (the game's, then each pack's, a later one
 // overriding single keys). Returns false if there was no usable file at all.
-bool mergeLanguageFiles(const ResourceManager& resources, const std::string& code,
-                        std::unordered_map<std::string, std::string>& entries) {
-    const ResourceLocation loc("minecraft", "lang/" + code + ".json");
+std::vector<std::string>& modNamespaces() {
+    static std::vector<std::string> namespaces;
+    return namespaces;
+}
+
+bool mergeLanguageFile(const ResourceManager& resources, const std::string& ns, const std::string& code, std::unordered_map<std::string, std::string>& entries) {
+    const ResourceLocation loc(ns, "lang/" + code + ".json");
     bool anyValid = false;
     for (const std::string& text : resources.readAllText(loc)) {
         const nlohmann::json json = nlohmann::json::parse(text, nullptr, /*allow_exceptions=*/false);
@@ -27,7 +31,22 @@ bool mergeLanguageFiles(const ResourceManager& resources, const std::string& cod
     return anyValid;
 }
 
+bool mergeLanguageFiles(const ResourceManager& resources, const std::string& code, std::unordered_map<std::string, std::string>& entries) {
+    const bool valid = mergeLanguageFile(resources, "minecraft", code, entries);
+    for (const std::string& ns : modNamespaces()) mergeLanguageFile(resources, ns, code, entries);  // (a mod without this language is not an error)
+    return valid;
+}
+
 }  // namespace
+
+void Language::setModNamespaces(std::vector<std::string> namespaces) { modNamespaces() = std::move(namespaces); }
+
+void Language::mergeMods(const ResourceManager& resources, std::string_view code) {
+    for (const std::string& ns : modNamespaces()) {
+        mergeLanguageFile(resources, ns, "en_us", entries_);
+        if (code != "en_us" && !code.empty()) mergeLanguageFile(resources, ns, std::string(code), entries_);
+    }
+}
 
 Language Language::load(const ResourceManager& resources, std::string_view code) {
     // English is always loaded first; another language is laid on top, so any line it lacks stays

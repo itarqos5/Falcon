@@ -17,6 +17,8 @@
 
 #include <algorithm>
 #include <array>
+#include "falcon/game/mod_content_apply.hpp"
+
 #include <chrono>
 #include <cctype>
 #include <cmath>
@@ -35,7 +37,8 @@ namespace {
 // The block registry, read from the game's data on first use and then shared by every world this run opens.
 std::shared_ptr<const BlockRegistry> loadRegistry(const ScreenServices& services, const ResourceManager& resources) {
     std::shared_ptr<const BlockRegistry> registry = currentBlockRegistry();
-    if (!registry || !registry->isFromGameData()) {
+    const bool firstLoad = !registry || !registry->isFromGameData();  // (the mods' blocks are added to the game's once)
+    if (firstLoad) {
         std::string error;
         // The data sits next to the assets: <game>/assets and <game>/data, registries.json, ...
         registry = BlockRegistry::loadFromGameData(resources.dataRoot(), services.gameDir / "falcon_cache", error);
@@ -62,6 +65,17 @@ std::shared_ptr<const BlockRegistry> loadRegistry(const ScreenServices& services
             falcon::log::line("block outlines: %s (every block will be aimed at as a full cube)\n", error.c_str());
         }
     }
+    // The blocks the mods registered: states after the game's, full cubes to collide with and aim at, drawn from the mod's own blockstates and models.
+    if (firstLoad) {
+        const std::vector<ExtraBlock> extra = modExtraBlocks(services.mods.get());
+        if (!extra.empty()) {
+            registry = BlockRegistry::extended(*registry, extra);
+            installBlockRegistry(registry);
+            installCollisionShapes(CollisionShapes::withCubes(collisionShapes(), registry->stateCount()));
+            installBlockOutlines(BlockOutlines::withCubes(blockOutlines(), registry->stateCount()));
+            falcon::log::line("mods: %zu block(s) added\n", extra.size());
+        }
+    }
     return registry;
 }
 
@@ -76,9 +90,14 @@ std::shared_ptr<const ItemRegistry> loadItems(const ScreenServices& services, co
         const std::filesystem::path cache = services.gameDir / "falcon_cache";
         items = ItemRegistry::loadFromGameData(dataDir, cache, &blocks, error);
         if (!items) throw std::runtime_error(error);
+        if (const std::vector<ExtraItem> extra = modExtraItems(services.mods.get()); !extra.empty()) {
+            items = ItemRegistry::extended(*items, extra, &blocks);
+            falcon::log::line("mods: %zu item(s) added\n", extra.size());
+        }
         installItemRegistry(items);
         std::string tabError;
         if (auto tabs = CreativeTabs::loadFromGameData(dataDir, *items, tabError)) {
+            if (const auto entries = modCreativeEntries(services.mods.get(), services.language); !entries.empty()) tabs = CreativeTabs::extended(*tabs, *items, entries);
             installCreativeTabs(std::move(tabs));
         } else {
             falcon::log::line("creative tabs: %s\n", tabError.c_str());
@@ -702,6 +721,7 @@ bool GameSession::keyIs(const char* action, int key) const {
 }
 
 void GameSession::onKey(int key, int mods) {
+    modKeyEvent(KeyId::keyboard(key), true);
     for (int slot = 0; slot < 9; ++slot) {
         if (info_.gameType != 3 && keyIs(format("key.hotbar.%d", slot + 1).c_str(), key)) inventory_.setSelected(slot);  // (a spectator has no inventory to choose from)
     }
@@ -788,6 +808,7 @@ void GameSession::drawPlayerPreview(GuiGraphics& g, int x0, int y0, int x1, int 
 }
 
 void GameSession::onKeyReleased(int key) {
+    modKeyEvent(KeyId::keyboard(key), false);
     if ((keyIs("key.debug.overlay", key) || keyIs("key.debug.modifier", key)) && debugHeld_) {
         debugHeld_ = false;
         if (!debugCombo_) showDebug_ = !showDebug_;
@@ -821,6 +842,8 @@ void GameSession::setGameType(int gameType) {
 }
 
 void GameSession::onMouseButton(int button) {
+    modKeyEvent(KeyId::mouse(button), true);
+    modKeyEvent(KeyId::mouse(button), false);
     const std::size_t index = keyMappingIndex("key.pickItem");
     if (index >= kKeyMappingCount || !ready_) return;
     const KeyId bound = services_.options.keyBindings.key(index);

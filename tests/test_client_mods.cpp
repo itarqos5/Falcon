@@ -1,7 +1,12 @@
 // The Mods screen's data: what a mod's jar says about itself (mods/mod_info.hpp) and which mods are optimization mods (mods/optimization_mods.hpp).
 #include "test_support.hpp"
 
+#include "falcon/game/creative_tabs.hpp"
+#include "falcon/game/key_mappings.hpp"
+#include "falcon/game/mod_content_apply.hpp"
 #include "falcon/game/mods_screen.hpp"
+#include "falcon/world/block_outlines.hpp"
+#include "falcon/world/collision_shapes.hpp"
 #include "falcon/mods/mod_info.hpp"
 #include "falcon/mods/optimization_mods.hpp"
 #include "falcon/platform/dialog.hpp"
@@ -171,6 +176,87 @@ void test_mod_icons() {
     for (const char* bad : {"", "javascript:alert(1)", "file:///C:/Windows/System32/calc.exe", "ftp://example.org/x", "https://", "https://exa mple.org", "https://example.org/\"x", "https://example.org/\nx", "cmd /c calc", "//example.org"}) {
         CHECK(!falcon::openWebAddress(bad));
     }
+}
+
+// What a mod adds goes into the game's tables after the game's own: blocks as full cubes you can collide with and aim at, items linked to their blocks, the creative tabs, the keys.
+void test_mod_content_in_the_game() {
+    const auto base = falcon::BlockRegistry::makeMinimal();
+    const std::size_t baseStates = base->stateCount();
+    const auto blocks = falcon::BlockRegistry::extended(*base, {{"examplemod:ruby_block", 3.0f, 6.0f, 7, true, false, "amethyst_block"}, {"examplemod:glass", 0.3f, 0.3f, 0, false, true, "glass"}});
+    CHECK(blocks->stateCount() == baseStates + 2);
+    const auto ruby = blocks->findBlock("examplemod:ruby_block");
+    const auto glass = blocks->findBlock("examplemod:glass");
+    CHECK(ruby.has_value() && glass.has_value() && blocks->findBlock("stone").has_value());
+    if (ruby && glass) {
+        const falcon::Block rubyState = blocks->defaultState(*ruby);
+        const falcon::StateInfo& info = blocks->state(rubyState);
+        CHECK(falcon::stateId(rubyState) == baseStates && info.hardness == 3.0f && info.explosionResistance == 6.0f && info.emission == 7 && info.dampening == 15);
+        CHECK(info.has(falcon::kStateOpaqueCube) && info.has(falcon::kStateFullCollision) && info.has(falcon::kStateHasModel) && info.has(falcon::kStateRequiresTool));
+        CHECK(blocks->type(rubyState).name == "examplemod:ruby_block" && blocks->type(rubyState).sound == "amethyst_block" && blocks->type(rubyState).item == "examplemod:ruby_block");
+        const falcon::StateInfo& clear = blocks->state(blocks->defaultState(*glass));
+        CHECK(!clear.has(falcon::kStateOpaqueCube) && clear.has(falcon::kStateFullCollision) && clear.dampening == 0);
+        // the same name twice is one block
+        CHECK(falcon::BlockRegistry::extended(*blocks, {{"examplemod:ruby_block", 1.0f, 1.0f, 0, false, false, "stone"}})->stateCount() == blocks->stateCount());
+
+        // the states after the game's have a full cube to collide with and to aim at
+        const auto shapes = falcon::CollisionShapes::withCubes(*falcon::CollisionShapes::makeMinimal(*base), blocks->stateCount());
+        std::vector<falcon::Aabb> boxes = shapes->boxes(rubyState);
+        CHECK(boxes.size() == 1 && boxes[0].maxX - boxes[0].minX == 1.0 && boxes[0].maxY - boxes[0].minY == 1.0);
+        const auto outlines = falcon::BlockOutlines::withCubes(*falcon::BlockOutlines::makeMinimal(*base), blocks->stateCount());
+        CHECK(outlines->shape(rubyState).boxes.size() == 1);
+
+        // items: after the game's, a block item linked to its block, the item of the block found from the block
+        const auto items = falcon::ItemRegistry::makeMinimal(base.get());
+        falcon::ExtraItem blockItem;
+        blockItem.name = "examplemod:ruby_block";
+        blockItem.translationKey = "block.examplemod.ruby_block";
+        blockItem.itemModel = "examplemod:ruby_block";
+        falcon::ExtraItem food;
+        food.name = "examplemod:ruby";
+        food.translationKey = "item.examplemod.ruby";
+        food.itemModel = "examplemod:ruby";
+        food.maxStack = 16;
+        food.food = falcon::FoodInfo{4, 2.4f, false};
+        food.rarity = falcon::Rarity::Epic;
+        const auto extended = falcon::ItemRegistry::extended(*items, {blockItem, food}, blocks.get());
+        CHECK(extended->size() == items->size() + 2);
+        const auto rubyItem = extended->find("examplemod:ruby");
+        const auto rubyBlockItem = extended->find("examplemod:ruby_block");
+        CHECK(rubyItem && rubyBlockItem && extended->find("apple").has_value());
+        if (rubyItem && rubyBlockItem) {
+            CHECK(extended->item(*rubyItem).maxStack == 16 && extended->item(*rubyItem).consumable && extended->item(*rubyItem).rarity == falcon::Rarity::Epic && extended->item(*rubyItem).blockIndex == -1);
+            CHECK(extended->item(*rubyBlockItem).blockIndex == *ruby && extended->itemOfBlock(*ruby) == *rubyBlockItem);
+            CHECK(extended->item(*rubyItem).protocolId == items->size() + 1 && extended->item(*rubyItem).itemModel == "examplemod:ruby");
+
+            // creative tabs: at the end of the tab the mod named, and in the search tab under the name the language gives
+            const auto tabs = falcon::CreativeTabs::makeMinimal(*extended);
+            const auto withMod = falcon::CreativeTabs::extended(*tabs, *extended, {{"minecraft:building_blocks", "examplemod:ruby_block", "Block of Ruby"}, {"minecraft:nowhere", "examplemod:ruby", "Ruby"}});
+            const falcon::CreativeTab* building = withMod->find("minecraft:building_blocks");
+            CHECK(building != nullptr && building->entries.size() == tabs->find("minecraft:building_blocks")->entries.size() + 1 && building->entries.back().stack.item == *rubyBlockItem);
+            CHECK(withMod->search("block of ruby").size() == 1 && withMod->search("examplemod:ruby").size() == 2);
+        }
+    }
+
+    // keys: after the game's, under a heading of their own, saved and read like the others
+    falcon::registerModKeyMappings({{"key.examplemod.open", "key.categories.examplemod", falcon::KeyId::keyboard(72)}, {"key.jump", "key.categories.examplemod", falcon::KeyId::keyboard(1)}});
+    CHECK(falcon::totalKeyMappingCount() == falcon::kKeyMappingCount + 1);  // (a mod cannot take over the game's own)
+    const std::size_t open = falcon::keyMappingIndex("key.examplemod.open");
+    CHECK(open == falcon::kKeyMappingCount && std::string(falcon::keyMappingAt(open).modCategory) == "key.categories.examplemod" && falcon::keyMappingAt(open).category == falcon::KeyCategory::Mod);
+    falcon::KeyBindings bindings;
+    bindings.sync();
+    CHECK(bindings.key(open) == falcon::KeyId::keyboard(72) && bindings.isDefault(open) && !bindings.anyChanged());
+    bindings.set(open, falcon::KeyId::keyboard(74));
+    CHECK(!bindings.isDefault(open) && bindings.anyChanged());
+    falcon::OptionsFile file;
+    bindings.save(file);
+    CHECK(file.contains("key_key.examplemod.open"));
+    falcon::KeyBindings loaded;
+    loaded.load(file);
+    CHECK(loaded.key(open) == falcon::KeyId::keyboard(74));
+    const auto order = falcon::sortedKeyMappingOrder([](const std::string& key) { return key; });
+    CHECK(order.size() == falcon::kKeyMappingCount + 1 && order.back() == open);
+    falcon::registerModKeyMappings({});  // (the table is process-wide: leave it as it was)
+    CHECK(falcon::totalKeyMappingCount() == falcon::kKeyMappingCount);
 }
 
 void test_mods_layout() {

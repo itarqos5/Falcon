@@ -435,6 +435,7 @@ add_library(falcon_core
     src/game/game_session_render.cpp
     src/game/game_session_debug.cpp
     src/game/game_session_mods.cpp
+    src/game/mod_content_apply.cpp
     src/game/mods_screen.cpp
     src/game/item_render.cpp
     src/game/container_screen.cpp

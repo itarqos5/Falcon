@@ -45,10 +45,13 @@
 #include "falcon/ui/confirm_screen.hpp"
 #include "falcon/world/level_info.hpp"
 #include "falcon/version.hpp"
+#include "falcon/game/mod_content_apply.hpp"
+#include "falcon/jvm/mod_runtime.hpp"
 
 #include <algorithm>
 #include <array>
 #include <future>
+#include <typeinfo>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -63,6 +66,33 @@
 #include <vector>
 
 namespace falcon {
+namespace {
+
+// The game's class of a screen, from the C++ class (Itanium names: "N6falcon11TitleScreenE" is falcon::TitleScreen): Falcon's screens carry the game's names, which is what a mod tests the
+// screen against (screen instanceof TitleScreen).
+std::string minecraftScreenClass(const char* mangled) {
+    std::string name;
+    const char* p = mangled;
+    if (*p == 'N') ++p;
+    while (*p >= '0' && *p <= '9') {
+        int length = 0;
+        while (*p >= '0' && *p <= '9') length = length * 10 + (*p++ - '0');
+        name.assign(p, static_cast<std::size_t>(length));
+        p += length;
+    }
+    if (name.empty()) return "net/minecraft/client/gui/screens/Screen";
+    static const char* const kOptions[] = {"OptionsScreen", "VideoSettingsScreen", "SoundOptionsScreen", "ControlsScreen", "KeyBindsScreen", "LanguageSelectScreen", "SkinCustomizationScreen", "AccessibilityOptionsScreen", "OnlineOptionsScreen", "ChatOptionsScreen", "MouseSettingsScreen"};
+    for (const char* option : kOptions) {
+        if (name == option) return "net/minecraft/client/gui/screens/options/" + name;
+    }
+    if (name == "SelectWorldScreen" || name == "CreateWorldScreen" || name == "EditWorldScreen") return "net/minecraft/client/gui/screens/worldselection/" + name;
+    if (name == "JoinMultiplayerScreen" || name == "ConnectScreen") return "net/minecraft/client/gui/screens/multiplayer/" + name;
+    if (name == "InventoryScreen" || name == "CreativeModeInventoryScreen" || name == "CraftingScreen" || name == "FurnaceScreen") return "net/minecraft/client/gui/screens/inventory/" + name;
+    return "net/minecraft/client/gui/screens/" + name;
+}
+
+}  // namespace
+
 namespace {
 
 constexpr const char* kGameVersion = "26.3";
@@ -193,6 +223,12 @@ int Client::run() {
     // when the game closes; automated captures only save when given their own --game-dir, so
     // they never touch the real folder.
     const std::filesystem::path gameDir = options_.gameDir ? *options_.gameDir : minecraftDir().value_or(".minecraft");
+    // The mods start first, beside everything else: what they add (blocks, items, keys, assets) has to be in the game's tables before the world opens.
+    const std::filesystem::path modsDir = options_.modsDir ? *options_.modsDir : options_.gameDir ? gameDir / "mods" : falconDataDir().value_or(std::filesystem::path(".")) / "mods";
+    std::future<std::shared_ptr<jvm::ModHost>> modHostStart = std::async(std::launch::async, [modsDir] {
+        if (std::getenv("FALCON_NO_MODS") != nullptr) return std::shared_ptr<jvm::ModHost>();
+        return std::make_shared<jvm::ModHost>(modsDir);
+    });
     const std::filesystem::path optionsPath = gameDir / "falcon_options.txt";
     const bool persistOptions = !options_.capturePath || options_.gameDir.has_value();
     OptionsFile optionsFile = OptionsFile::load(optionsPath);
@@ -291,6 +327,26 @@ int Client::run() {
         gameOptions.language = loadedLanguage.code;
     }
     Language language = std::move(loadedLanguage.language);
+    std::shared_ptr<jvm::ModHost> modHost;
+    ResourceManager::PackList modPacks;
+    try {
+        modHost = modHostStart.get();
+    } catch (const std::exception& e) {
+        falcon::log::line("mods: %s\n", e.what());
+    }
+    if (modHost && !modHost->mods().empty()) {
+        for (const auto& mod : modHost->mods()) {
+            const jvm::ModReport& r = mod->report();
+            falcon::log::line("mods: %s: %.1f ms, %zu item(s), %zu block(s), %zu key(s), %zu handler(s)%s%s\n", r.modId.c_str(), r.milliseconds, mod->content().items.size(), mod->content().blocks.size(), mod->content().keys.size(),
+                              r.events.size(), r.error.empty() ? "" : ", stopped: ", r.error.c_str());
+        }
+        modPacks = modHost->resourcePacks();
+        Language::setModNamespaces(modHost->namespaces());
+        resources.setPacks(modPacks);                       // (their assets, under the packs the player selects)
+        language.mergeMods(resources, gameOptions.language);  // (their translations)
+        registerModKeyMappings(modKeyMappings(modHost.get()));
+        gameOptions.keyBindings.load(optionsFile);          // (the keys they asked for, on what the player saved for them)
+    }
     memStage("language");
     Font font = Font::fromData(fontLoad.get());
     memStage("font");
@@ -382,12 +438,28 @@ int Client::run() {
     // Applies a new pack selection in the background; update() below swaps it in between frames.
     ResourceReloader reloader(ReloadTargets{resources, packs, language, font, textures, sprites,
                                             panoramaRenderer, splashes, sounds, !options_.keepJavaEdition,
-                                            gameOptions.language});
+                                            gameOptions.language, modPacks});
     int framebufferNowW = options_.width;  // the window's current size, for the GUI Scale button's range
     int framebufferNowH = options_.height;
     ScreenServices services{language, font, panorama, gameOptions, sounds, music, packs, {}, gameDir, {}, {},
-                            loadLanguageList(resources), nullptr, {}, {}, "Player", {}, {}, {}, {}};
-    services.modsDir = options_.modsDir ? *options_.modsDir : options_.gameDir ? gameDir / "mods" : falconDataDir().value_or(std::filesystem::path(".")) / "mods";
+                            loadLanguageList(resources), nullptr, {}, {}, "Player", {}, {}, {}, {}, {}};
+    services.modsDir = modsDir;
+    services.mods = modHost;
+    if (modHost && !modHost->mods().empty()) {
+        jvm::HostState hostState;  // (what the mods may ask the client before a world is open: the language and the font)
+        hostState.textWidth = [&font](const std::string& text) { return font.width(text); };
+        hostState.translate = [&language](const std::string& key) { return language.get(key); };
+        modHost->setHost(hostState);
+        // The buttons the mods put on screens (ScreenEvents.AFTER_INIT): asked for every screen once it has built its own widgets; a press runs the mod's handler in the VM.
+        Screen::setPostInitHook([modHost](Screen& screen) {
+            const std::string name = minecraftScreenClass(typeid(screen).name());
+            for (const jvm::ModHost::HostWidget& w : modHost->screenOpened(name, screen.width(), screen.height())) {
+                jvm::ModInstance* mod = w.mod;
+                const int id = w.widget.id;
+                screen.addExternalButton(w.widget.label, Rect{w.widget.x, w.widget.y, w.widget.width, w.widget.height}, [mod, id] { mod->pressWidget(id); });
+            }
+        });
+    }
     if (options_.username && !options_.username->empty()) services.playerName = *options_.username;
     if (options_.uuid) services.playerUuid = *options_.uuid;
     services.accessToken = options_.accessToken;

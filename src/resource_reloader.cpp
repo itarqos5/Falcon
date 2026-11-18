@@ -107,7 +107,7 @@ std::shared_ptr<const ResourceSource> ResourceReloader::sourceFor(const std::str
 }
 
 void ResourceReloader::request(const std::vector<std::string>& packIds, const std::string& languageCode) {
-    ResourceManager::PackList packs;
+    ResourceManager::PackList packs = targets_.basePacks;
     std::vector<std::string> ids;
     for (const std::string& id : packIds) {
         if (auto source = sourceFor(id)) {

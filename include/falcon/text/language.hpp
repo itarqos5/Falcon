@@ -17,6 +17,9 @@ public:
     // language files are merged in too. Throws std::runtime_error if English, or the requested
     // language, has no usable file.
     static Language load(const ResourceManager& resources, std::string_view code);
+    // The namespaces mods bring (assets/<namespace>/lang/<code>.json): their translations are merged into every language that is loaded from now on, and into this one by mergeMods.
+    static void setModNamespaces(std::vector<std::string> namespaces);
+    void mergeMods(const ResourceManager& resources, std::string_view code);
 
     // Returns the translation, or the key itself when it is missing (like the game does).
     [[nodiscard]] std::string get(const std::string& key) const;

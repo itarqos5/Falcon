@@ -445,7 +445,8 @@ running next to it keeps the machine.
 - **The mod VM** (`src/jvm/`, [docs/JVM.md](docs/JVM.md)): a small Java virtual machine that interprets the bytecode of a Fabric or Quilt mod's own classes (about 450 million bytecodes a second), with
   the game's, the loader's and the libraries' classes answered by recording stand-ins, so that what the mod registers (items, blocks, keys, event handlers) is read instead of loaded. Nothing of the
   mod runs outside the VM and no Mixin is applied (they are read and listed). The Mods screen shows *What it does* for the selected mod; in a world the mods' client-tick handlers run every tick and
-  what they say to the player appears in the chat (`FALCON_NO_MODS=1` turns it off). Registered items, blocks and keys are captured but not yet added to the game. `falcon_jvm_run` runs a mod from
+  what they say to the player appears in the chat (`FALCON_NO_MODS=1` turns it off). The items, blocks and keys a mod registers are added to the game (with the textures, models and translations of its jar), its HUD
+  handlers draw on the screen, its buttons appear on the screens it names, and `KeyMapping` keys work. `falcon_jvm_run` runs a mod from
   the command line; `falcon_jvm_tests` runs one compiled by the JDK.
 - **More F3 chords** (`src/game/game_session_debug.cpp`, geometry and colours from the 26.3 classes `ChunkBorderRenderer` and `EntityHitboxDebugRenderer`): F3 + G chunk borders
   (the corners of the chunks round yours in faint red, your chunk's four edges with a line every two blocks in yellow and teal, blue rings every 16 blocks, and your section as a box

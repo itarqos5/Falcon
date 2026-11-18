@@ -652,9 +652,9 @@ bool GameSession::giveItem(const std::string& spec) {
         if (colon == std::string::npos) break;
         from = colon + 1;
     }
-    // "minecraft:stone:5" starts with a namespace: join it back.
-    if (parts.size() >= 2 && parts[0] == "minecraft") {
-        parts[1] = "minecraft:" + parts[1];
+    // "minecraft:stone:5" and "examplemod:ruby:5" start with a namespace: the second part is a name, not a count; join it back.
+    if (parts.size() >= 2 && (parts[0] == "minecraft" || parts[1].find_first_not_of("0123456789") != std::string::npos)) {
+        parts[1] = parts[0] + ":" + parts[1];
         parts.erase(parts.begin());
     }
     const int count = parts.size() > 1 ? std::max(1, std::atoi(parts[1].c_str())) : 1;

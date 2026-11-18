@@ -37,6 +37,7 @@ struct ReloadTargets {
     SoundSystem& sounds;
     bool cppEditionBadge = true;  // keep regenerating the "C++ EDITION" title badge
     std::string languageCode = "en_us";  // the language that is loaded now
+    ResourceManager::PackList basePacks;  // the mods' own assets: always on, under every pack the player selects
 };
 
 // Applies a new selection of resource packs to the running client without ever stalling it.

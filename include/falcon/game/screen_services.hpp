@@ -18,6 +18,10 @@ namespace falcon {
 class GameSession;
 
 // Everything the screens share. Screens hold a reference and pass it on to the screens they open.
+namespace jvm {
+class ModHost;
+}
+
 struct ScreenServices {
     const Language& language;
     const Font& font;
@@ -51,6 +55,8 @@ struct ScreenServices {
     std::function<void(const std::string& address)> joinServer;
     // The folder the Mods screen lists (the launcher's Mods tab puts the mods it installs in Falcon's own folder, mods/).
     std::filesystem::path modsDir;
+    // The mods of that folder, started in the VM (null when none could be): what they add to the game, their HUDs, buttons and keys.
+    std::shared_ptr<jvm::ModHost> mods;
 };
 
 // A button handler that opens screen T on top of the current one (T's constructor takes the

@@ -417,6 +417,7 @@ void GameSession::renderHud(GuiGraphics& g, int guiWidth, int guiHeight, bool ch
         if (info_.gameType != 3) drawHotbar(g, guiWidth, guiHeight);  // (a spectator has no hotbar: no inventory)
         if (survivalBars()) drawSurvivalBars(g, guiWidth, guiHeight);
         drawNameTags(g, guiWidth, guiHeight, camera());
+        renderModHud(g, guiWidth, guiHeight);
     }
     drawPlayerList(g, guiWidth);
 

@@ -226,6 +226,7 @@ void test_zip_archive();
 void test_mod_metadata();
 void test_mods_folder();
 void test_optimization_mods();
+void test_mod_content_in_the_game();
 void test_mod_icons();
 void test_mods_layout();
 void test_nbt();

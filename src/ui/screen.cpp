@@ -2,11 +2,21 @@
 
 namespace falcon {
 
+namespace {
+Screen::PostInitHook& postInitHook() {
+    static Screen::PostInitHook hook;
+    return hook;
+}
+}  // namespace
+
+void Screen::setPostInitHook(PostInitHook hook) { postInitHook() = std::move(hook); }
+
 void Screen::resize(int width, int height) {
     width_ = width;
     height_ = height;
     widgets_.clear();
     init();
+    if (postInitHook()) postInitHook()(*this);
 }
 
 void Screen::setFocus(Widget* widget) {

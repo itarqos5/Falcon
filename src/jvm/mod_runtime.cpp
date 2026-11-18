@@ -46,6 +46,16 @@ ModInstance::ModInstance(const std::filesystem::path& jarPath, const RunOptions&
         { finish(); return; }
     }
     auto shared = std::make_shared<const ZipArchive>(std::move(*jar));
+    jar_ = jarPath;
+    {  // the namespaces it has assets for
+        std::set<std::string> found;
+        for (const std::string& name : shared->entryNames()) {
+            if (name.rfind("assets/", 0) != 0) continue;
+            const std::size_t end = name.find('/', 7);
+            if (end != std::string::npos && end > 7) found.insert(name.substr(7, end - 7));
+        }
+        namespaces_.assign(found.begin(), found.end());
+    }
     json meta;
     std::vector<std::pair<std::string, std::string>> entries;  // (kind, class) in the order they run
     std::vector<std::string> mixinConfigs;
@@ -366,12 +376,54 @@ ModHost::ModHost(const std::filesystem::path& modsDir) {
         } catch (...) {  // (a jar the VM cannot make sense of is left out)
         }
     }
+    for (const auto& mod : mods_) {
+        HostState& h = mod->host();
+        h.consumeClick = [this](const std::string& name) {
+            const auto it = clicks_.find(name);
+            if (it == clicks_.end() || it->second <= 0) return false;
+            --it->second;
+            return true;
+        };
+        h.isDown = [this](const std::string& name) { return down_.count(name) != 0; };
+    }
+}
+
+void ModHost::keyEvent(const std::string& keyName, bool pressed) {
+    if (pressed) {
+        if (down_.insert(keyName).second) ++clicks_[keyName];  // (a held key repeats: only the first press counts)
+    } else {
+        down_.erase(keyName);
+    }
 }
 
 std::vector<ModHost::Said> ModHost::tick() {
     std::vector<Said> out;
     for (const auto& mod : mods_) {
         for (std::string& text : mod->tick()) out.push_back({mod->report().name.empty() ? mod->report().modId : mod->report().name, std::move(text)});
+    }
+    return out;
+}
+
+std::shared_ptr<const ResourceSource> ModInstance::resourcePack() const {
+    if (namespaces_.empty()) return nullptr;
+    auto zip = ZipArchive::open(jar_);
+    return zip ? makeZipPack(std::move(*zip)) : nullptr;
+}
+
+std::vector<std::shared_ptr<const ResourceSource>> ModHost::resourcePacks() const {
+    std::vector<std::shared_ptr<const ResourceSource>> out;
+    for (const auto& mod : mods_) {
+        if (auto pack = mod->resourcePack()) out.push_back(std::move(pack));
+    }
+    return out;
+}
+
+std::vector<std::string> ModHost::namespaces() const {
+    std::vector<std::string> out;
+    for (const auto& mod : mods_) {
+        for (const std::string& ns : mod->namespaces()) {
+            if (ns != "minecraft" && std::find(out.begin(), out.end(), ns) == out.end()) out.push_back(ns);
+        }
     }
     return out;
 }
@@ -388,6 +440,8 @@ std::vector<DrawCmd> ModHost::renderHud() {
 std::vector<ModHost::HostWidget> ModHost::screenOpened(const std::string& screenClass, int width, int height) {
     std::vector<HostWidget> out;
     for (const auto& mod : mods_) {
+        mod->host().guiWidth = width;
+        mod->host().guiHeight = height;
         for (ModInstance::ScreenWidget& w : mod->screenOpened(screenClass, width, height)) out.push_back({mod.get(), std::move(w)});
     }
     return out;
@@ -406,8 +460,6 @@ void ModHost::setHost(const HostState& state) {
         h.health = state.health;
         h.food = state.food;
         h.textWidth = state.textWidth;
-        h.consumeClick = state.consumeClick;
-        h.isDown = state.isDown;
         h.translate = state.translate;
     }
 }

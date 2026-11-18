@@ -1,5 +1,6 @@
 #pragma once
 
+#include "falcon/assets/resource_source.hpp"
 #include "falcon/jvm/class_file.hpp"
 #include "falcon/jvm/mod_content.hpp"
 #include "falcon/jvm/vm.hpp"
@@ -56,6 +57,9 @@ public:
     // What the client lends the mod: the player's place, the window's size, the keys. Set before each call that runs the mod's code.
     [[nodiscard]] HostState& host() { return vm_->host; }
     [[nodiscard]] bool running() const { return vm_ != nullptr; }
+    // The mod's assets (the jar as a resource pack: assets/<namespace>/...) and the namespaces it has some for.
+    [[nodiscard]] std::shared_ptr<const ResourceSource> resourcePack() const;
+    [[nodiscard]] const std::vector<std::string>& namespaces() const { return namespaces_; }
 
     // The mod's HUD (HudRenderCallback, HudElementRegistry): its handlers run once, and what they drew is returned for the client to draw. A handler that fails or overruns is switched off.
     [[nodiscard]] std::vector<DrawCmd> renderHud();
@@ -76,6 +80,8 @@ private:
     void collect();
     void switchOff(std::size_t handler, const std::string& why);
 
+    std::filesystem::path jar_;
+    std::vector<std::string> namespaces_;
     ModReport report_;
     ModContent content_;
     std::unique_ptr<Vm> vm_;
@@ -106,16 +112,23 @@ public:
     [[nodiscard]] const std::vector<std::unique_ptr<ModInstance>>& mods() const { return mods_; }
     // The mods' HUDs, drawn in the order the mods were started.
     [[nodiscard]] std::vector<DrawCmd> renderHud();
+    // What every mod ships to be looked up as resources, lowest priority first, and the namespaces they bring (for their language files).
+    [[nodiscard]] std::vector<std::shared_ptr<const ResourceSource>> resourcePacks() const;
+    [[nodiscard]] std::vector<std::string> namespaces() const;
     struct HostWidget {
         ModInstance* mod = nullptr;
         ModInstance::ScreenWidget widget;
     };
     [[nodiscard]] std::vector<HostWidget> screenOpened(const std::string& screenClass, int width, int height);
-    // Lends every mod the same view of the client (position, window, keys), before they run.
+    // Lends every mod the same view of the client (position, window, text width, language), before they run.
     void setHost(const HostState& state);
+    // A key a mod asked for (by its name, "key.examplemod.open") was pressed or let go: the mods' KeyMapping.consumeClick and isDown answer from this.
+    void keyEvent(const std::string& keyName, bool pressed);
 
 private:
     std::vector<std::unique_ptr<ModInstance>> mods_;
+    std::map<std::string, int> clicks_;
+    std::set<std::string> down_;
 };
 
 // The report in short lines for a screen or a terminal: what the mod adds, hooks, wants to patch, wrote, and where it failed.

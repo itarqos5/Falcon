@@ -35,14 +35,36 @@ remembers where it came from (`BuiltInRegistries.ITEM`, `ClientTickEvents.END_CL
 
 ## What the client does with it
 
+The client starts the mods (`ModHost`) beside its own start-up, before the first world, so that what they add is in the game's tables when a world opens. `FALCON_NO_MODS=1` plays without them.
+
+* **Items** (`ModContent::items`): `Item.Properties` is read (stacksTo, durability, fireResistant, rarity, food) and the item is appended to the item registry (`ItemRegistry::extended`; protocol ids go on
+  after the game's). Its model, picture and name come from the mod's own jar, which is mounted as a resource pack under the player's (`ReloadTargets::basePacks`): `assets/<ns>/items/<name>.json`,
+  `models/`, `textures/`, `lang/en_us.json` (`Language::setModNamespaces`). `ItemGroupEvents.modifyEntriesEvent(tab)` puts it in a creative tab (Ingredients when it says nothing; a block's item in
+  Building Blocks); it is in the search tab by its translated name. `--give examplemod:ruby:5` works.
+* **Blocks** (`ModContent::blocks`): `BlockBehaviour.Properties` is read (strength, destroyTime, explosionResistance, lightLevel(state -> n), requiresCorrectToolForDrops, noOcclusion, instabreak, sound) and a
+  block of one state, a full cube, is added after the game's states (`BlockRegistry::extended`; the collision and outline tables get a cube for it). It is drawn from the mod's own
+  `blockstates/` and `models/`. It drops its item (a tool when it needs one). What its Java methods would do (onUse, a block entity, a custom shape, several states) is not run.
+* **Keys** (`KeyMapping` through `KeyBindingHelper.registerKeyBinding`): added to the Key Binds screen under the mod's category and saved in the options file like the game's.
+  `KeyMapping.consumeClick()` and `isDown()` answer from the keys the player really presses.
+* **HUDs** (`HudRenderCallback.EVENT`, `HudElementRegistry.addLast/addFirst/...`): the handler runs once a frame with a `GuiGraphics` stand-in; `fill`, `fillGradient`, `hLine`, `vLine`,
+  `renderOutline`, `drawString`, `drawCenteredString`, `blit`, `blitSprite`, `renderItem`, scissors and the pose's `translate`/`scale` become commands that the client draws with its own
+  graphics. The player's position and rotation, the window's size, `Font.width` and the language are answered from the client. A handler that throws or runs 200,000 instructions in one frame is
+  switched off.
+* **Buttons** (`ScreenEvents.AFTER_INIT`, `Screens.getButtons(screen).add(Button.builder(text, onPress).bounds(x, y, w, h).build())`): asked of every screen after it builds its own widgets
+  (`Screen::setPostInitHook`); `screen instanceof TitleScreen` is true only for the real class (Falcon's screens carry the game's names). Pressing one runs the mod's handler.
+* **Ticks** (`ClientTickEvents`): every game tick; what a handler says to the player (`displayClientMessage`) goes into the chat as `[Mod name] text`.
 * **The Mods screen** runs a selected mod's start-up and shows *What it does*: what it adds, the events and keys it registers, the mixins it carries and what they patch (not applied), what it
   logged, and where it stopped.
-* **In a world**, `GameSession::tickMods` starts the mods when the world is ready and runs the handlers they registered for the client tick every game tick; what a handler says to the player
-  (`displayClientMessage`) goes into the chat as `[Mod name] text`. `FALCON_NO_MODS=1` plays without them.
-* **Not carried out yet:** the items, blocks and keys a mod registers are *captured* (`ModReport::registrations`, `keys`) but not yet added to the game's registries; every further event (screens,
-  commands, the world's ticks) needs its own meaning in `shims.cpp`.
+
+A handler that runs every frame allocates, so the VM has a collector (`Vm::collectGarbage`, between calls: the roots are the classes' statics, the stand-ins' fields, what the capture holds and what
+was pinned; a value is looked at as if it could be a pointer).
 
 ## Limits
+
+* **A mod that draws its own pictures** (Xaero's World Map and Minimap, JourneyMap: they upload map textures and draw with their own GL calls and Mixins into the game's renderer) does **not** work:
+  `GuiGraphics` calls are replayed, GL is not. Their HUD is not what is registered through the events above. The same goes for a mod whose point is a Mixin.
+* **Behaviour in Java is not run for blocks and items**: `use`, `onUse`, `appendHoverText`, block entities, custom models in code. Properties are read; methods are not called by the game.
+* Text drawn by a HUD is not scaled (the pose's scale moves it but does not resize it).
 
 * **Forge and NeoForge** mods are not run (their start-up is annotations and an event bus); Fabric and Quilt entry points are (`main`, `client`; method-reference entry points and Kotlin adapters are not).
 * **No reflection, files, network, threads or `java.nio`**: those calls are shims. That is also what keeps a mod inside the VM: the only way out of it is a native that was written.
@@ -54,4 +76,6 @@ remembers where it came from (`BuiltInRegistries.ITEM`, `ClientTickEvents.END_CL
 
 `falcon_jvm_tests` runs a mod the JDK compiled (`tests/jvm_mod/`, built by `build.ps1` into `tests/data/jvm/vmtest.jar`; the real game and loader classes are only stubbed to compile against). It
 checks 23 computed results against what Java gives, an item with its properties, an event handler, the mixin, a chat line on the third tick, the speed, and that a loop and a recursion that never
-end are stopped. `falcon_jvm_run <mod.jar> --verbose` runs any Fabric or Quilt mod and prints what it did (Mod Menu runs in about 6 ms).
+end are stopped. A second mod (`vmcontent.jar`: a block with its item, a food, a tool, a key, a HUD, a title screen button, with textures, models and a language file) is read as facts and its
+HUD, key and button are run; `test_mod_content_in_the_game` (the client tests) checks the registries, the cube shapes, the creative tabs and the key table it feeds. Rebuild the jars with
+`tests/jvm_mod/build.ps1`. `falcon_jvm_run <mod.jar> --verbose` runs any Fabric or Quilt mod and prints what it did (Mod Menu runs in about 6 ms).

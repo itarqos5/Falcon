@@ -573,7 +573,8 @@ const ResolvedItemModel& ItemIcons::resolved(const std::string& itemModel, const
     const auto found = resolved_.find(cacheKey);
     if (found != resolved_.end()) return found->second;
     ResolvedItemModel result;
-    const auto text = models_.resources().readText(ResourceLocation("minecraft", "items/" + itemModel + ".json"));
+    const std::size_t modelColon = itemModel.find(':');  // (a mod's item: "examplemod:ruby" is assets/examplemod/items/ruby.json)
+    const auto text = models_.resources().readText(modelColon == std::string::npos ? ResourceLocation("minecraft", "items/" + itemModel + ".json") : ResourceLocation(itemModel.substr(0, modelColon), "items/" + itemModel.substr(modelColon + 1) + ".json"));
     if (!text) {
         result.missing = true;
     } else {
@@ -613,7 +614,9 @@ ItemIcons::Rendered ItemIcons::renderPart(const IconPart& part, int size, int st
             auto it = textures_.find(name);
             if (it == textures_.end()) {
                 Image image;
-                if (const auto bytes = models_.resources().readBytes(ResourceLocation("minecraft", "textures/" + name + ".png"))) {
+                const std::size_t layerColon = name.find(':');  // ("examplemod:item/ruby")
+                const ResourceLocation layerLocation = layerColon == std::string::npos ? ResourceLocation("minecraft", "textures/" + name + ".png") : ResourceLocation(name.substr(0, layerColon), "textures/" + name.substr(layerColon + 1) + ".png");
+                if (const auto bytes = models_.resources().readBytes(layerLocation)) {
                     if (auto decoded = decodePng(*bytes); decoded && !decoded->empty()) image = firstFrame(*decoded);
                 }
                 if (image.empty()) image = models_.layerImage(models_.layerFor("missingno"));  // (the game's magenta and black squares)
