@@ -216,14 +216,20 @@ void main() {
 constexpr char kLineVertex[] = R"(// vk: lines.vert
 #version 330 core
 layout(location = 0) in vec3 aPos;
+layout(location = 1) in vec4 aColor;
 uniform mat4 uViewProj;
-void main() { gl_Position = uViewProj * vec4(aPos, 1.0); }
+out vec4 vColor;
+void main() {
+    gl_Position = uViewProj * vec4(aPos, 1.0);
+    vColor = aColor;
+}
 )";
 
 constexpr char kLineFragment[] = R"(// vk: lines.frag
 #version 330 core
+in vec4 vColor;
 out vec4 frag;
-void main() { frag = vec4(0.0, 0.0, 0.0, 0.6); }
+void main() { frag = vColor; }
 )";
 
 // The cracks of a block being dug: the picture alone, multiplied into what is already there by the blend (see drawBreakOverlay).
@@ -367,7 +373,9 @@ WorldRenderer::WorldRenderer(BlockModels& models, std::int64_t seed, TerrainStyl
     gl::BindVertexArray(lineVao_);
     gl::BindBuffer(gl::ARRAY_BUFFER, lineVbo_);
     gl::EnableVertexAttribArray(0);
-    gl::VertexAttribPointer(0, 3, gl::FLOAT, 0, 3 * sizeof(float), nullptr);
+    gl::VertexAttribPointer(0, 3, gl::FLOAT, 0, 7 * sizeof(float), nullptr);  // (a position, then the colour: the outline is black, the debug lines are not)
+    gl::EnableVertexAttribArray(1);
+    gl::VertexAttribPointer(1, 4, gl::FLOAT, 0, 7 * sizeof(float), reinterpret_cast<const void*>(3 * sizeof(float)));
     gl::BindVertexArray(0);
 
     gl::GenVertexArrays(1, &crackVao_);
@@ -1126,6 +1134,7 @@ bool WorldRenderer::chunkMeshed(ChunkPos pos) const {
     for (int sy = 0; sy < kSectionCount; ++sy) {
         if (!chunk->sections[static_cast<std::size_t>(sy)]) continue;  // air
         const SectionKey key{pos.x, pos.z, sy};
+        if (sections_.contains(key)) continue;  // (a section that is being made again, for a neighbour or for the leaf detail, is still drawn from its old mesh: the LODs must not come back under it)
         if (!meshRequested_.contains(key) || meshPending_.contains(key)) return false;
     }
     return true;
