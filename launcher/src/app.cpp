@@ -364,7 +364,7 @@ std::string App::handleMessage(const std::string& message) {
         std::string text;
         if (options_.mock || !options_.mockState.empty()) {
             text =
-                "2026-11-14 18:02:19.150 INFO  [client] ---- Falcon 1.3.0 (Minecraft Java 26.3) ----\n"
+                "2026-11-14 18:02:19.150 INFO  [client] ---- Falcon 1.3.1 (Minecraft Java 26.3) ----\n"
                 "2026-11-14 18:02:19.188 INFO  [gpu] vendor AMD; renderer Radeon RX 580; version 4.5.0 Core Profile Context\n"
                 "2026-11-14 18:02:19.241 INFO  [options] render distance 8, simulation 6, LODs on (64 chunks, detail 2)\n"
                 "2026-11-14 18:02:21.598 INFO  [world] playing world 'New World' (hills, seed 12345)\n"

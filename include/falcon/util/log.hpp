@@ -20,7 +20,7 @@ namespace falcon::log {
 enum class Level { Debug, Info, Warn, Error };
 
 struct Settings {
-    std::string version;           // "Falcon 1.3.0 (Minecraft 26.3)"
+    std::string version;           // "Falcon 1.3.1 (Minecraft 26.3)"
     std::string commandLine;       // what the program was started with (for the header)
     bool echo = true;              // also to the console (stdout), as the game always did: the launcher and the test scripts read it
     int keep = 15;                 // client logs and crash reports kept
