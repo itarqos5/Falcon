@@ -22,6 +22,20 @@ extern char** environ;
 
 namespace falcon {
 
+namespace {
+
+bool isWebAddress(const std::string& url) {
+    const bool scheme = url.rfind("https://", 0) == 0 || url.rfind("http://", 0) == 0;
+    if (!scheme || url.size() > 2000) return false;
+    for (const char c : url) {
+        const auto u = static_cast<unsigned char>(c);
+        if (u <= 0x20 || u == 0x7F || c == '"' || c == '<' || c == '>' || c == '\\' || c == '^' || c == '|') return false;
+    }
+    return url.size() > url.find("://") + 3;
+}
+
+}  // namespace
+
 #ifdef _WIN32
 namespace {
 
@@ -43,6 +57,11 @@ void showErrorDialog(const std::string& title, const std::string& message) {
 
 void openFolderInFileManager(const std::string& path) {
     ShellExecuteW(nullptr, L"open", widen(path).c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+}
+
+bool openWebAddress(const std::string& url) {
+    if (!isWebAddress(url)) return false;
+    return reinterpret_cast<INT_PTR>(ShellExecuteW(nullptr, L"open", widen(url).c_str(), nullptr, nullptr, SW_SHOWNORMAL)) > 32;
 }
 
 void attachParentConsole() {
@@ -90,6 +109,8 @@ void showErrorDialog(const std::string& title, const std::string& message) {
 }
 
 void openFolderInFileManager(const std::string& path) { runTool({"xdg-open", path}, false); }
+
+bool openWebAddress(const std::string& url) { return isWebAddress(url) && runTool({"xdg-open", url}, false); }
 
 void attachParentConsole() {}  // (a terminal is already the program's own when it was started from one)
 #endif

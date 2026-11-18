@@ -4,6 +4,7 @@
 #include "falcon/game/mods_screen.hpp"
 #include "falcon/mods/mod_info.hpp"
 #include "falcon/mods/optimization_mods.hpp"
+#include "falcon/platform/dialog.hpp"
 
 namespace fs = std::filesystem;
 
@@ -98,7 +99,7 @@ void test_mods_folder() {
     fs::remove_all(folder, ec);
     // A Fabric jar with a picture and a bundled library, a Forge jar, a jar with no mod information, a file that is no jar at all, and a text file.
     writeBytes(folder / "zeta.jar", makeZip({{"fabric.mod.json", R"({"schemaVersion":1,"id":"zeta","version":"1","name":"Zeta","icon":"icon.png"})", false},
-                                             {"icon.png", "not really a png", false},
+                                             {"icon.png", std::string("\x89PNG\r\n\x1a\nIHDR....", 16), false},  // (a PNG by its first bytes)
                                              {"META-INF/jars/lib.jar", "x", false}}));
     writeBytes(folder / "Alpha.JAR", makeZip({{"META-INF/mods.toml", "[[mods]]\nmodId=\"alpha\"\nversion=\"${file.jarVersion}\"\n", false}, {"META-INF/MANIFEST.MF", "Manifest-Version: 1.0\r\nImplementation-Version: 9.9\r\n", false}}));
     writeBytes(folder / "library.jar", makeZip({{"some/Class.class", "x", false}}));
@@ -114,7 +115,7 @@ void test_mods_folder() {
     CHECK(falcon::readModsFolder(folder / "missing").empty());
     CHECK(!falcon::readModJar(folder / "library.jar").has_value());
 
-    // The facts the screen shows under the description: what is empty is left out.
+    // The details the screen shows under "Details:": what is empty is left out (the authors and the licence have places of their own).
     falcon::ModInfo info;
     info.id = "x";
     info.loader = "Fabric";
@@ -122,15 +123,69 @@ void test_mods_folder() {
     info.file = "x.jar";
     info.size = 1536;
     info.bundled = 2;
-    bool hasAuthors = false, hasLicense = false, hasFile = false, hasBundled = false;
-    for (const auto& [label, value] : falcon::ModsScreen::facts(info)) {
-        hasAuthors = hasAuthors || (label == "Authors" && value == "A, B");
-        hasLicense = hasLicense || label == "License";
+    bool hasId = false, hasLoader = false, hasAuthors = false, hasFile = false, hasBundled = false, hasMinecraft = false;
+    for (const auto& [label, value] : falcon::ModsScreen::details(info)) {
+        hasId = hasId || (label == "Mod ID" && value == "x");
+        hasLoader = hasLoader || (label == "Loader" && value == "Fabric");
+        hasAuthors = hasAuthors || label == "Authors";
+        hasMinecraft = hasMinecraft || label == "Minecraft";
         hasFile = hasFile || (label == "File" && value == "x.jar (1.5 KB)");
         hasBundled = hasBundled || (label == "Bundled" && value == "2 libraries");
     }
-    CHECK(hasAuthors && !hasLicense && hasFile && hasBundled);
+    CHECK(hasId && hasLoader && !hasAuthors && !hasMinecraft && hasFile && hasBundled);
+    // The search: name, id, description, authors and loader, whatever the case of the text (it comes in lower case).
+    info.name = "Atlas Maps";
+    info.description = "A map of every place you have been.";
+    CHECK(falcon::ModsScreen::matches(info, "") && falcon::ModsScreen::matches(info, "atlas") && falcon::ModsScreen::matches(info, "every place") && falcon::ModsScreen::matches(info, "fabric") &&
+          falcon::ModsScreen::matches(info, "b") && !falcon::ModsScreen::matches(info, "sodium"));
     fs::remove_all(folder, ec);
+}
+
+// The icon of a mod: the declared one when it is in the jar, else where mods keep theirs (a mod that names a file it does not ship still has one).
+void test_mod_icons() {
+    const std::string png("\x89PNG\r\n\x1a\nIHDR....", 16);  // (the first bytes decide: a PNG)
+    const fs::path folder = fs::temp_directory_path() / "falcon_mod_icons_test";
+    std::error_code ec;
+    fs::remove_all(folder, ec);
+    const std::string toml = "[[mods]]\nmodId=\"xaeromap\"\nversion=\"1\"\nlogoFile=\"xaeromap.png\"\n";  // (says a file that is not there, as Xaero's World Map does)
+    writeBytes(folder / "undeclared.jar", makeZip({{"META-INF/mods.toml", toml, false}, {"assets/xaeromap/icon.png", png, false}, {"assets/xaeromap/gui/gui.png", "other picture", false}}));
+    writeBytes(folder / "declared.jar", makeZip({{"fabric.mod.json", R"({"schemaVersion":1,"id":"declared","version":"1","icon":"pics/logo.png"})", false}, {"pics/logo.png", png, false}, {"assets/declared/icon.png", "x", false}}));
+    writeBytes(folder / "moved.jar", makeZip({{"fabric.mod.json", R"({"schemaVersion":1,"id":"moved","version":"1","icon":"logo.png"})", false}, {"assets/moved/Logo.PNG", png, false}}));  // (found by its name, whatever the case)
+    writeBytes(folder / "notapng.jar", makeZip({{"fabric.mod.json", R"({"schemaVersion":1,"id":"notapng","version":"1","icon":"icon.png"})", false}, {"icon.png", "this is text", false}, {"assets/notapng/icon.png", png, false}}));
+    writeBytes(folder / "none.jar", makeZip({{"fabric.mod.json", R"({"schemaVersion":1,"id":"none","version":"1"})", false}, {"assets/none/textures/block.png", png, false}}));
+    writeBytes(folder / "root.jar", makeZip({{"fabric.mod.json", R"({"schemaVersion":1,"id":"root","version":"1"})", false}, {"icon.png", png, false}}));
+    const auto iconOf = [&](const char* name) {
+        const auto mod = falcon::readModJar(folder / name);
+        return mod ? mod->icon : std::vector<unsigned char>{};
+    };
+    CHECK(iconOf("undeclared.jar").size() == png.size());                                   // the file it names is missing: assets/<id>/icon.png
+    CHECK(falcon::readModJar(folder / "undeclared.jar")->iconPath == "assets/xaeromap/icon.png");
+    CHECK(falcon::readModJar(folder / "declared.jar")->iconPath == "pics/logo.png");        // the declared one wins over the usual place
+    CHECK(iconOf("moved.jar").size() == png.size());                                        // "logo.png" is assets/moved/Logo.PNG
+    CHECK(falcon::readModJar(folder / "notapng.jar")->iconPath == "assets/notapng/icon.png");  // a declared file that is no picture is passed over
+    CHECK(iconOf("none.jar").empty() && falcon::readModJar(folder / "none.jar")->iconPath.empty());  // (an ordinary texture is not an icon)
+    CHECK(iconOf("root.jar").size() == png.size());                                         // icon.png at the top of the jar
+    fs::remove_all(folder, ec);
+
+    // Opening a web address: only http and https, with no spaces, quotes or control characters (what is refused is never started).
+    for (const char* bad : {"", "javascript:alert(1)", "file:///C:/Windows/System32/calc.exe", "ftp://example.org/x", "https://", "https://exa mple.org", "https://example.org/\"x", "https://example.org/\nx", "cmd /c calc", "//example.org"}) {
+        CHECK(!falcon::openWebAddress(bad));
+    }
+}
+
+void test_mods_layout() {
+    // 854 x 480 at GUI scale 2: 427 x 240 units, laid out as Mod Menu's ModsScreen does.
+    const falcon::ModsLayout l = falcon::computeModsLayout(427, 240);
+    CHECK(l.paneWidth == 205 && l.rightPaneX == 222 && l.titleX == 102 && l.titleY == 8);
+    CHECK((l.search == falcon::Rect{8, 22, 189, 20}));
+    CHECK((l.list == falcon::Rect{0, 48, 205, 156}));            // down to 36 above the bottom
+    CHECK((l.descriptions == falcon::Rect{222, 108, 205, 96}));  // the same bottom
+    CHECK(l.headerX == 222 && l.headerY == 48);
+    CHECK((l.website == falcon::Rect{223, 84, 100, 20}) && (l.issues == falcon::Rect{325, 84, 100, 20}));
+    CHECK((l.folder == falcon::Rect{59, 212, 150, 20}) && (l.done == falcon::Rect{217, 212, 150, 20}));
+    // A wide window: the search box and the buttons stop at 200.
+    const falcon::ModsLayout wide = falcon::computeModsLayout(960, 540);
+    CHECK(wide.paneWidth == 472 && wide.search.width == 200 && wide.website.width == 200 && wide.list.height == 540 - 36 - 48);
 }
 
 void test_optimization_mods() {

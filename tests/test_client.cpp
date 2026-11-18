@@ -30,6 +30,8 @@ int main() {
     test_mod_metadata();
     test_mods_folder();
     test_optimization_mods();
+    test_mod_icons();
+    test_mods_layout();
     test_nbt();
     test_options_file();
     test_game_options_round_trip();
