@@ -286,6 +286,7 @@ private:
     void tickBody();
     void loadSave();
     void tickHealth();
+    void tickAir();  // drowning (LivingEntity.baseTick): the air under water, and the damage when it is gone
     void causeExhaustion(float amount);  // FoodData.addExhaustion (survival, singleplayer): the food bar goes down as the player does things
     void pickUpItems();
     void tickStatistics(bool jumped);     // the time, the distances and, every second, the advancements (game_session_player.cpp)
@@ -462,6 +463,7 @@ private:
     int hurtTime_ = 0;           // ticks of the camera's tilt after a hit
     float lastHurt_ = 0.0f;      // the damage of the last hit
     float hurtDirection_ = 0.0f; // which way the view tilts, degrees (0 or 180)
+    int airSupply_ = 300;      // LivingEntity.getAirSupply: 15 seconds of breath (the bubbles above the food bar), refilled four times as fast as it runs out
     int regenTimer_ = 0;       // FoodData.tickTimer: the slow and the fast healing and the starving count in it
     float exhaustion_ = 0.0f;  // FoodData.exhaustionLevel: at more than 4 the saturation (then the food) goes down by one
     bool dead_ = false;

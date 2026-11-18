@@ -91,6 +91,7 @@ void GameSession::tickPlayer(double seconds, bool steering) {
             }
         }
         tickHealth();
+        tickAir();
         tickBurning();
         if (ready_ && !remote_) itemEntities_.tick(renderer_.level(), [this](int cx, int cz) { return renderer_.isChunkRendered(cx, cz); });  // (on a server the items are the server's: pumpRemote puts them there)
         if (ready_ && !remote_) tickTime();
@@ -429,6 +430,7 @@ void GameSession::respawn() {
     vitals_.food = 20;
     vitals_.saturation = 5.0f;
     exhaustion_ = 0.0f;
+    airSupply_ = 300;
     invulnerableTime_ = hurtTime_ = regenTimer_ = 0;
     lastHurt_ = 0.0f;
     lastHealthShown_ = displayHealth_ = static_cast<int>(vitals_.maxHealth);
@@ -438,6 +440,21 @@ void GameSession::respawn() {
     player_.lastFallDamage = 0;
     stepClock_ = StepClock();
     if (dimension_ != 0) travelTo(0, spawn_[0], spawn_[1], spawn_[2], false);  // (home: the Overworld)
+}
+
+// LivingEntity.baseTick: with the eyes under water a player who can drown loses a point of air a tick; at -20 the air is reset to 0 and the player takes 2 damage (through armor), and again
+// every second after that. Out of the water the air comes back, 4 a tick, up to 300.
+void GameSession::tickAir() {
+    constexpr int kMaxAir = 300;
+    if (remote_ || dead_) return;
+    if (player_.isUnderWater() && survivalBars()) {
+        if (--airSupply_ <= -20) {
+            airSupply_ = 0;
+            hurt(2.0f, false, true);  // (drowning ignores armor)
+        }
+    } else if (airSupply_ < kMaxAir) {
+        airSupply_ = std::min(airSupply_ + 4, kMaxAir);
+    }
 }
 
 void GameSession::causeExhaustion(float amount) {

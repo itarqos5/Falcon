@@ -587,6 +587,16 @@ void GameSession::drawSurvivalBars(GuiGraphics& g, int guiWidth, int guiHeight) 
         const BarFill fill = foodFill(icon, vitals_.food);
         if (fill != BarFill::Empty) g.blitSprite(fill == BarFill::Full ? "hud/food_full" : "hud/food_half", x, y, 9, 9);
     }
+    // The air bubbles above the food bar (Hud.extractAirBubbles): shown under water and while the breath is coming back; a bubble that has just gone pops.
+    // (FALCON_TEST_AIR=<0..300> shows that much breath whatever the player is doing: a pinned camera, --cam, has no ticks to use any up.)
+    static const char* const testAir = std::getenv("FALCON_TEST_AIR");
+    const int shownAir = testAir != nullptr ? std::clamp(std::atoi(testAir), -20, 300) : airSupply_;
+    if (const int maxAir = 300; player_.isUnderWater() || shownAir < maxAir) {
+        const int air = std::max(shownAir, 0);
+        const int bubbles = std::max(static_cast<int>(std::ceil((air - 2) * 10.0 / maxAir)), 0);
+        const int popping = std::max(static_cast<int>(std::ceil(air * 10.0 / maxAir)) - bubbles, 0);
+        for (int i = 0; i < bubbles + popping; ++i) g.blitSprite(i < bubbles ? "hud/air" : "hud/air_bursting", l.foodX(i), l.rowY - 10, 9, 9);
+    }
     // The experience strip: the sprite is 182 wide and only the filled part of it is drawn.
     g.blitSprite("hud/experience_bar_background", l.xpLeft, l.xpTop, 182, 5);
     if (const int filled = experienceFillWidth(vitals_.progress); filled > 0) {
