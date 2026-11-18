@@ -7,6 +7,7 @@
 #include <GLFW/glfw3.h>
 
 #include <algorithm>
+#include <deque>
 #include <map>
 #include <numeric>
 
@@ -200,22 +201,46 @@ const char* keyCategoryLabelKey(KeyCategory category) {
         case KeyCategory::Creative: return "key.category.minecraft.creative";
         case KeyCategory::Spectator: return "key.category.minecraft.spectator";
         case KeyCategory::Debug: return "key.category.minecraft.debug";
+        case KeyCategory::Mod: return "";
     }
     return "";
 }
 
+namespace {
+std::deque<std::string> g_modNames;   // (the table keeps pointers into them)
+std::vector<KeyMappingInfo> g_modMappings;
+}  // namespace
+
+void registerModKeyMappings(const std::vector<ModKeyMapping>& mappings) {
+    g_modNames.clear();
+    g_modMappings.clear();
+    for (const ModKeyMapping& m : mappings) {
+        if (keyMappingIndex(m.name) < kKeyMappingCount) continue;  // (a mod cannot take over one of the game's)
+        g_modNames.push_back(m.name);
+        const char* name = g_modNames.back().c_str();
+        g_modNames.push_back(m.category);
+        g_modMappings.push_back({name, KeyCategory::Mod, m.defaultKey, 0, g_modNames.back().c_str()});
+    }
+}
+
+std::size_t totalKeyMappingCount() { return kKeyMappingCount + g_modMappings.size(); }
+
+const KeyMappingInfo& keyMappingAt(std::size_t index) { return index < kKeyMappingCount ? kMappings[index] : g_modMappings[index - kKeyMappingCount]; }
+
 std::vector<std::size_t> sortedKeyMappingOrder(const std::function<std::string(const std::string&)>& translate) {
     std::vector<std::u32string> names;
-    for (const KeyMappingInfo& info : kMappings) {
-        const auto cps = decodeUtf8(translate(info.name));
+    const std::size_t total = totalKeyMappingCount();
+    for (std::size_t i = 0; i < total; ++i) {
+        const auto cps = decodeUtf8(translate(keyMappingAt(i).name));
         names.emplace_back(cps.begin(), cps.end());
     }
-    std::vector<std::size_t> order(kKeyMappingCount);
+    std::vector<std::size_t> order(total);
     std::iota(order.begin(), order.end(), std::size_t{0});
     std::stable_sort(order.begin(), order.end(), [&](std::size_t a, std::size_t b) {
-        const KeyMappingInfo& x = kMappings[a];
-        const KeyMappingInfo& y = kMappings[b];
+        const KeyMappingInfo& x = keyMappingAt(a);
+        const KeyMappingInfo& y = keyMappingAt(b);
         if (x.category != y.category) return static_cast<int>(x.category) < static_cast<int>(y.category);
+        if (x.modCategory != nullptr && y.modCategory != nullptr && std::string(x.modCategory) != std::string(y.modCategory)) return std::string(x.modCategory) < std::string(y.modCategory);
         if (x.order != y.order) return x.order < y.order;
         return names[a] < names[b];
     });
@@ -224,20 +249,24 @@ std::vector<std::size_t> sortedKeyMappingOrder(const std::function<std::string(c
 
 // ---- KeyBindings -------------------------------------------------------------------------
 
-KeyBindings::KeyBindings() {
-    for (std::size_t i = 0; i < kKeyMappingCount; ++i) keys_[i] = kMappings[i].defaultKey;
+KeyBindings::KeyBindings() { sync(); }
+
+void KeyBindings::sync() {
+    const std::size_t before = keys_.size();
+    keys_.resize(totalKeyMappingCount());
+    for (std::size_t i = before; i < keys_.size(); ++i) keys_[i] = keyMappingAt(i).defaultKey;
 }
 
-bool KeyBindings::isDefault(std::size_t index) const { return keys_[index] == kMappings[index].defaultKey; }
+bool KeyBindings::isDefault(std::size_t index) const { return keys_[index] == keyMappingAt(index).defaultKey; }
 
-void KeyBindings::reset(std::size_t index) { keys_[index] = kMappings[index].defaultKey; }
+void KeyBindings::reset(std::size_t index) { keys_[index] = keyMappingAt(index).defaultKey; }
 
 void KeyBindings::resetAll() {
-    for (std::size_t i = 0; i < kKeyMappingCount; ++i) reset(i);
+    for (std::size_t i = 0; i < keys_.size(); ++i) reset(i);
 }
 
 bool KeyBindings::anyChanged() const {
-    for (std::size_t i = 0; i < kKeyMappingCount; ++i) {
+    for (std::size_t i = 0; i < keys_.size(); ++i) {
         if (!isDefault(i)) return true;
     }
     return false;
@@ -246,19 +275,20 @@ bool KeyBindings::anyChanged() const {
 std::vector<std::size_t> KeyBindings::conflicts(std::size_t index) const {
     std::vector<std::size_t> found;
     if (keys_[index].isUnbound()) return found;
-    for (std::size_t other = 0; other < kKeyMappingCount; ++other) {
+    for (std::size_t other = 0; other < keys_.size(); ++other) {
         if (other != index && keys_[other] == keys_[index] && (!isDefault(other) || !isDefault(index))) found.push_back(other);
     }
     return found;
 }
 
 void KeyBindings::save(OptionsFile& file) const {
-    for (std::size_t i = 0; i < kKeyMappingCount; ++i) file.set(std::string("key_") + kMappings[i].name, keys_[i].optionName());
+    for (std::size_t i = 0; i < keys_.size(); ++i) file.set(std::string("key_") + keyMappingAt(i).name, keys_[i].optionName());
 }
 
 void KeyBindings::load(const OptionsFile& file) {
-    for (std::size_t i = 0; i < kKeyMappingCount; ++i) {
-        const std::string name = std::string("key_") + kMappings[i].name;
+    sync();
+    for (std::size_t i = 0; i < keys_.size(); ++i) {
+        const std::string name = std::string("key_") + keyMappingAt(i).name;
         if (!file.contains(name)) continue;
         if (const auto key = KeyId::fromOptionName(file.getString(name))) keys_[i] = *key;
     }

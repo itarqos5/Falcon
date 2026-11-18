@@ -83,7 +83,7 @@ public:
         : Entry(kKeyBindsRowHeight),
           index_(index),
           ctx_(std::move(context)),
-          name_(ctx_->services.language.get(keyMappings()[index].name)),
+          name_(ctx_->services.language.get(keyMappingAt(index).name)),
           reset_(ctx_->services.language.get("controls.reset"), 0, 0, kResetButtonWidth, kKeyBindsRowHeight) {}
 
     void render(GuiGraphics& g, const Rect& r, int mouseX, int mouseY, const ScrollList::RowState&) override {
@@ -103,7 +103,7 @@ public:
         change_.tooltip.clear();
         if (conflict) {  // "This key is also used for:" and the other actions, comma-separated
             std::string names;
-            for (const std::size_t other : conflicts) names += (names.empty() ? "" : ",") + lang.get(keyMappings()[other].name);
+            for (const std::size_t other : conflicts) names += (names.empty() ? "" : ",") + lang.get(keyMappingAt(other).name);
             change_.tooltip = formatLanguageString(lang.get("controls.keybinds.duplicateKeybinds"), {names});
         }
         change_.render(g, mouseX, mouseY);
@@ -183,11 +183,15 @@ void KeyBindsScreen::init() {
     // Grouped by category, each group sorted by the names in the current language.
     const auto order = sortedKeyMappingOrder([this](const std::string& key) { return text(key); });
     std::optional<KeyCategory> current;
+    std::string currentMod;  // (a mod's keys are listed under the mod's own heading)
     for (const std::size_t index : order) {
-        const KeyCategory category = keyMappings()[index].category;
-        if (!current || *current != category) {
+        const KeyMappingInfo& info = keyMappingAt(index);
+        const KeyCategory category = info.category;
+        const std::string mod = info.modCategory != nullptr ? info.modCategory : "";
+        if (!current || *current != category || currentMod != mod) {
             current = category;
-            list.addEntry<CategoryEntry>(text(keyCategoryLabelKey(category)), width_);
+            currentMod = mod;
+            list.addEntry<CategoryEntry>(category == KeyCategory::Mod ? text(mod) : text(keyCategoryLabelKey(category)), width_);
         }
         list.addEntry<KeyEntry>(index, context);
     }

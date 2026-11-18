@@ -38,7 +38,7 @@ struct KeyId {
 };
 
 // The sections of the Key Binds screen, in the order it lists them.
-enum class KeyCategory { Movement, Misc, Multiplayer, Gameplay, Inventory, Creative, Spectator, Debug };
+enum class KeyCategory { Movement, Misc, Multiplayer, Gameplay, Inventory, Creative, Spectator, Debug, Mod };
 
 // One action that can be bound. `name` is its translation key ("key.jump"); it is also the options-file
 // key (key_key.jump). `order` puts a few debug keys first inside their category.
@@ -47,7 +47,20 @@ struct KeyMappingInfo {
     KeyCategory category;
     KeyId defaultKey;
     int order = 0;
+    const char* modCategory = nullptr;  // a mod's key: the translation key of the heading it is listed under ("key.categories.examplemod")
 };
+
+// A key a mod asked for (KeyMapping): listed after the game's own under its own heading, saved in the options file like the others.
+struct ModKeyMapping {
+    std::string name;      // "key.examplemod.open"
+    std::string category;  // "key.categories.examplemod"
+    KeyId defaultKey;
+};
+// Adds the mods' keys to the table (once, before the Key Binds screen or the options file is read; later calls replace the list). Their indices come after the game's.
+void registerModKeyMappings(const std::vector<ModKeyMapping>& mappings);
+// The game's actions and the mods' keys.
+[[nodiscard]] std::size_t totalKeyMappingCount();
+[[nodiscard]] const KeyMappingInfo& keyMappingAt(std::size_t index);
 
 inline constexpr std::size_t kKeyMappingCount = 62;
 // Every action of the 26.3 client, grouped by category (the screen sorts them again by translated name).
@@ -68,6 +81,8 @@ public:
 
     [[nodiscard]] const KeyId& key(std::size_t index) const { return keys_[index]; }
     void set(std::size_t index, KeyId key) { keys_[index] = key; }
+    // Makes room for the mods' keys (after registerModKeyMappings): each starts on its default.
+    void sync();
     [[nodiscard]] bool isDefault(std::size_t index) const;
     void reset(std::size_t index);
     void resetAll();
@@ -83,7 +98,7 @@ public:
     void load(const OptionsFile& file);
 
 private:
-    std::array<KeyId, kKeyMappingCount> keys_;
+    std::vector<KeyId> keys_;
 };
 
 // The text on a key button: "Not Bound", "Left Shift", "Left Button", "Button 4", or the key's printed
