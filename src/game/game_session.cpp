@@ -310,6 +310,7 @@ GameSession::GameSession(ScreenServices& services, const ResourceManager& resour
 }
 
 GameSession::~GameSession() {
+    if (services_.mods && ready_ && !remote_) services_.mods->left();  // (ClientPlayConnectionEvents.DISCONNECT)
     if (remote_) net::setComponentTranslator(nullptr);
     save();
 }
@@ -661,6 +662,10 @@ void GameSession::update(double dt, bool active, int framebufferWidth, int frame
         const bool timedOut = loadElapsed_ >= kLoadTimeoutSeconds;
         if (loaded || timedOut) {
             ready_ = true;
+            if (services_.mods && !remote_) {  // the mods are told a world was joined (ClientPlayConnectionEvents.JOIN)
+                services_.mods->setHost(modHostState(modGuiWidth_, modGuiHeight_));
+                services_.mods->joined();
+            }
             completeArrival();
             renderer_.setActiveWorkers(workerCount());  // playing: about half of the PC (it all made the spawn area)
             progress_ = smoothedProgress_ = 1.0f;
@@ -888,6 +893,7 @@ void GameSession::addChatMessage(const std::string& text) {
 void GameSession::chatInput(const std::string& text) {
     if (text.empty()) return;
     chat_.remember(text);
+    if (text[0] == '/' && runModCommand(text.substr(1))) return;  // (a mod's client command)
     if (remote_) {  // on a server it is the server that answers
         if (text[0] == '/') remote_->sendCommand(text.substr(1));
         else remote_->sendChat(text);

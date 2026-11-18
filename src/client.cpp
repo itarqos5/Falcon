@@ -225,9 +225,9 @@ int Client::run() {
     const std::filesystem::path gameDir = options_.gameDir ? *options_.gameDir : minecraftDir().value_or(".minecraft");
     // The mods start first, beside everything else: what they add (blocks, items, keys, assets) has to be in the game's tables before the world opens.
     const std::filesystem::path modsDir = options_.modsDir ? *options_.modsDir : options_.gameDir ? gameDir / "mods" : falconDataDir().value_or(std::filesystem::path(".")) / "mods";
-    std::future<std::shared_ptr<jvm::ModHost>> modHostStart = std::async(std::launch::async, [modsDir] {
+    std::future<std::shared_ptr<jvm::ModHost>> modHostStart = std::async(std::launch::async, [modsDir, gameDir] {
         if (std::getenv("FALCON_NO_MODS") != nullptr) return std::shared_ptr<jvm::ModHost>();
-        return std::make_shared<jvm::ModHost>(modsDir);
+        return std::make_shared<jvm::ModHost>(modsDir, gameDir);
     });
     const std::filesystem::path optionsPath = gameDir / "falcon_options.txt";
     const bool persistOptions = !options_.capturePath || options_.gameDir.has_value();
@@ -450,6 +450,7 @@ int Client::run() {
         hostState.textWidth = [&font](const std::string& text) { return font.width(text); };
         hostState.translate = [&language](const std::string& key) { return language.get(key); };
         modHost->setHost(hostState);
+        modHost->clientStarted();  // (ClientLifecycleEvents.CLIENT_STARTED)
         // The buttons the mods put on screens (ScreenEvents.AFTER_INIT): asked for every screen once it has built its own widgets; a press runs the mod's handler in the VM.
         Screen::setPostInitHook([modHost](Screen& screen) {
             const std::string name = minecraftScreenClass(typeid(screen).name());

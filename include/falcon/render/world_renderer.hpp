@@ -28,6 +28,9 @@
 #include <vector>
 
 namespace falcon {
+namespace jvm {
+struct WorldSubmit;
+}
 
 // Where the player's eyes are and what they look at.
 struct Camera {
@@ -212,6 +215,9 @@ public:
         bool onTop = false;
     };
     void drawDebugLines(const Camera& camera, int framebufferWidth, int framebufferHeight, const std::vector<DebugLine>& lines);
+    // What mods drew in the level (their render pipelines' vertices, camera-relative): lines of their width, filled quads and triangles, with the depth test, the blending and the depth writing
+    // they asked for, after the entities. See jvm/vm.hpp (WorldSubmit): the translation of a mod's pipeline into this renderer's own drawing, which runs on OpenGL and on Vulkan alike.
+    void drawModGeometry(const Camera& camera, int framebufferWidth, int framebufferHeight, const std::vector<jvm::WorldSubmit>& submits);
     // Black outline of one block (the one the player looks at).
     void drawSelection(const Camera& camera, int framebufferWidth, int framebufferHeight, int x, int y, int z);
     // The ten pictures of a block being dug (destroy_stage_0..9); without them no cracks are drawn.

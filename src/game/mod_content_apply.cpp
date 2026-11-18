@@ -75,7 +75,7 @@ std::vector<ModKeyMapping> modKeyMappings(const jvm::ModHost* host) {
             ModKeyMapping m;
             m.name = k.name;
             m.category = k.category;
-            m.defaultKey = k.key < 0 ? KeyId::unbound() : k.mouse ? KeyId::mouse(k.key) : KeyId::keyboard(k.key);
+            m.defaultKey = k.key <= 0 && !k.mouse ? KeyId::unbound() : k.mouse ? KeyId::mouse(k.key) : KeyId::keyboard(k.key);  // (0 is no key: a mod that wants the player to choose)
             out.push_back(std::move(m));
         }
     }

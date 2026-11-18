@@ -1,4 +1,5 @@
 #include "falcon/render/world_renderer.hpp"
+#include "falcon/jvm/vm.hpp"
 #include "falcon/util/log.hpp"
 #include "world_renderer_internal.hpp"
 
@@ -671,6 +672,69 @@ void WorldRenderer::drawDebugLines(const Camera& camera, int framebufferWidth, i
     gl::Enable(gl::CULL_FACE);
     gl::DepthMask(gl::TRUE_);
     gl::Disable(gl::BLEND);
+}
+
+void WorldRenderer::drawModGeometry(const Camera& camera, int framebufferWidth, int framebufferHeight, const std::vector<jvm::WorldSubmit>& submits) {
+    if (submits.empty()) return;
+    std::vector<DebugLine> lines;
+    std::vector<float> triangles[2];  // x y z r g b a, camera-relative: the ones the world hides (pass 0), and the ones it does not (pass 1)
+    for (const jvm::WorldSubmit& s : submits) {
+        const std::size_t count = s.vertices.size() / 9;
+        const int pass = (s.state & 1) != 0 ? 0 : 1;  // (bit 0: the depth test; without it the geometry is drawn over everything)
+        const auto at = [&](std::size_t i) { return s.vertices.data() + i * 9; };
+        if (s.topology == 0) {
+            const bool strip = (s.state & 16) != 0;
+            for (std::size_t i = 0; i + 1 < count; i += strip ? 1 : 2) {
+                const float* a = at(i);
+                const float* b = at(i + 1);
+                DebugLine l{static_cast<double>(a[0]) + camera.x, static_cast<double>(a[1]) + camera.y, static_cast<double>(a[2]) + camera.z,
+                            static_cast<double>(b[0]) + camera.x, static_cast<double>(b[1]) + camera.y, static_cast<double>(b[2]) + camera.z, a[3], a[4], a[5], a[6]};
+                l.width = s.lineWidth;
+                l.onTop = pass == 1;
+                lines.push_back(l);
+            }
+            continue;
+        }
+        const auto push = [&](std::size_t i) {
+            const float* v = at(i);
+            triangles[pass].insert(triangles[pass].end(), {v[0], v[1], v[2], v[3], v[4], v[5], v[6]});
+        };
+        if (s.topology == 2) {  // quads: two triangles each
+            for (std::size_t i = 0; i + 3 < count; i += 4) {
+                for (const std::size_t k : {0u, 1u, 2u, 0u, 2u, 3u}) push(i + k);
+            }
+        } else {
+            for (std::size_t i = 0; i + 2 < count; i += 3) {
+                for (const std::size_t k : {0u, 1u, 2u}) push(i + k);
+            }
+        }
+    }
+    if (!triangles[0].empty() || !triangles[1].empty()) {
+        const float aspect = static_cast<float>(framebufferWidth) / static_cast<float>(std::max(1, framebufferHeight));
+        const float farPlane = farPlaneFor(std::max(lastRadius_, zoomReach_), camera.y);
+        const Matrix4f viewProj = perspective(camera.fov, aspect, 0.05f, farPlane) * cameraView(camera);
+        gl::Enable(gl::BLEND);
+        gl::BlendFuncSeparate(gl::SRC_ALPHA, gl::ONE_MINUS_SRC_ALPHA, gl::ONE, gl::ONE_MINUS_SRC_ALPHA);
+        gl::Disable(gl::CULL_FACE);  // (the mods' faces are drawn from either side)
+        gl::DepthMask(gl::FALSE_);
+        lines_.use();
+        gl::UniformMatrix4fv(lineViewProj_, 1, 0, viewProj.m.data());
+        gl::BindVertexArray(lineVao_);
+        gl::BindBuffer(gl::ARRAY_BUFFER, lineVbo_);
+        for (int pass = 0; pass < 2; ++pass) {
+            if (triangles[pass].empty()) continue;
+            if (pass == 0) gl::Enable(gl::DEPTH_TEST);
+            else gl::Disable(gl::DEPTH_TEST);
+            gl::BufferData(gl::ARRAY_BUFFER, static_cast<gl::GLsizeiptr>(triangles[pass].size() * sizeof(float)), triangles[pass].data(), gl::STREAM_DRAW);
+            gl::DrawArrays(gl::TRIANGLES, 0, static_cast<gl::GLsizei>(triangles[pass].size() / 7));
+        }
+        gl::BindVertexArray(0);
+        gl::Enable(gl::DEPTH_TEST);
+        gl::Enable(gl::CULL_FACE);
+        gl::DepthMask(gl::TRUE_);
+        gl::Disable(gl::BLEND);
+    }
+    drawDebugLines(camera, framebufferWidth, framebufferHeight, lines);
 }
 
 void WorldRenderer::setBreakImages(const std::vector<Image>& stages) {

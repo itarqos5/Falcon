@@ -24,6 +24,12 @@ bool modsDisabled() {
 void GameSession::tickMods() {
     jvm::ModHost* host = services_.mods.get();
     if (modsDisabled() || remote_ || host == nullptr || host->mods().empty()) return;
+    host->setHost(modHostState(modGuiWidth_, modGuiHeight_));
+    for (const jvm::ModHost::Said& said : host->tick()) addChatMessage("§7[" + said.mod + "]§r " + said.text);
+}
+
+// What the mods may ask the client: where the player and the camera are, how big the window is, which world this is, what block is where, the language and the font.
+jvm::HostState GameSession::modHostState(int guiWidth, int guiHeight) const {
     jvm::HostState state;
     state.x = player_.x;
     state.y = player_.y;
@@ -31,10 +37,58 @@ void GameSession::tickMods() {
     state.yaw = player_.yaw;
     state.pitch = player_.pitch;
     state.food = player_.foodLevel;
+    const Camera cam = camera();
+    state.camX = cam.x;
+    state.camY = cam.y;
+    state.camZ = cam.z;
+    state.camYaw = cam.look.yaw;
+    state.camPitch = cam.look.pitch;
+    state.camFov = cam.fov;
+    state.eyeHeight = cam.y - player_.y;
+    state.playerFlags = (player_.sneaking ? 1 : 0) | (player_.onGround ? 2 : 0) | (player_.inWater ? 4 : 0) | (info_.gameType == 1 ? 8 : 0) | (info_.gameType == 3 ? 16 : 0) | (dead_ ? 0 : 32);
+    state.guiWidth = guiWidth;
+    state.guiHeight = guiHeight;
+    state.framebufferWidth = modFramebufferWidth_;
+    state.framebufferHeight = modFramebufferHeight_;
+    state.guiScale = guiWidth > 0 ? std::max(1, modFramebufferWidth_ / guiWidth) : 2;
+    state.gameTime = static_cast<double>(playerAgeTicks_);
+    state.dimension = dimension_ == 1 ? "minecraft:the_nether" : dimension_ == 2 ? "minecraft:the_end" : "minecraft:overworld";
+    state.worldName = info_.name.empty() ? info_.folder : info_.name;
+    state.worldKind = remote_ ? 1 : 0;
+    state.playerName = services_.playerName;
+    state.playerUuid = services_.playerUuid;
     state.textWidth = [this](const std::string& text) { return services_.font.width(text); };
     state.translate = [this](const std::string& key) { return services_.language.get(key); };
-    host->setHost(state);
-    for (const jvm::ModHost::Said& said : host->tick()) addChatMessage("§7[" + said.mod + "]§r " + said.text);
+    state.blockAt = [this](int x, int y, int z) {
+        const Block b = renderer_.level().block(x, y, z);
+        const std::string& name = blockRegistry().type(b).name;
+        return name.find(':') == std::string::npos ? "minecraft:" + name : name;
+    };
+    state.blockFlags = [this](int x, int y, int z) {
+        const StateInfo& info = blockRegistry().state(renderer_.level().block(x, y, z));
+        return 1 | (info.has(kStateOpaqueCube) ? 2 : 0) | (info.has(kStateFullCollision) ? 4 : 0);
+    };
+    return state;
+}
+
+// What the mods drew in the level, after the entities: their pipelines' vertices, drawn by the world renderer.
+void GameSession::renderModLevel(const Camera& camera, int framebufferWidth, int framebufferHeight) {
+    jvm::ModHost* host = services_.mods.get();
+    if (modsDisabled() || host == nullptr || host->mods().empty()) return;
+    modFramebufferWidth_ = framebufferWidth;
+    modFramebufferHeight_ = framebufferHeight;
+    host->setHost(modHostState(modGuiWidth_, modGuiHeight_));
+    renderer_.drawModGeometry(camera, framebufferWidth, framebufferHeight, host->renderLevel(static_cast<float>(partialTick_)));
+}
+
+// Fabric's client commands: a line a mod has a command for is answered by the mod, before the server or the game's own commands hear of it.
+bool GameSession::runModCommand(const std::string& line) {
+    jvm::ModHost* host = services_.mods.get();
+    if (modsDisabled() || host == nullptr || host->mods().empty()) return false;
+    host->setHost(modHostState(modGuiWidth_, modGuiHeight_));
+    if (!host->runCommand(line)) return false;
+    for (const jvm::ModHost::Said& said : host->takeSaid()) addChatMessage(said.text);
+    return true;
 }
 
 void GameSession::modKeyEvent(const KeyId& key, bool pressed) {
@@ -49,18 +103,9 @@ void GameSession::modKeyEvent(const KeyId& key, bool pressed) {
 void GameSession::renderModHud(GuiGraphics& g, int guiWidth, int guiHeight) {
     jvm::ModHost* host = services_.mods.get();
     if (modsDisabled() || host == nullptr || host->mods().empty()) return;
-    jvm::HostState state;
-    state.x = player_.x;
-    state.y = player_.y;
-    state.z = player_.z;
-    state.yaw = player_.yaw;
-    state.pitch = player_.pitch;
-    state.food = player_.foodLevel;
-    state.guiWidth = guiWidth;
-    state.guiHeight = guiHeight;
-    state.textWidth = [this](const std::string& text) { return services_.font.width(text); };
-    state.translate = [this](const std::string& key) { return services_.language.get(key); };
-    host->setHost(state);
+    modGuiWidth_ = guiWidth;
+    modGuiHeight_ = guiHeight;
+    host->setHost(modHostState(guiWidth, guiHeight));
 
     const auto round = [](float v) { return static_cast<int>(std::lround(v)); };
     static std::set<std::string> missing;  // (a picture a mod names that is not there is looked for once)

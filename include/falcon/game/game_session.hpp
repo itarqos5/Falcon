@@ -386,6 +386,9 @@ private:
     void debugMessage(const std::string& text);
     void tickMods();  // the mods' tick handlers, run by the VM (src/game/game_session_mods.cpp)
     void renderModHud(GuiGraphics& graphics, int guiWidth, int guiHeight);  // what the mods' HUDs draw
+    void renderModLevel(const Camera& camera, int framebufferWidth, int framebufferHeight);  // what they draw in the level
+    [[nodiscard]] bool runModCommand(const std::string& line);  // a client command of a mod (true when one answered it)
+    [[nodiscard]] jvm::HostState modHostState(int guiWidth, int guiHeight) const;
     void modKeyEvent(const KeyId& key, bool pressed);                       // a key a mod asked for was pressed or let go
     void tickTime();  // the clock: a tick of the day, unless the game rule advance_time is off
     void pumpRemote();
@@ -523,6 +526,7 @@ private:
     SystemMemory systemMemory_;
     double systemMemoryAge_ = 1.0e9;
     bool advancedTooltips_ = false;
+    int modGuiWidth_ = 427, modGuiHeight_ = 240, modFramebufferWidth_ = 854, modFramebufferHeight_ = 480;  // the window, as the mods are told of it
     bool showHitboxes_ = false;      // F3 + B
     bool showChunkBorders_ = false;  // F3 + G
     int droppedCount_ = 0;
