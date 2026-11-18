@@ -102,6 +102,26 @@ jobs:
           done
           build/tests/falcon_image_diff shots/world-opengl.png shots/world-vulkan.png "" shots/world-diff.png
 
+      - name: The LODs round a world, with OpenGL and with Vulkan
+        continue-on-error: true
+        env:
+          VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+          FALCON_VK_VALIDATION: '1'
+          LIBGL_ALWAYS_SOFTWARE: '1'
+        run: |
+          mkdir -p "$RUNNER_TEMP/scratch-lod"
+          build/tests/falcon_make_world "$RUNNER_TEMP/scratch-lod/saves" "New World" 12345 creative
+          printf 'lodsEnabled:true\nlodDetail:1\nlodChunkRadius:64\nenableVsync:false\n' > "$RUNNER_TEMP/scratch-lod/falcon_options.txt"
+          for api in opengl vulkan; do
+            echo "=== $api"
+            timeout 420 xvfb-run -a -s "-screen 0 1280x800x24" build/Falcon --assets "$RUNNER_TEMP/game/26.3/assets" --data "$RUNNER_TEMP/game/26.3" --game-dir "$RUNNER_TEMP/scratch-lod" \
+              --play "New World" --mute --render-distance 3@0.5 --gamemode creative --cam 96.5,90,73.5,-35,18 --size 1280x720 --graphics-api $api \
+              --capture shots/lod-$api.png --capture-after 60 > shots/lod-$api.log 2>&1
+            echo "exit code $?"
+            tail -12 shots/lod-$api.log
+          done
+          build/tests/falcon_image_diff shots/lod-opengl.png shots/lod-vulkan.png "" shots/lod-diff.png
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:

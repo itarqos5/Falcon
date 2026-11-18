@@ -59,7 +59,11 @@ number measured on a window you can see (the measuring here uses hidden windows,
 * **New meshes are copied into the mesh arena by the GPU** from a staging buffer instead of being written into it from the CPU. Writing into a buffer that queued draws still
   read from can make the driver wait for all of them; with a deep queue that was one stall per uploaded section while chunks stream in. (`FALCON_DIRECT_UPLOAD=1` is the old way.)
 * **The GPU timer queries only run while F3 or the benchmark shows the number**; they cost the driver something on every frame.
-* `FALCON_NO_PACING=1` skips the 16 ms sleep of a hidden window, to measure it running flat out.
+* `FALCON_NO_PACING=1` skips the 16 ms sleep of a hidden window, to measure it running flat out. **Measure with it.** A hidden window paced at 40 or 60 fps leaves the card idle most of the time,
+  it drops its clocks, and the "GPU time of the world pass" of one and the same scene then comes out anywhere between 3 and 8 ms from run to run (measured 2026-11-18, RX 580, render distance 8 with LODs: 8.4, 6.1,
+  8.0, 7.5, 4.8 ms; with no pacing 2.2 to 2.4 ms every time).
+* Measured the same way (1280x720, render distance 16, LODs on, the log's `[render]` line): 5.2 to 6.6 ms a frame; with LODs off 4.5 ms, so the LOD pass costs about 2 ms (some 870 000 triangles). Drawing the LOD
+  tiles nearest first, and turning their back faces off, were tried (A/B, interleaved runs) and changed nothing that the run-to-run spread of about 10% could show: not kept.
 
 ## Making chunks (measured 2026-11-15, 12 logical processors, `--bench 20` at render distance 16)
 

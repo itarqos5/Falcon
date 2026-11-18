@@ -106,6 +106,12 @@ Medium or Full Detail). The three are saved as lodsEnabled, lodChunkRadius and l
   (isChunkRendered). When the spyglass goes down the chunks go to the cache like any chunk out of range. Test aids: FALCON_TEST_ZOOM=1 holds a spyglass to a pinned camera
   (--cam), FALCON_NO_ZOOM_CHUNKS=1 leaves the cone out (to compare), FALCON_TEST_CONE="16,25" draws a cone of real chunks 16 degrees either side, turned 25 degrees from where the
   camera looks, with the normal view (real chunks beside LODs).
+* **Where the chunks end and the LODs begin.** With LODs on, the chunks are a circle of chunks round the player's chunk (dx^2 + dz^2 <= render distance^2, WorldRenderer::drawable; the ring of chunks beyond it
+  that exists for the light and the meshes is not drawn), and the LOD shader cuts that same circle out of the LODs cell by cell (LodRenderer::render's hole: the corner of the player's chunk, relative to
+  the camera, and the radius), whatever the tiles that hold the cells look like. The sea is the exception: it is not cut but drawn as a dark backdrop (the sea floor's colour) under the chunks, because the chunks'
+  water is see-through and at the edge of the circle the eye looks through it past the last chunk, where nothing else is behind it (a pale band). Quads of the sea carry bit 5 of Vertex::face (kFlatPictureBit):
+  the shader reads their picture at its smallest size, so the sea is one colour near and far. The far plane of the chunks counts the height of the eyes (WorldRenderer::farPlaneFor): a camera at y 430 looks at
+  chunks 360 blocks below it.
 * **Textures, sharper.** The picture is sampled one mip level sharper than the hardware would choose (a bias of -1): a block of the far terrain is a pixel or three wide, and the plain
   choice melts every picture into its average colour, which looks like flat colour. This keeps the grain of grass, stone and leaves (with a little shimmer). Leaf cutout holes are preserved without darkening water.
 * **The five types.** A cell is 1, 2, 4, 8 or 16 blocks wide (a block, two blocks, four blocks, half a chunk, a whole chunk), the finest next to the loaded chunks (Distant Horizons'
