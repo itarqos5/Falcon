@@ -380,6 +380,25 @@ std::shared_ptr<const ItemRegistry> ItemRegistry::loadFromGameData(const fs::pat
     return reg;
 }
 
+std::shared_ptr<const ItemRegistry> ItemRegistry::extended(const ItemRegistry& base, const std::vector<ExtraItem>& extra, const BlockRegistry* blocks) {
+    auto reg = std::make_shared<ItemRegistry>(base);
+    for (const ExtraItem& e : extra) {
+        if (reg->byName_.count(e.name) != 0 || reg->items_.size() >= 65535) continue;
+        ItemType t;
+        t.name = e.name;
+        t.translationKey = e.translationKey;
+        t.itemModel = e.itemModel;
+        t.maxStack = e.maxStack;
+        t.maxDamage = e.maxDamage;
+        t.rarity = e.rarity;
+        t.food = e.food;
+        t.consumable = e.food.has_value();
+        ItemRegistryBuilder::add(*reg, std::move(t));
+    }
+    if (blocks != nullptr) ItemRegistryBuilder::linkBlocks(*reg, *blocks);
+    return reg;
+}
+
 std::shared_ptr<const ItemRegistry> ItemRegistry::makeMinimal(const BlockRegistry* blocks) {
     auto reg = std::make_shared<ItemRegistry>();
     const auto add = [&](const char* name, const char* key, int maxStack = 64, int maxDamage = 0) {

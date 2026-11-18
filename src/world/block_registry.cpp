@@ -608,6 +608,30 @@ std::shared_ptr<const BlockRegistry> BlockRegistry::loadFromGameData(const fs::p
     return reg;
 }
 
+std::shared_ptr<const BlockRegistry> BlockRegistry::extended(const BlockRegistry& base, const std::vector<ExtraBlock>& extra) {
+    auto reg = std::make_shared<BlockRegistry>(base);
+    for (const ExtraBlock& e : extra) {
+        if (reg->byName_.count(e.name) != 0 || reg->states_.size() >= 65535) continue;
+        BlockType type;
+        type.name = e.name;
+        type.firstState = static_cast<std::uint16_t>(reg->states_.size());
+        type.stateCount = 1;
+        type.defaultState = type.firstState;
+        type.item = e.name;
+        type.sound = e.sound;
+        StateInfo state;
+        state.block = static_cast<std::uint16_t>(reg->blocks_.size());
+        state.flags = kStateHasModel | kStateFullCollision | (e.noOcclusion ? kStateSkylightDown : (kStateOpaqueCube | kStateCanOcclude)) | (e.requiresTool ? kStateRequiresTool : 0);
+        state.emission = static_cast<std::uint8_t>(std::clamp(e.light, 0, 15));
+        state.dampening = e.noOcclusion ? 0 : 15;
+        state.hardness = e.hardness;
+        state.explosionResistance = e.resistance;
+        reg->states_.push_back(state);
+        BlockRegistryBuilder::addBlock(*reg, std::move(type));
+    }
+    return reg;
+}
+
 std::shared_ptr<const BlockRegistry> BlockRegistry::makeMinimal() {
     auto reg = std::make_shared<BlockRegistry>();
     int next = 0;

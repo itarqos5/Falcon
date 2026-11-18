@@ -390,6 +390,13 @@ std::shared_ptr<const CollisionShapes> CollisionShapes::makeMinimal(const BlockR
     return table;
 }
 
+std::shared_ptr<const CollisionShapes> CollisionShapes::withCubes(const CollisionShapes& base, std::size_t states) {
+    auto table = std::make_shared<CollisionShapes>(base);
+    auto& stateShape = Builder::stateShape(*table);
+    if (stateShape.size() < states) stateShape.resize(states, Builder::unitCube(*table));
+    return table;
+}
+
 std::shared_ptr<const CollisionShapes> CollisionShapes::makeFromBoxes(const BlockRegistry& registry, const std::vector<Override>& overrides) {
     auto table = std::const_pointer_cast<CollisionShapes>(makeMinimal(registry));
     auto& stateShape = Builder::stateShape(*table);

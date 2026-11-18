@@ -227,6 +227,11 @@ void BlockLoot::runEntry(const json& entry, Context& c, std::vector<ItemStack>& 
 std::vector<ItemStack> BlockLoot::drops(Block block, const ItemStack& tool, std::mt19937& random) const {
     std::vector<ItemStack> out;
     const json* doc = table(registry_.type(block).name);
+    if (doc == nullptr && registry_.type(block).name.find(':') != std::string::npos) {  // a mod's block has no table here: it drops its own item (a tool, when it needs one)
+        const Item own = itemRegistry().itemOfBlock(registry_.state(block).block);
+        if (own != Item::Air && (!registry_.state(block).has(kStateRequiresTool) || !tool.isEmpty())) out.push_back(ItemStack(own, 1));
+        return out;
+    }
     if (doc == nullptr || !doc->is_object()) return out;
     const auto pools = doc->find("pools");
     if (pools == doc->end() || !pools->is_array()) return out;

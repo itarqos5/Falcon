@@ -211,6 +211,13 @@ std::shared_ptr<const BlockOutlines> BlockOutlines::makeFromBoxes(const BlockReg
 
 std::shared_ptr<const BlockOutlines> BlockOutlines::makeMinimal(const BlockRegistry& registry) { return makeFromBoxes(registry, {}); }
 
+std::shared_ptr<const BlockOutlines> BlockOutlines::withCubes(const BlockOutlines& base, std::size_t states) {
+    auto o = std::make_shared<BlockOutlines>(base);
+    auto& stateShape = BlockOutlinesBuilder::stateShape(*o);
+    if (stateShape.size() < states) stateShape.resize(states, 1);  // (shape 1 is the full cube)
+    return o;
+}
+
 std::shared_ptr<const BlockOutlines> BlockOutlines::loadFromGameData(const fs::path& dir, const fs::path& cacheDir, const BlockRegistry& registry,
                                                                      std::string& error) {
     const auto fingerprint = fingerprintOf(dir, registry);

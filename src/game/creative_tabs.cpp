@@ -246,6 +246,23 @@ std::shared_ptr<const CreativeTabs> CreativeTabs::loadFromGameData(const fs::pat
     return out;
 }
 
+std::shared_ptr<const CreativeTabs> CreativeTabs::extended(const CreativeTabs& base, const ItemRegistry& items, const std::vector<ExtraEntry>& extra) {
+    auto out = std::make_shared<CreativeTabs>(base);
+    for (const ExtraEntry& e : extra) {
+        const auto item = items.find(e.item);
+        if (!item) continue;
+        for (CreativeTab& tab : out->tabs_) {
+            if (tab.id == e.tab && tab.type == CreativeTabType::Category) tab.entries.push_back({ItemStack(*item, 1), {}, {}});
+            if (tab.type == CreativeTabType::Search) {
+                CreativeEntry entry{ItemStack(*item, 1), {}, {}};
+                entry.searchText = lower(e.displayName) + "\n" + e.item;
+                tab.entries.push_back(std::move(entry));
+            }
+        }
+    }
+    return out;
+}
+
 std::shared_ptr<const CreativeTabs> CreativeTabs::makeMinimal(const ItemRegistry& items) {
     auto out = std::make_shared<CreativeTabs>();
     const auto stack = [&](const char* name) { return ItemStack(items.find(name).value_or(Item::Air), 1); };

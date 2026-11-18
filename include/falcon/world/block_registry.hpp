@@ -73,6 +73,17 @@ struct BlockType {
     float soundPitch = 1.0f;
 };
 
+// A block a mod added (see jvm/mod_content.hpp): one state, a full cube. Its name keeps the mod's namespace ("examplemod:ruby_block").
+struct ExtraBlock {
+    std::string name;
+    float hardness = 0.0f;
+    float resistance = 0.0f;
+    int light = 0;
+    bool requiresTool = false;
+    bool noOcclusion = false;
+    std::string sound = "stone";
+};
+
 class BlockRegistry {
 public:
     // Reads the game's exported data: <gameDataDir>/registries.json, model-states.json and gameplay-facts.json
@@ -80,6 +91,8 @@ public:
     [[nodiscard]] static std::shared_ptr<const BlockRegistry> loadFromGameData(const std::filesystem::path& gameDataDir,
                                                                                const std::filesystem::path& cacheDir,
                                                                                std::string& error);
+    // The registry with these blocks after the game's: their states take the ids after the last of the game's (a name the registry already has is skipped).
+    [[nodiscard]] static std::shared_ptr<const BlockRegistry> extended(const BlockRegistry& base, const std::vector<ExtraBlock>& extra);
     // A handful of blocks with made-up ids, so tests run without the game's files.
     [[nodiscard]] static std::shared_ptr<const BlockRegistry> makeMinimal();
 

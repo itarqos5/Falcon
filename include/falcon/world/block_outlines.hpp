@@ -31,6 +31,8 @@ public:
                                                                                const BlockRegistry& registry, std::string& error);
     // For tests and when the game's file is missing: every state that is neither air nor liquid is a full cube.
     [[nodiscard]] static std::shared_ptr<const BlockOutlines> makeMinimal(const BlockRegistry& registry);
+    // The table with the full cube for every state from its own count up to `states` (the states a mod's blocks added).
+    [[nodiscard]] static std::shared_ptr<const BlockOutlines> withCubes(const BlockOutlines& base, std::size_t states);
     // Like makeMinimal, but the given states have their own boxes (edges are made from them): for tests.
     struct Override {
         Block block;

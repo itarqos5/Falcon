@@ -95,6 +95,8 @@ public:
         float fallDistanceReduction = 0.0f;
     };
     [[nodiscard]] static std::shared_ptr<const CollisionShapes> makeFromBoxes(const BlockRegistry& registry, const std::vector<Override>& overrides);
+    // The table with full cubes for every state from stateCount() up to `states` (the states a mod's blocks added to the registry).
+    [[nodiscard]] static std::shared_ptr<const CollisionShapes> withCubes(const CollisionShapes& base, std::size_t states);
 
     [[nodiscard]] bool isFromGameData() const { return fromGameData_; }
     [[nodiscard]] std::size_t stateCount() const { return stateShape_.size(); }

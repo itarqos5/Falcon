@@ -47,6 +47,14 @@ public:
 
     // Reads <gameDataDir>/creative-inventory.json. Null and `error` if it is missing or unreadable.
     [[nodiscard]] static std::shared_ptr<const CreativeTabs> loadFromGameData(const std::filesystem::path& gameDataDir, const ItemRegistry& items, std::string& error);
+    // An item a mod put into a tab, with the name the search tab finds it by.
+    struct ExtraEntry {
+        std::string tab;  // "minecraft:ingredients"
+        std::string item; // "examplemod:ruby"
+        std::string displayName;
+    };
+    // The tabs with these items added at the end of their tab, and to the search tab.
+    [[nodiscard]] static std::shared_ptr<const CreativeTabs> extended(const CreativeTabs& base, const ItemRegistry& items, const std::vector<ExtraEntry>& extra);
     // A few tabs of a few items (tests without the game's files).
     [[nodiscard]] static std::shared_ptr<const CreativeTabs> makeMinimal(const ItemRegistry& items);
 

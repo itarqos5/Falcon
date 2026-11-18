@@ -86,6 +86,18 @@ struct ItemType {
     [[nodiscard]] bool isBlockItem() const { return blockIndex >= 0; }
 };
 
+// An item a mod added (see jvm/mod_content.hpp).
+struct ExtraItem {
+    std::string name;            // "examplemod:ruby": the namespace stays
+    std::string translationKey;  // "item.examplemod.ruby" or "block.examplemod.ruby_block"
+    std::string itemModel;       // "examplemod:ruby": assets/examplemod/items/ruby.json draws it
+    int maxStack = 64;
+    int maxDamage = 0;
+    Rarity rarity = Rarity::Common;
+    std::optional<FoodInfo> food;
+    bool fireResistant = false;
+};
+
 class ItemRegistry {
 public:
     // Reads <gameDataDir>/items.json and registries.json (protocol ids), plus the fuel times in
@@ -96,6 +108,8 @@ public:
                                                                               const std::filesystem::path& cacheDir,
                                                                               const BlockRegistry* blocks,
                                                                               std::string& error);
+    // The registry with these items after the game's (protocol ids go on from the last), linked to the blocks of the same names.
+    [[nodiscard]] static std::shared_ptr<const ItemRegistry> extended(const ItemRegistry& base, const std::vector<ExtraItem>& extra, const BlockRegistry* blocks);
     // A few items with real facts, so tests run without the game's files (stone, dirt, planks, stick, apple,
     // diamond_pickaxe, iron_chestplate, ...). Block items are linked when `blocks` is given.
     [[nodiscard]] static std::shared_ptr<const ItemRegistry> makeMinimal(const BlockRegistry* blocks = nullptr);
