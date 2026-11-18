@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 
 project(Falcon
-    VERSION 1.2.1
+    VERSION 1.3.0
     DESCRIPTION "Falcon - a C++ reimplementation of the Minecraft Java client"
     LANGUAGES CXX C
 )

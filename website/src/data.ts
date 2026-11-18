@@ -1,7 +1,7 @@
 // Everything the page states as a number lives here, with where it comes from. The measurements are those of docs/vs-vanilla.md (docs/benchmarks/vs-vanilla.json) and
 // docs/performance.md; change them together with those files.
 
-export const VERSION = '1.2.1';
+export const VERSION = '1.3.0';
 export const REPO = 'https://github.com/itarqos5/Falcon';
 export const RELEASE = 'https://github.com/itarqos5/Falcon/releases/latest';
 export const LAUNCHER_SIZE = '9.5 MB';
