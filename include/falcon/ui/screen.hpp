@@ -70,9 +70,11 @@ public:
     virtual void charTyped(unsigned int codePoint);
     // Whether Escape closes this screen (the main menu is the root and ignores it).
     [[nodiscard]] virtual bool shouldCloseOnEsc() const { return true; }
-    // True while the screen wants every key for itself (the Key Binds screen waiting for a key to bind), so the client keeps
-    // F11, F2 and the other global keys out of it.
+    // True while the screen wants every key for itself (the chat box: the hide-GUI key is typing there), so the client keeps that key out of it.
     [[nodiscard]] virtual bool wantsAllKeys() const { return false; }
+    // True while the screen is waiting for a key to bind (the Key Binds screen): then even F11 and F2 are the key being bound. Everywhere else, chat included, they work
+    // (Minecraft.handleGlobalKeyPress runs before any screen hears a key).
+    [[nodiscard]] virtual bool bindingKey() const { return false; }
     // True for a screen drawn over a world that keeps running behind it (the inventory): the game goes on ticking while it is open,
     // only the player cannot steer. Menus that pause the game (every other screen) leave it false.
     [[nodiscard]] virtual bool keepsWorldTicking() const { return false; }

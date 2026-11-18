@@ -22,7 +22,7 @@ public:
 
     // The world keeps running behind the chat, and the player cannot steer (the chat is not InGameScreen).
     [[nodiscard]] bool keepsWorldTicking() const override { return true; }
-    // Typing must reach the box, so the global F-keys are held back.
+    // Typing must reach the box, so the hide-GUI key is held back (F11 and F2 still work in chat, as in the game).
     [[nodiscard]] bool wantsAllKeys() const override { return true; }
     void onClose() override;
 

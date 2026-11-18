@@ -483,8 +483,8 @@ int Client::run() {
         }
         if (action != kPress && action != kRepeat) return;
         // Keys that work on every screen, through whatever key they are bound to (a screen that is waiting for a key to
-        // bind gets the key itself, so F11 can be rebound).
-        if (action == kPress && !screens.back()->wantsAllKeys()) {
+        // bind gets the key itself, so F11 can be rebound; the chat box gets every key but these two).
+        if (action == kPress && !screens.back()->bindingKey()) {
             const auto bound = [&](const char* name) {
                 const std::size_t index = keyMappingIndex(name);
                 return index < kKeyMappingCount && gameOptions.keyBindings.key(index) == KeyId::keyboard(key);
@@ -498,7 +498,7 @@ int Client::run() {
                 screenshotRequested = true;  // taken once the frame is drawn
                 return;
             }
-            if (bound("key.toggleGui")) {
+            if (bound("key.toggleGui") && !screens.back()->wantsAllKeys()) {
                 if (session != nullptr) session->toggleHud();
                 return;
             }

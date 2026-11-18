@@ -56,6 +56,7 @@ public:
     bool keyPressed(int key, int mods) override;
     [[nodiscard]] bool shouldCloseOnEsc() const override { return waiting_ < 0; }
     [[nodiscard]] bool wantsAllKeys() const override { return waiting_ >= 0; }
+    [[nodiscard]] bool bindingKey() const override { return waiting_ >= 0; }
 
 protected:
     void init() override;
