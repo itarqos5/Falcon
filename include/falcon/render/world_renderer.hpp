@@ -407,6 +407,7 @@ private:
     int lastChunkX_ = 1 << 30;
     int lastChunkZ_ = 1 << 30;
     int lastRadius_ = -1;
+    int readyCx_ = 1 << 30, readyCz_ = 1 << 30, readyFor_ = -1, readyRadius2_ = -1, readyAge_ = 0;  // (chunkCircleReady's last answer)
     // The zoom cone (setZoom). The request is the last call's; the sets are made from it when it changed (main thread) and read by the workers, who check a chunk against them
     // before they spend time on it.
     struct ZoomCone {
@@ -424,6 +425,10 @@ private:
     std::shared_ptr<const ChunkSet> zoomGenerate_;        // and a ring of two chunks round it: generated, so that the light and the faces at the edges have their neighbours
     [[nodiscard]] bool inZoom(ChunkPos pos, bool generate) const;
     [[nodiscard]] bool drawable(int chunkX, int chunkZ) const;  // whether the chunk's sections are drawn (see the zoom)
+    // The radius squared, in chunks, of the circle round the player's chunk in which every chunk has all its meshes (the LODs are cut out of that circle and no wider: a chunk the player
+    // has just come to, which the workers have not finished, shows the LOD instead of a hole). At most `radius`; -1 when the player's own chunk is not there. Remembered for a few frames.
+    [[nodiscard]] int chunkCircleReady(int radius);
+    [[nodiscard]] bool chunkMeshed(ChunkPos pos) const;
     bool refreshZoom(int playerChunkX, int playerChunkZ, int renderDistance);  // true when the cone changed
     std::size_t meshBytes_ = 0;
     std::size_t quadsTotal_ = 0;

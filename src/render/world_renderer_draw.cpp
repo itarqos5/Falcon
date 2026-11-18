@@ -101,9 +101,9 @@ void WorldRenderer::render(const Camera& camera, int framebufferWidth, int frame
         const std::array<float, 2> envFog = underwater_ ? std::array<float, 2>{waterFogStart_, waterFogEnd_} : std::array<float, 2>{envFogStart_, envFogEnd_};
         models_.uploadPending();  // the pictures the LODs use may be new
         if (lightmapBrightness_ != brightness_ || lightmapSkyChanged()) updateLightmap();  // (the chunks below want it the same way)
-        // (The chunks that are drawn: the circle of the render distance, and a ring round it while a zoom is up, see drawable().)
+        // (The chunks that are drawn: the circle of the render distance, and a ring round it while a zoom is up, see drawable(); the LODs are left out of as much of it as is really there.)
         lod_->render(view, camera.fov, aspect, camera.x, camera.y, camera.z, renderDistance, fogColor, envFog, lightmapTex_, drawRadius(renderDistance), playerChunkX_.load(), playerChunkZ_.load(),
-                     zoomReach_ > 0 ? renderDistance + 2 : renderDistance);
+                     chunkCircleReady(zoomReach_ > 0 ? renderDistance + 2 : renderDistance));
         gl::DepthMask(1);
         gl::Clear(gl::DEPTH_BUFFER_BIT);
     }

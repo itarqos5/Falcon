@@ -20,8 +20,19 @@ layout(set = 1, binding = 0) uniform sampler2DArray uTex;
 layout(set = 1, binding = 2) uniform sampler2D uLightmap;
 layout(location = 0) out vec4 frag;
 void main() {
-    vec2 chunk = floor((vXZ - u.uHoleOrigin) * (1.0 / 16.0));
+    vec2 inChunk = (vXZ - u.uHoleOrigin) * (1.0 / 16.0);
+    vec2 chunk = floor(inChunk);
     bool underChunks = dot(chunk, chunk) <= u.uHoleRadius2;
+    bool atTheEdge = false;
+    if (underChunks) {
+        vec2 edge = (inChunk - chunk) * 16.0;
+        float margin = 1.5 * max(fwidth(vXZ.x), fwidth(vXZ.y));
+        if ((edge.x < margin && dot(chunk - vec2(1.0, 0.0), chunk - vec2(1.0, 0.0)) > u.uHoleRadius2) || (edge.x > 16.0 - margin && dot(chunk + vec2(1.0, 0.0), chunk + vec2(1.0, 0.0)) > u.uHoleRadius2) ||
+            (edge.y < margin && dot(chunk - vec2(0.0, 1.0), chunk - vec2(0.0, 1.0)) > u.uHoleRadius2) || (edge.y > 16.0 - margin && dot(chunk + vec2(0.0, 1.0), chunk + vec2(0.0, 1.0)) > u.uHoleRadius2)) {
+            underChunks = false;
+            atTheEdge = true;
+        }
+    }
     if (underChunks && vFlat < 0.5) discard;
     vec4 t = texture(uTex, vec3(vUv, vLayer), mix(-1.0, 8.0, vFlat));
     vec3 rgb = t.rgb;
@@ -38,5 +49,8 @@ void main() {
         float fresnel = pow(clamp(vDist / max(100.0, u.uFogRange.y), 0.0, 1.0), 3.0) * 0.35;
         col = mix(col, u.uFogColor, fresnel);
     }
-    frag = vec4(mix(underChunks ? vec3(0.065) : col * light, u.uFogColor, fog), 1.0);
+    vec3 lit = col * light;
+    if (underChunks) lit = vec3(0.065);
+    else if (atTheEdge && vFlat > 0.5) lit = mix(vec3(0.065), lit, 0.5);
+    frag = vec4(mix(lit, u.uFogColor, fog), 1.0);
 }

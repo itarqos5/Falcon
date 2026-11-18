@@ -111,7 +111,10 @@ Medium or Full Detail). The three are saved as lodsEnabled, lodChunkRadius and l
   the camera, and the radius), whatever the tiles that hold the cells look like. The sea is the exception: it is not cut but drawn as a dark backdrop (the sea floor's colour) under the chunks, because the chunks'
   water is see-through and at the edge of the circle the eye looks through it past the last chunk, where nothing else is behind it (a pale band). Quads of the sea carry bit 5 of Vertex::face (kFlatPictureBit):
   the shader reads their picture at its smallest size, so the sea is one colour near and far. The far plane of the chunks counts the height of the eyes (WorldRenderer::farPlaneFor): a camera at y 430 looks at
-  chunks 360 blocks below it.
+  chunks 360 blocks below it. The cut is only as wide as the chunks that are really there (WorldRenderer::chunkCircleReady: the nearest chunk of the circle that has not all its meshes in ends it, so
+  a chunk the player has just flown up to shows the LOD, not a hole), and it ends a pixel and a half inside the edge of the circle (the LOD's cut and the chunks' edge are rasterized separately; a pixel
+  that neither had was a dotted line that flickered as the camera moved). A coarser tile that stands in for a leaf whose tile is not there yet is not drawn together with the finer tiles under it (they
+  fought over every pixel): the area changes from the coarse tile to the fine ones when all of them are there.
 * **Textures, sharper.** The picture is sampled one mip level sharper than the hardware would choose (a bias of -1): a block of the far terrain is a pixel or three wide, and the plain
   choice melts every picture into its average colour, which looks like flat colour. This keeps the grain of grass, stone and leaves (with a little shimmer). Leaf cutout holes are preserved without darkening water.
 * **The five types.** A cell is 1, 2, 4, 8 or 16 blocks wide (a block, two blocks, four blocks, half a chunk, a whole chunk), the finest next to the loaded chunks (Distant Horizons'

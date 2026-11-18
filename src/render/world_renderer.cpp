@@ -1119,6 +1119,37 @@ bool WorldRenderer::sectionReady(int x, int y, int z) const {
     return meshRequested_.contains(key) && !meshPending_.contains(key);
 }
 
+// Whether every section of the chunk that has anything in it has its mesh (even an empty one) in: what sectionReady asks, for the whole column.
+bool WorldRenderer::chunkMeshed(ChunkPos pos) const {
+    const Chunk* chunk = level_.chunk(pos);
+    if (chunk == nullptr) return false;
+    for (int sy = 0; sy < kSectionCount; ++sy) {
+        if (!chunk->sections[static_cast<std::size_t>(sy)]) continue;  // air
+        const SectionKey key{pos.x, pos.z, sy};
+        if (!meshRequested_.contains(key) || meshPending_.contains(key)) return false;
+    }
+    return true;
+}
+
+int WorldRenderer::chunkCircleReady(int radius) {
+    const int pcx = playerChunkX_.load(), pcz = playerChunkZ_.load();
+    if (pcx == readyCx_ && pcz == readyCz_ && radius == readyFor_ && ++readyAge_ < 6) return readyRadius2_;  // (a few frames old at most)
+    readyCx_ = pcx;
+    readyCz_ = pcz;
+    readyFor_ = radius;
+    readyAge_ = 0;
+    int firstMissing = radius * radius + 1;  // nothing missing: the whole circle
+    for (const Offset& o : offsetsByDistance()) {
+        if (o.d2 > radius * radius) break;
+        if (!chunkMeshed(ChunkPos{pcx + o.dx, pcz + o.dz})) {
+            firstMissing = o.d2;
+            break;
+        }
+    }
+    readyRadius2_ = firstMissing - 1;
+    return readyRadius2_;
+}
+
 bool WorldRenderer::isChunkRendered(int chunkX, int chunkZ) const {
     const int pcx = playerChunkX_.load();
     const int pcz = playerChunkZ_.load();

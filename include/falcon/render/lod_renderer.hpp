@@ -81,11 +81,12 @@ public:
     // Draws the LODs (the framebuffer's depth is left with them in it: the caller clears it before drawing the chunks). `view` is the camera's view matrix (rotation; the
     // world is drawn relative to the camera), the camera's place is in blocks. `lightmapTexture` is the world's light map (sky light across, block light down): LODs are lit with its
     // brightest sky, so they follow the time of day like the chunks. The pictures must have been uploaded (BlockModels::uploadPending).
-    // The chunks are drawn where the LODs are not: the chunk (holeChunkX, holeChunkZ) and every chunk within `holeRadiusChunks` of it (a circle of chunks, like the chunks that are drawn) are
-    // cut out of the LODs, cell by cell, whatever the tiles that hold them look like (a tile is 32 blocks or more across and does not follow a circle; without the cut a LOD under a chunk
-    // shows through its translucent water). -1: no cut.
+    // The chunks are drawn where the LODs are not: the chunk (holeChunkX, holeChunkZ) and every chunk whose distance from it, in chunks, squared, is at most `holeRadius2` (a circle of chunks, like
+    // the chunks that are drawn) are cut out of the LODs, cell by cell, whatever the tiles that hold them look like (a tile is 32 blocks or more across and does not follow a circle; without the cut
+    // a LOD under a chunk shows through its translucent water). The caller makes the circle only as wide as the chunks that are really there: a chunk that is still being made must not be a hole.
+    // -1: no cut.
     void render(const Matrix4f& view, float fovDegrees, float aspect, double camX, double camY, double camZ, int nearChunks, const std::array<float, 3>& fogColor,
-                const std::array<float, 2>& envFog, gl::GLuint lightmapTexture, int fogNearChunks = -1, int holeChunkX = 0, int holeChunkZ = 0, int holeRadiusChunks = -1);
+                const std::array<float, 2>& envFog, gl::GLuint lightmapTexture, int fogNearChunks = -1, int holeChunkX = 0, int holeChunkZ = 0, int holeRadius2 = -1);
 
     [[nodiscard]] LodStats stats() const { return stats_; }
 

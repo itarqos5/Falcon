@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <unordered_set>
 
 namespace falcon {
 namespace {
@@ -72,8 +73,21 @@ out vec4 frag;
 void main() {
     // The chunks are drawn where the LODs are not (see LodRenderer::render): a cell inside the circle of chunks is not drawn, except the sea, which stays there as dark as the sea floor under
     // the chunks' own water: the chunks' water is see-through, and at the edge of the circle the eye looks through it past the last chunk, where nothing else would be behind it.
-    vec2 chunk = floor((vXZ - uHoleOrigin) * (1.0 / 16.0));
+    vec2 inChunk = (vXZ - uHoleOrigin) * (1.0 / 16.0);
+    vec2 chunk = floor(inChunk);
     bool underChunks = dot(chunk, chunk) <= uHoleRadius2;
+    bool atTheEdge = false;
+    if (underChunks) {
+        // Where the circle ends, a pixel or two of the LOD stays under the edge of the chunks: the LOD's cut and the chunks' edge are rasterized separately, and a pixel that neither had showed
+        // as a dotted line (flickering as the camera moves). The chunks are drawn over it.
+        vec2 edge = (inChunk - chunk) * 16.0;
+        float margin = 1.5 * max(fwidth(vXZ.x), fwidth(vXZ.y));
+        if ((edge.x < margin && dot(chunk - vec2(1.0, 0.0), chunk - vec2(1.0, 0.0)) > uHoleRadius2) || (edge.x > 16.0 - margin && dot(chunk + vec2(1.0, 0.0), chunk + vec2(1.0, 0.0)) > uHoleRadius2) ||
+            (edge.y < margin && dot(chunk - vec2(0.0, 1.0), chunk - vec2(0.0, 1.0)) > uHoleRadius2) || (edge.y > 16.0 - margin && dot(chunk + vec2(0.0, 1.0), chunk + vec2(0.0, 1.0)) > uHoleRadius2)) {
+            underChunks = false;
+            atTheEdge = true;
+        }
+    }
     if (underChunks && vFlat < 0.5) discard;
     // One mip level sharper than the hardware would pick: preserves texture definition on distant terrain
     // (The sea's picture is read at its smallest size, 8 levels on: it is one colour, the same near and far.)
@@ -95,7 +109,10 @@ void main() {
         float fresnel = pow(clamp(vDist / max(100.0, uFogRange.y), 0.0, 1.0), 3.0) * 0.35;
         col = mix(col, uFogColor, fresnel);
     }
-    frag = vec4(mix(underChunks ? vec3(0.065) : col * light, uFogColor, fog), 1.0);
+    vec3 lit = col * light;
+    if (underChunks) lit = vec3(0.065);
+    else if (atTheEdge && vFlat > 0.5) lit = mix(vec3(0.065), lit, 0.5);  // (the sea at the edge: half way, so the chunks' water over it is no lighter line and a gap is no dark one)
+    frag = vec4(mix(lit, uFogColor, fog), 1.0);
 }
 )";
 
@@ -656,7 +673,7 @@ void LodRenderer::update(double camX, double camZ, int nearChunks, double upload
 // ---- drawing ------------------------------------------------------------------------------------------------------------------------------------------------------
 
 void LodRenderer::render(const Matrix4f& view, float fovDegrees, float aspect, double camX, double camY, double camZ, int nearChunks, const std::array<float, 3>& fogColor,
-                         const std::array<float, 2>& envFog, gl::GLuint lightmapTexture, int fogNearChunks, int holeChunkX, int holeChunkZ, int holeRadiusChunks) {
+                         const std::array<float, 2>& envFog, gl::GLuint lightmapTexture, int fogNearChunks, int holeChunkX, int holeChunkZ, int holeRadius2) {
     stats_.tilesDrawn = 0;
     stats_.trianglesDrawn = 0;
     stats_.levels = 0;
@@ -702,6 +719,23 @@ void LodRenderer::render(const Matrix4f& view, float fovDegrees, float aspect, d
         asked.push_back(key);
         draws.push_back({tile, key, bias});
     }
+    // A coarser tile that stands in for a leaf whose own tile is not there yet covers the leaf's brothers too, and they may have their tiles: both were drawn, nearly in the same plane (the
+    // coarse one 0.05 lower), and the two fought over every pixel (flicker, and the coarse hills showing through the fine ground). A tile with a tile above it is not drawn: the area changes
+    // from the coarse tile to the fine ones when all of them are there.
+    {
+        std::unordered_set<TileKey, TileKeyHash> chosen;
+        for (const Draw& d : draws) chosen.insert(d.key);
+        std::erase_if(draws, [&](const Draw& d) {
+            TileKey up = d.key;
+            while (up.level < topLevel_) {
+                ++up.level;
+                up.tx >>= 1;
+                up.tz >>= 1;
+                if (chosen.count(up) != 0) return true;
+            }
+            return false;
+        });
+    }
     std::sort(draws.begin(), draws.end(), [](const Draw& a, const Draw& b) { return a.tile->buffer < b.tile->buffer; });
 
     program_.use();
@@ -717,7 +751,7 @@ void LodRenderer::render(const Matrix4f& view, float fovDegrees, float aspect, d
     gl::Uniform2f(uFogRange_, fogStart, fogEnd);
     gl::Uniform2f(uEnvFog_, envFog[0], envFog[1]);
     gl::Uniform2f(uHoleOrigin_, static_cast<float>(holeChunkX * 16 - camX), static_cast<float>(holeChunkZ * 16 - camZ));
-    gl::Uniform1f(uHoleRadius2_, holeRadiusChunks >= 0 ? static_cast<float>(holeRadiusChunks) * static_cast<float>(holeRadiusChunks) : -1.0f);
+    gl::Uniform1f(uHoleRadius2_, holeRadius2 >= 0 ? static_cast<float>(holeRadius2) : -1.0f);
     gl::Enable(gl::DEPTH_TEST);
     gl::DepthFunc(gl::LEQUAL);
     gl::DepthMask(1);
