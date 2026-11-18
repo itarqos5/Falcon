@@ -128,6 +128,12 @@ export const Terminal = ({ size, ...p }: IconProps) => (
     <path d="M7 10l3 2-3 2M12 15h5" />
   </svg>
 );
+export const Search = ({ size, ...p }: IconProps) => (
+  <svg {...base(size)} {...p}>
+    <circle cx="11" cy="11" r="6.5" />
+    <path d="M16 16l4.5 4.5" />
+  </svg>
+);
 export const Box = ({ size, ...p }: IconProps) => (
   <svg {...base(size)} {...p}>
     <path d="M21 8l-9-5-9 5v8l9 5 9-5V8zM3 8l9 5 9-5M12 13v8" />

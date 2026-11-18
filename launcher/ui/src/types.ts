@@ -47,4 +47,35 @@ export interface LauncherState {
     data: boolean;
   };
   settings: { keepOpen: boolean };
+  /** The Mods tab: the folder, the game version mods are searched for, the mods that are installed (by Modrinth project id) and the ones being installed now (with what is going on). */
+  mods: { dir: string; gameVersion: string; installed: Record<string, InstalledMod>; busy: Record<string, string> };
+}
+
+export interface InstalledMod {
+  title: string;
+  version: string;
+  file: string;
+  loader: string;
+}
+
+/** One mod of a search on Modrinth. `icon` is a data: address (empty when there is none): the page may not load pictures from the network itself. */
+export interface ModHit {
+  projectId: string;
+  slug: string;
+  title: string;
+  description: string;
+  author: string;
+  icon: string;
+  downloads: number;
+  categories: string[];
+}
+
+export interface ModSearchResult {
+  hits: ModHit[];
+  offset: number;
+  limit: number;
+  total: number;
+  query: string;
+  /** Set when a newer search replaced this one: the page ignores the answer. */
+  superseded?: boolean;
 }

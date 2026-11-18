@@ -26,6 +26,7 @@ const base = (): LauncherState => ({
   account: { name: 'FalconPlayer', uuid: '069a79f444e94726a5befca90e38aaf5', owns: true, hasProfile: true, avatar: devAvatar() },
   game: { status: 'ready', phase: '', label: '', done: 0, total: 0, error: null, version: '26.3', data: true },
   settings: { keepOpen: true },
+  mods: { dir: 'C:/Users/you/AppData/Local/Falcon/mods', gameVersion: '26.3', installed: {}, busy: {} },
 });
 
 function stateFor(name: string): LauncherState {
@@ -75,13 +76,54 @@ function stateFor(name: string): LauncherState {
   return s;
 }
 
+/** A square with a letter, as a data: address: the icon of a made-up mod. */
+function devIcon(letter: string, color: string): string {
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = 64;
+  const context = canvas.getContext('2d');
+  if (!context) return '';
+  context.fillStyle = color;
+  context.fillRect(0, 0, 64, 64);
+  context.fillStyle = '#fff';
+  context.font = 'bold 34px sans-serif';
+  context.textAlign = 'center';
+  context.fillText(letter, 32, 45);
+  return canvas.toDataURL('image/png');
+}
+
+const devMods = [
+  { projectId: 'dev00001', slug: 'a', title: 'Sample Lighting', description: 'Soft, smooth lighting for caves and nights. A made-up mod for working on the page.', author: 'someone', downloads: 4_200_000, categories: ['fabric', 'neoforge', 'optimization'], color: '#e0a33d' },
+  { projectId: 'dev00002', slug: 'b', title: 'Sample Minimap', description: 'A small map of what is round you, with waypoints.', author: 'somebody', downloads: 2_750_000, categories: ['fabric', 'forge', 'utility'], color: '#3d8fe0' },
+  { projectId: 'dev00003', slug: 'c', title: 'Sample Zoom', description: 'Hold a key to look far away, with a smooth field of view.', author: 'someone', downloads: 87_000, categories: ['fabric', 'quilt'], color: '#9b59e0' },
+].map((m) => ({ ...m, icon: devIcon(m.title[7], m.color) }));
+
 export function createDevHost(deliver: (message: unknown) => void): { send: (message: string) => void } {
+  let state: LauncherState = base();
   return {
     send(message: string) {
       const request = JSON.parse(message) as { id: number; method: string; params?: Record<string, unknown> };
       console.info('[dev host]', request.method, request.params);
       if (request.method === 'uiReady') {
-        deliver({ event: 'state', state: stateFor(window.location.hash.replace('#', '')) });
+        state = stateFor(window.location.hash.replace('#', ''));
+        deliver({ event: 'state', state });
+      }
+      if (request.method === 'searchMods') {
+        // Like the launcher: the answer comes later.
+        const query = String(request.params?.query ?? '').toLowerCase();
+        const hits = devMods.filter((m) => !query || `${m.title} ${m.description}`.toLowerCase().includes(query));
+        window.setTimeout(() => deliver({ id: request.id, ok: true, result: { hits, offset: 0, limit: 20, total: hits.length, query } }), 500);
+        return;
+      }
+      if (request.method === 'installMod') {
+        const projectId = String(request.params?.projectId ?? '');
+        state = { ...state, mods: { ...state.mods, busy: { [projectId]: 'Downloading…' } } };
+        deliver({ event: 'state', state });
+        window.setTimeout(() => {
+          state = { ...state, mods: { ...state.mods, busy: {}, installed: { ...state.mods.installed, [projectId]: { title: String(request.params?.title ?? ''), version: '1.0.0', file: `${projectId}-1.0.0.jar`, loader: 'fabric' } } } };
+          deliver({ event: 'state', state });
+          deliver({ id: request.id, ok: true, result: { projectId } });
+        }, 1200);
+        return;
       }
       deliver({ id: request.id, ok: true, result: {} });
     },

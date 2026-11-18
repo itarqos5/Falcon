@@ -4,6 +4,13 @@ export function formatBytes(bytes: number): string {
   return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
 }
 
+/** 4231512 -> "4.2M", 87000 -> "87K": a count of downloads. */
+export function formatCount(count: number): string {
+  if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(count >= 10_000_000 ? 0 : 1).replace(/\.0$/, '')}M`;
+  if (count >= 1_000) return `${(count / 1_000).toFixed(count >= 10_000 ? 0 : 1).replace(/\.0$/, '')}K`;
+  return String(count);
+}
+
 /** 069a79f444e94726a5befca90e38aaf5 -> 069a79f4-44e9-4726-a5be-fca90e38aaf5 */
 export function dashedUuid(uuid: string): string {
   return uuid.length === 32 ? `${uuid.slice(0, 8)}-${uuid.slice(8, 12)}-${uuid.slice(12, 16)}-${uuid.slice(16, 20)}-${uuid.slice(20)}` : uuid;

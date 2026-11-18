@@ -2,13 +2,14 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { call } from '../bridge';
 import { buyUrl, dashedUuid, formatBytes, profileUrl } from '../format';
-import { Check, Copy, Cpu, Download, External, Folder, Play, Refresh, ShieldAlert, Spinner, Terminal } from '../icons';
+import { Box, Check, Copy, Cpu, Download, External, Folder, Play, Refresh, ShieldAlert, Spinner, Terminal } from '../icons';
 import { falconLogo } from '../logo';
 import type { LauncherState } from '../types';
 import { Avatar } from './Avatar';
 import { ErrorCard } from './ErrorCard';
+import { ModsPage } from './ModsPage';
 
-type Tab = 'overview' | 'logs';
+type Tab = 'overview' | 'mods' | 'logs';
 
 function Notice({ title, actions, children }: { title: string; actions: ReactNode; children: ReactNode }) {
   return (
@@ -183,7 +184,7 @@ function Logs() {
 }
 
 export function InstancePage({ state }: { state: LauncherState }) {
-  const [tab, setTab] = useState<Tab>(() => (window.location.hash === '#logs' ? 'logs' : 'overview'));
+  const [tab, setTab] = useState<Tab>(() => (window.location.hash === '#logs' ? 'logs' : window.location.hash === '#mods' ? 'mods' : 'overview'));
   const account = state.account;
   if (!account) return null;
 
@@ -273,12 +274,15 @@ export function InstancePage({ state }: { state: LauncherState }) {
         <button className={`tab ${tab === 'overview' ? 'active' : ''}`} role="tab" aria-selected={tab === 'overview'} onClick={() => setTab('overview')}>
           Overview
         </button>
+        <button className={`tab ${tab === 'mods' ? 'active' : ''}`} role="tab" aria-selected={tab === 'mods'} onClick={() => setTab('mods')}>
+          <Box size={14} /> Mods
+        </button>
         <button className={`tab ${tab === 'logs' ? 'active' : ''}`} role="tab" aria-selected={tab === 'logs'} onClick={() => setTab('logs')}>
           <Terminal size={14} /> Logs
         </button>
       </div>
 
-      {tab === 'overview' ? <Overview state={state} /> : <Logs />}
+      {tab === 'overview' ? <Overview state={state} /> : tab === 'mods' ? <ModsPage state={state} /> : <Logs />}
     </div>
   );
 }
