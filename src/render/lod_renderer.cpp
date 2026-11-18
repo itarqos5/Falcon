@@ -528,13 +528,21 @@ void LodRenderer::request(const TileKey& key, double priority) {
     // for each column of the others.
     const worldgen::LodMode mode = cell <= detail_.chunkMax ? worldgen::LodMode::Chunk : worldgen::LodMode::Direct;
     const int epoch = shared_->epoch.load();
-    pool_.submit(static_cast<float>(priority), [surface = surface_, shared = shared_, textures = textures_, key, epoch, cell, mode, originX, originZ] {
+    const double centreX = static_cast<double>(originX) + size * 0.5, centreZ = static_cast<double>(originZ) + size * 0.5;
+    const double askedFrom = std::hypot(centreX - shared_->camX.load(), centreZ - shared_->camZ.load());
+    pool_.submit(static_cast<float>(priority), [surface = surface_, shared = shared_, textures = textures_, key, epoch, cell, mode, originX, originZ, centreX, centreZ, askedFrom, size] {
         if (shared->epoch.load() == epoch) {
-            const worldgen::LodGrid grid = surface->grid(originX, originZ, cell, kCells, mode);
             Result r;
             r.key = key;
             r.epoch = epoch;
-            r.vertices = buildColumns(grid, cell, textures, r.minY, r.maxY);
+            // The queue holds tiles that were wanted when the player was somewhere else (flying fast, or turning): one that is now a good way further off than it was is left out, so the tiles
+            // that are wanted now do not wait behind it. It is asked for again if the player comes back.
+            if (std::hypot(centreX - shared->camX.load(), centreZ - shared->camZ.load()) > askedFrom + 160.0 + size) {
+                r.dropped = true;
+            } else {
+                const worldgen::LodGrid grid = surface->grid(originX, originZ, cell, kCells, mode);
+                r.vertices = buildColumns(grid, cell, textures, r.minY, r.maxY);
+            }
             std::lock_guard<std::mutex> lock(shared->mutex);
             shared->done.push_back(std::move(r));
         }
@@ -590,6 +598,10 @@ void LodRenderer::release(int buffer, std::uint32_t first, std::uint32_t count) 
 void LodRenderer::upload(Result&& result) {
     const auto it = tiles_.find(result.key);
     if (it == tiles_.end() || it->second.state != State::Requested) return;  // let go of while it was being made
+    if (result.dropped) {
+        tiles_.erase(it);
+        return;
+    }
     Tile& tile = it->second;
     const auto count = static_cast<std::uint32_t>(result.vertices.size());
     if (!allocate(count, tile.buffer, tile.first)) {
@@ -631,7 +643,12 @@ void LodRenderer::update(double camX, double camZ, int nearChunks, double upload
     if (!settings_.enabled) return;
     const double nearBlocks = static_cast<double>(nearChunks) * 16.0;
     const double maxBlocks = static_cast<double>(settings_.radiusChunks) * 16.0;
+    shared_->camX = camX;
+    shared_->camZ = camZ;
     select(camX, camZ, nearBlocks, maxBlocks);
+    // Nearest first. The tiles come out of the quadtree in the order of its rows, and with a limit on how many are being made (below) the ones that came last, which may be the nearest, were
+    // asked for last: some tiles next to the player waited for hundreds of far ones in other directions.
+    std::stable_sort(wanted_.begin(), wanted_.end(), [](const Wanted& a, const Wanted& b) { return a.distance < b.distance; });
 
     // Ask for what is missing: first a coarse stand-in a few levels up (cheap, and it fills the view quickly), then the tile itself.
     constexpr int kMaxBuilding = 1500;

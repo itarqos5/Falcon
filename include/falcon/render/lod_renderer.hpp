@@ -135,6 +135,7 @@ private:
         int epoch;
         std::vector<Vertex> vertices;
         float minY, maxY;
+        bool dropped = false;  // not made: the camera had moved away from the tile before a worker got to it (the tile is forgotten, and asked for again if it is wanted again)
     };
     // What the worker jobs share with the renderer; held by every job, so a job that finishes after the renderer is gone only finds its results dropped.
     struct Shared {
@@ -142,6 +143,7 @@ private:
         std::vector<Result> done;
         std::atomic<int> epoch{0};
         std::atomic<int> building{0};
+        std::atomic<double> camX{0.0}, camZ{0.0};  // where the camera is now (the jobs look: a tile that has fallen far behind is not worth making)
     };
     struct Detail {
         int cellMin;        // the finest cell, in blocks
