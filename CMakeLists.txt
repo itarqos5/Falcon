@@ -207,6 +207,7 @@ add_library(falcon_base
     src/jvm/shims.cpp
     src/jvm/shims_game.cpp
     src/jvm/host_natives.cpp
+    src/jvm/reflect_natives.cpp
     src/jvm/modapi.cpp
     src/jvm/mod_content.cpp
     src/jvm/mod_runtime.cpp

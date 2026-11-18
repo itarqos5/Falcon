@@ -187,6 +187,19 @@ void installLang(Vm& reg) {
     });
     NAT("java/lang/Class", "toString", "()Ljava/lang/String;", return R(vm.newString("class " + vm.str(a[0].a))););
     NAT("java/lang/Class", "desiredAssertionStatus", "()Z", return Z(false););
+    // Class.forName: a class that is nowhere (not in a jar, not the platform's, not a native class) is a ClassNotFoundException, which is how a mod probes for another mod's classes.
+    STAT("java/lang/Class", "forName", "(Ljava/lang/String;)Ljava/lang/Class;", {
+        std::string name = vm.str(a[0].a);
+        std::replace(name.begin(), name.end(), '.', '/');
+        if (vm.loadClass(name)->shim) vm.throwNew("java/lang/ClassNotFoundException", vm.str(a[0].a));
+        return R(vm.classObject(name));
+    });
+    STAT("java/lang/Class", "forName", "(Ljava/lang/String;ZLjava/lang/ClassLoader;)Ljava/lang/Class;", {
+        std::string name = vm.str(a[0].a);
+        std::replace(name.begin(), name.end(), '.', '/');
+        if (vm.loadClass(name)->shim) vm.throwNew("java/lang/ClassNotFoundException", vm.str(a[0].a));
+        return R(vm.classObject(name));
+    });
     NAT("java/lang/Class", "isInstance", "(Ljava/lang/Object;)Z", return Z(vm.instanceOf(a[1].a, vm.loadClass(vm.str(a[0].a)))););
 
     // ---- String ----

@@ -235,7 +235,7 @@ bool ModInstance::runEvent(const char* name, const char* desc, const Value* args
 std::vector<std::string> ModInstance::tick() {
     std::vector<std::string> said;
     if (platform_) {
-        runEvent("tick", "()V", nullptr, 400000);
+        runEvent("tick", "()V", nullptr, 12'000'000);
         said.swap(vm_->capture.chat);
         for (std::string& line : vm_->capture.overlay) said.push_back(std::move(line));
         vm_->capture.overlay.clear();
@@ -283,9 +283,9 @@ std::vector<std::string> ModInstance::takeChat() {
     return out;
 }
 
-void ModInstance::clientStarted() { if (platform_) runEvent("clientStarted", "()V", nullptr, 600'000); }
-void ModInstance::joined() { if (platform_) runEvent("join", "()V", nullptr, 3'000'000); }
-void ModInstance::left() { if (platform_) runEvent("disconnect", "()V", nullptr, 3'000'000); }
+void ModInstance::clientStarted() { if (platform_) runEvent("clientStarted", "()V", nullptr, 20'000'000); }
+void ModInstance::joined() { if (platform_) runEvent("join", "()V", nullptr, 40'000'000); }
+void ModInstance::left() { if (platform_) runEvent("disconnect", "()V", nullptr, 40'000'000); }
 
 bool ModInstance::hasCommand(const std::string& name) {
     if (!platform_ || !vm_) return false;
@@ -324,7 +324,7 @@ std::vector<WorldSubmit> ModInstance::renderLevel(float partialTick) {
     if (!vm_ || !platform_) return out;
     vm_->capture.submits.clear();
     Value arg = valueOfFloat(partialTick);
-    runEvent("levelRender", "(F)V", &arg, 1'500'000);
+    runEvent("levelRender", "(F)V", &arg, 10'000'000);
     out.swap(vm_->capture.submits);
     collect();
     return out;
@@ -337,7 +337,7 @@ std::vector<DrawCmd> ModInstance::renderHud(float partialTick) {
     if (platform_) {
         vm.capture.draw.clear();
         Value arg = valueOfFloat(partialTick);
-        runEvent("hud", "(F)V", &arg, 400'000);
+        runEvent("hud", "(F)V", &arg, 6'000'000);
         out.swap(vm.capture.draw);
         collect();
         return out;

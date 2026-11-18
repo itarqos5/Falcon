@@ -15,6 +15,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <set>
 #include <string>
 #include <unordered_map>
@@ -255,6 +256,8 @@ public:
     // the names the game uses, before a mod's jar is asked; a class neither has is a stand-in. Methods declared native in them are answered by defineHostNative.
     void addPlatformJar(std::shared_ptr<const ZipArchive> jar);
     void defineHostNative(const std::string& cls, const std::string& name, const std::string& desc, NativeFn fn);
+    // A file of the mod's jars (or the platform's): "assets/examplemod/lang/en_us.json".
+    [[nodiscard]] std::optional<std::vector<unsigned char>> readResource(const std::string& path) const;
     // Calls a static method of a loaded class by name; the arguments one Value each. Null when there is no such method.
     Value callStatic(const std::string& cls, const std::string& name, const std::string& desc, const Value* args, int count, bool* found = nullptr);
 
@@ -380,5 +383,6 @@ private:
 void installNatives(Vm& vm);
 void installShims(Vm& vm);
 void installHostNatives(Vm& vm);
+void installReflectNatives(Vm& vm);
 
 }  // namespace falcon::jvm

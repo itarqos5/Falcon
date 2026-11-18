@@ -384,6 +384,16 @@ Class* Vm::loadClass(const std::string& name) {
 
 void Vm::addPlatformJar(std::shared_ptr<const ZipArchive> jar) { platformJars_.push_back(std::move(jar)); }
 
+std::optional<std::vector<unsigned char>> Vm::readResource(const std::string& path) const {
+    for (const auto& jar : jars_) {
+        if (auto bytes = jar->read(path)) return bytes;
+    }
+    for (const auto& jar : platformJars_) {
+        if (auto bytes = jar->read(path)) return bytes;
+    }
+    return std::nullopt;
+}
+
 void Vm::defineHostNative(const std::string& cls, const std::string& name, const std::string& desc, NativeFn fn) { hostNatives_[cls + "." + name + desc] = std::move(fn); }
 
 Value Vm::callStatic(const std::string& cls, const std::string& name, const std::string& desc, const Value* args, int count, bool* found) {

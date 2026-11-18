@@ -437,6 +437,8 @@ void installHostNatives(Vm& vm) {
         return ref(out);
     });
 
+    installReflectNatives(vm);
+
     // ---- pictures ----
     nat("decodeImageSize", "([B)[I", [](Vm& v, Value* a) {
         Object* bytes = a[0].a;
