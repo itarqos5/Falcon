@@ -363,6 +363,7 @@ add_library(falcon_core
     src/worldgen/material.cpp
     src/worldgen/overworld_generator.cpp
     src/worldgen/underground.cpp
+    src/worldgen/nether_carver.cpp
     src/worldgen/lod_surface.cpp
     src/net/server_pinger.cpp
     src/net/connection.cpp

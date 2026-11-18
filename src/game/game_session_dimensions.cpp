@@ -7,11 +7,13 @@
 #include "falcon/render/hand_renderer.hpp"
 #include "falcon/world/nether_decoration.hpp"
 #include "falcon/world/world_save.hpp"
+#include "falcon/worldgen/nether_carver.hpp"
 #include "falcon/worldgen/overworld_generator.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <memory>
 
 namespace falcon {
 namespace {
@@ -36,6 +38,10 @@ bool GameSession::prepareDimension(int dimension) {
     if (!generator) {
         falcon::log::line("the %s could not be made (%s)\n", dimension == 1 ? "Nether" : "End", error.c_str());
         return false;
+    }
+    if (dimension == 1) {  // the Nether's caves (the End has none)
+        auto carver = std::make_shared<const worldgen::NetherCarver>(*registry_, info_.seed);
+        generator->setChunkStage([carver](std::vector<Block>& blocks, int chunkX, int chunkZ) { carver->apply(blocks, chunkX, chunkZ); });
     }
     dim.generator = std::move(generator);
     const worldgen::OverworldGenerator* self = dim.generator.get();

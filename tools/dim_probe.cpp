@@ -10,6 +10,7 @@
 #include "falcon/world/block_registry.hpp"
 #include "falcon/world/chunk.hpp"
 #include "falcon/world/decoration.hpp"
+#include "falcon/worldgen/nether_carver.hpp"
 #include "falcon/worldgen/overworld_generator.hpp"
 
 #include <algorithm>
@@ -67,6 +68,10 @@ int main(int argc, char** argv) {
     if (!generator) {
         std::fprintf(stderr, "generator: %s\n", error.c_str());
         return 1;
+    }
+    if (dim == "nether" && std::getenv("FALCON_NO_NETHER_CARVER") == nullptr) {  // (the Nether's caves, as the game session adds them)
+        auto carver = std::make_shared<const falcon::worldgen::NetherCarver>(*registry, seed);
+        generator->setChunkStage([carver](std::vector<falcon::Block>& blocks, int x, int z) { carver->apply(blocks, x, z); });
     }
     std::printf("generator ready in %.0f ms\n", std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count());
 
