@@ -1,7 +1,11 @@
 #include "falcon/world/decoration.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <initializer_list>
+#include <unordered_set>
+#include <utility>
 
 namespace falcon {
 namespace {
@@ -176,12 +180,12 @@ Decorator::Profile Decorator::profileFor(const std::string& full) const {
         set(Plant::Grass, 6.0f);
         set(Plant::TallGrass, 0.5f);
     } else if (n == "desert") {
-        set(Plant::Cactus, 1.5f);
-        set(Plant::DeadBush, 1.0f);
+        set(Plant::Cactus, 1.0f / 6.0f);  // patch_cactus_desert: rarity_filter 6, then 10 tries
+        set(Plant::DeadBush, 2.0f);       // patch_dead_bush_2: count 2, then 4 tries
     } else if (contains(n, "badlands")) {
         trees(contains(n, "wooded") ? 3.0f : 0.0f, T::Oak, T::Oak, T::Oak);
-        set(Plant::Cactus, 1.0f);
-        set(Plant::DeadBush, 1.5f);
+        set(Plant::Cactus, 1.0f / 13.0f);  // patch_cactus_decorated: rarity_filter 13, then 10 tries
+        set(Plant::DeadBush, 20.0f);       // patch_dead_bush_badlands: count 20, then 4 tries
     } else if (n == "swamp" || n == "mangrove_swamp") {
         trees(2.5f, T::Oak, T::Oak, T::Oak);
         set(Plant::Grass, 2.0f);
@@ -326,6 +330,15 @@ void Decorator::decorate(Chunk& chunk, int chunkX, int chunkZ, const worldgen::C
     const BlockRegistry& reg = registry_;
     const int grassIndex = reg.state(b_.grassBlock).block, podzolIndex = reg.state(b_.podzol).block;
     const int sandIndex = reg.state(b_.sand).block, redSandIndex = reg.state(b_.redSand).block, mossIndex = reg.state(b_.moss).block;
+    // What a dead bush may stand on besides sand (the game's supports_dry_vegetation: terracotta, and the grounds plants grow on).
+    std::unordered_set<int> dryVegetationGround;
+    for (const char* name : {"terracotta", "white_terracotta", "orange_terracotta", "magenta_terracotta", "light_blue_terracotta", "yellow_terracotta", "lime_terracotta", "pink_terracotta",
+                             "gray_terracotta", "light_gray_terracotta", "cyan_terracotta", "purple_terracotta", "blue_terracotta", "brown_terracotta", "green_terracotta", "red_terracotta",
+                             "black_terracotta", "dirt", "coarse_dirt", "rooted_dirt", "podzol", "grass_block", "mycelium", "moss_block", "mud", "farmland"}) {
+        const Block block = named(name);
+        if (!registry_.isAir(block)) dryVegetationGround.insert(reg.state(block).block);
+    }
+    std::vector<std::array<int, 2>> cactusColumns;  // (the cacti this chunk has laid down so far, by world column)
 
     // ---- the ground: snow, ice and sea plants, column by column (this chunk's own columns) ----
     for (int z = 0; z < 16; ++z) {
@@ -396,7 +409,7 @@ void Decorator::decorate(Chunk& chunk, int chunkX, int chunkZ, const worldgen::C
         {Plant::Flower, Block::Air, Block::Air, 48, 6, 0x54},  // the flower itself is picked per plant
         {Plant::Sunflower, b_.sunflowerLower, b_.sunflowerUpper, 48, 7, 0x55},
         {Plant::Cactus, b_.cactus, Block::Air, 10, 7, 0x56},
-        {Plant::DeadBush, b_.deadBush, Block::Air, 8, 7, 0x57},
+        {Plant::DeadBush, b_.deadBush, Block::Air, 4, 7, 0x57},
     };
     for (int dcz = -1; dcz <= 1; ++dcz) {
         for (int dcx = -1; dcx <= 1; ++dcx) {
@@ -420,10 +433,20 @@ void Decorator::decorate(Chunk& chunk, int chunkX, int chunkZ, const worldgen::C
                     };
                     const int originX = ncx * 16 + rnd(16);
                     const int originZ = ncz * 16 + rnd(16);
+                    // Cacti and dead bushes try at a height too: the game takes the height of the ground at the patch's own spot and moves each try up or down by up to 3 (a trapezoid, like
+                    // the sideways move), and the try only counts if it is in the air with something to stand on. On flat sand that is one try in four (the roll is 0), on a dune the
+                    // slope decides: far fewer than a plant at the ground of every try.
+                    const bool movesInHeight = kind.plant == Plant::Cactus || kind.plant == Plant::DeadBush;
+                    int originHeight = 0;
+                    if (movesInHeight) {
+                        const bool inside = originX >= x0 && originX < x0 + 16 && originZ >= z0 && originZ < z0 + 16;
+                        originHeight = inside ? extras.heightmaps.worldSurface[static_cast<std::size_t>((originX - x0) + 16 * (originZ - z0))] : generator_.surfaceHeightAt(originX, originZ) + 1;
+                    }
                     for (int t = 0; t < kind.tries; ++t) {
                         // The game's trapezoid offset: two rolls added, so the middle of the patch is the thickest.
                         const int ox = (rnd(kind.spread + 1) + rnd(kind.spread + 1)) - kind.spread;
                         const int oz = (rnd(kind.spread + 1) + rnd(kind.spread + 1)) - kind.spread;
+                        const int oy = movesInHeight ? rnd(4) + rnd(4) - 3 : 0;
                         const int roll = rnd(1024);
                         const int wx = originX + ox, wz = originZ + oz;
                         if (wx < x0 || wx >= x0 + 16 || wz < z0 || wz >= z0 + 16) continue;  // another chunk lays this one down
@@ -434,6 +457,7 @@ void Decorator::decorate(Chunk& chunk, int chunkX, int chunkZ, const worldgen::C
                         const worldgen::BiomeId here = extras.biomes.at(x >> 2, surface >> 2, z >> 2);
                         const Profile& hereProfile = profiles_[here < profiles_.size() ? here : 0];
                         if (hereProfile.patchesOf(kind.plant) <= 0.0f || hereProfile.snow) continue;
+                        if (movesInHeight && originHeight + oy != surface + 1) continue;  // (not in the air on the ground here)
                         const Block top = chunk.at(x, surface, z);
                         const StateInfo& topInfo = reg.state(top);
                         if (!topInfo.has(kStateFullCollision) || topInfo.has(kStateLiquid)) continue;
@@ -442,8 +466,10 @@ void Decorator::decorate(Chunk& chunk, int chunkX, int chunkZ, const worldgen::C
                         const bool grassy = blockIndex == grassIndex || blockIndex == podzolIndex || blockIndex == mossIndex;
                         const bool sandy = blockIndex == sandIndex || blockIndex == redSandIndex;
                         Block lower = kind.block, upper = kind.upper;
-                        if (kind.plant == Plant::Cactus || kind.plant == Plant::DeadBush) {
-                            if (!sandy && !(kind.plant == Plant::DeadBush && topInfo.has(kStateFullCollision) && !grassy)) continue;
+                        if (kind.plant == Plant::Cactus) {
+                            if (!sandy) continue;  // (the game's tag of what a cactus stands on: sand, red sand)
+                        } else if (kind.plant == Plant::DeadBush) {
+                            if (!sandy && !dryVegetationGround.count(blockIndex)) continue;  // (sand, terracotta, dirt and the grounds of plants)
                         } else if (!grassy) {
                             continue;
                         }
@@ -464,8 +490,19 @@ void Decorator::decorate(Chunk& chunk, int chunkX, int chunkZ, const worldgen::C
                         }
                         if (registry_.isAir(lower)) continue;
                         if (!registry_.isAir(upper) && !reg.isAir(chunk.at(x, surface + 2, z))) continue;
-                        if (kind.plant == Plant::Cactus) {  // a cactus is 1 to 3 blocks tall and needs no neighbours
-                            const int height = 1 + roll % 3;
+                        if (kind.plant == Plant::Cactus) {
+                            // A cactus lives only where nothing solid is beside its foot (CactusBlock.canSurvive): not against a dune's slope, not next to another cactus.
+                            bool crowded = false;
+                            for (const auto& [dx, dz] : {std::pair{1, 0}, std::pair{-1, 0}, std::pair{0, 1}, std::pair{0, -1}}) {
+                                const int nx = x + dx, nz = z + dz;
+                                if (nx >= 0 && nx < 16 && nz >= 0 && nz < 16 && reg.state(chunk.at(nx, surface + 1, nz)).has(kStateFullCollision)) crowded = true;
+                                for (const auto& column : cactusColumns) crowded = crowded || (column[0] == wx + dx && column[1] == wz + dz);
+                            }
+                            if (crowded) continue;
+                            cactusColumns.push_back({wx, wz});
+                            // 1 to 3 blocks tall, mostly 1 (BiasedToBottomInt: the height is 1 + a roll of a roll): 61% one, 28% two, 11% three.
+                            const int inner = (roll >> 2) % 3;
+                            const int height = 1 + ((roll >> 5) % (inner + 1));
                             for (int k = 1; k <= height && surface + k < kMaxY; ++k) {
                                 edits.push_back({static_cast<std::uint8_t>(x), static_cast<std::uint8_t>(z), static_cast<std::int16_t>(surface + k), lower, true});
                             }

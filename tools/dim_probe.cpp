@@ -1,11 +1,15 @@
 // What the Nether's and the End's generators make: a chunk's blocks counted, a slice of it drawn in letters, and the biomes. A look at the terrain without starting the game.
 //
-//   falcon_dim_probe [--dim nether|end|overworld] [--seed S] [--chunk X Z] [--slice Z] [--map N]
+//   falcon_dim_probe [--dim nether|end|overworld] [--seed S] [--chunk X Z] [--slice Z] [--map N] [--plants N]
+//
+// --plants N decorates the N x N chunks round the chunk the way the game does (world/decoration.cpp) and says, for the desert and badlands chunks among them, how many cacti and dead bushes
+// each has: the number to compare with what the game's placed features give (a desert chunk: about 0.4 cacti and 8 dead-bush tries).
 //
 // --map N prints the top-down surface of N x N chunks round the chunk (one character per two blocks), for the shape of the land. It reads the game's data the way the tests do.
 #include "falcon/assets/asset_locator.hpp"
 #include "falcon/world/block_registry.hpp"
 #include "falcon/world/chunk.hpp"
+#include "falcon/world/decoration.hpp"
 #include "falcon/worldgen/overworld_generator.hpp"
 
 #include <algorithm>
@@ -20,7 +24,7 @@
 int main(int argc, char** argv) {
     std::string dim = "nether";
     std::int64_t seed = 12345;
-    int cx = 0, cz = 0, slice = 8, mapSize = 0, layer = -1000;
+    int cx = 0, cz = 0, slice = 8, mapSize = 0, layer = -1000, plants = 0;
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
         if (a == "--dim" && i + 1 < argc) dim = argv[++i];
@@ -30,6 +34,7 @@ int main(int argc, char** argv) {
             cz = std::atoi(argv[++i]);
         } else if (a == "--slice" && i + 1 < argc) slice = std::atoi(argv[++i]);
         else if (a == "--map" && i + 1 < argc) mapSize = std::atoi(argv[++i]);
+        else if (a == "--plants" && i + 1 < argc) plants = std::atoi(argv[++i]);
         else if (a == "--layer" && i + 1 < argc) layer = std::atoi(argv[++i]);  // with --map: what is at this height instead of the highest block
         else {
             std::fputs("usage: falcon_dim_probe [--dim nether|end|overworld] [--seed S] [--chunk X Z] [--slice Z] [--map N]\n", stderr);
@@ -64,6 +69,49 @@ int main(int argc, char** argv) {
         return 1;
     }
     std::printf("generator ready in %.0f ms\n", std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count());
+
+    if (plants > 0) {
+        const falcon::Decorator decorator(*generator, *registry, seed);
+        long chunksCounted = 0, cacti = 0, bushes = 0, columns = 0;
+        std::map<std::string, long> perBiome, seen;
+        for (int z = cz - plants / 2; z <= cz + plants / 2; ++z) {
+            for (int x = cx - plants / 2; x <= cx + plants / 2; ++x) {
+                falcon::worldgen::ChunkExtras extras;
+                auto made = generator->generate(x, z, extras);
+                const int surfaceY = extras.heightmaps.worldSurface[8 + 16 * 8] - 1;  // (the biome of the ground in the middle of the chunk: biomes are three-dimensional)
+                const std::string biome = generator->biomes().name(generator->biomeAt(x * 16 + 8, surfaceY, z * 16 + 8));
+                ++seen[biome];
+                if (biome.find("desert") == std::string::npos && biome.find("badlands") == std::string::npos) continue;
+                decorator.decorate(*made, x, z, extras);
+                ++chunksCounted;
+                ++perBiome[biome];
+                for (int y = falcon::kMinY; y < falcon::kMaxY; ++y) {
+                    for (int bz = 0; bz < 16; ++bz) {
+                        for (int bx = 0; bx < 16; ++bx) {
+                            const std::string& name = registry->type(made->at(bx, y, bz)).name;
+                            if (name == "cactus") {
+                                ++cacti;
+                                if (made->at(bx, y - 1, bz) != made->at(bx, y, bz)) ++columns;  // (the lowest block of a column)
+                            } else if (name == "dead_bush") {
+                                ++bushes;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        std::printf("chunk middles by biome:");
+        for (const auto& [biome, n] : seen) std::printf(" %s x%ld", biome.c_str(), n);
+        std::printf("\n");
+        std::printf("desert and badlands chunks: %ld (", chunksCounted);
+        for (const auto& [biome, n] : perBiome) std::printf(" %s x%ld", biome.c_str(), n);
+        std::printf(" )\n");
+        if (chunksCounted > 0) {
+            std::printf("  cactus blocks %ld (%.2f a chunk), cactus columns %ld (%.2f a chunk), dead bushes %ld (%.2f a chunk)\n", cacti, static_cast<double>(cacti) / static_cast<double>(chunksCounted), columns,
+                        static_cast<double>(columns) / static_cast<double>(chunksCounted), bushes, static_cast<double>(bushes) / static_cast<double>(chunksCounted));
+        }
+        return 0;
+    }
 
     const auto glyph = [&](falcon::Block b) -> char {
         if (b == falcon::Block::Air) return ' ';
