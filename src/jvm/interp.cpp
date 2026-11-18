@@ -79,7 +79,7 @@ Value Vm::run(Method* m, Value* locals) {
     for (;;) {
         try {
             for (;;) {
-                if (++instructions_ > budget) throw BudgetExceeded{"the mod ran out of instructions"};
+                if (++instructions_ > budget) throw BudgetExceeded{"the mod ran out of instructions in " + stackTrace(depth_)};
                 const std::uint8_t op = bc[pc];
                 switch (op) {
                     case 0x00: pc += 1; break;
@@ -376,6 +376,7 @@ Value Vm::run(Method* m, Value* locals) {
                     case 0xBF: {
                         Object* e = sp[-1].a;
                         if (e == nullptr) throwNew("java/lang/NullPointerException");
+                        throwDepth_ = depth_;
                         throw JavaThrow{e};
                     }
                     case 0xC0: {

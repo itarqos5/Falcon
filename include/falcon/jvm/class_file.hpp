@@ -48,6 +48,7 @@ struct Member {
     bool hasCode = false;
     Code code;
     std::uint16_t constantIndex = 0;  // a static field's ConstantValue
+    std::string signature;            // a field's generic signature ("Ljava/util/List<Ljava/lang/String;>;"), when it has one
 };
 
 struct Bootstrap {
@@ -65,6 +66,7 @@ struct ClassFile {
     std::vector<std::string> mixinTargets;  // class-level @Mixin: the game classes it patches ("net/minecraft/client/gui/screens/TitleScreen")
     std::vector<MixinHook> hooks;           // the injector annotations on its methods
     std::vector<std::string> record;        // the component names of a record ("x", "y"), from the Record attribute
+    std::string signature;                  // the class's generic signature ("Lcom/google/gson/reflect/TypeToken<Ljava/util/List<Lcom/x/Foo;>;>;"), when it has one
 
     [[nodiscard]] const std::string& utf8(std::uint16_t index) const;
     [[nodiscard]] const std::string& className(std::uint16_t classIndex) const;  // the name a Class entry gives

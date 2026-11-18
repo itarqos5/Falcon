@@ -21,6 +21,13 @@ using namespace falcon::jvm;
 
 namespace {
 
+// The mods of these tests are compiled against stub classes of the game (tests/jvm_mod/api): their run without the platform is the one with stand-ins for everything of the game.
+RunOptions standIns() {
+    RunOptions options;
+    options.platform = false;
+    return options;
+}
+
 std::map<std::string, const Registration*> byId(const ModReport& r) {
     std::map<std::string, const Registration*> out;
     for (const Registration& reg : r.registrations) out[reg.id] = &reg;
@@ -28,7 +35,7 @@ std::map<std::string, const Registration*> byId(const ModReport& r) {
 }
 
 void test_mod_start_up() {
-    const ModReport r = runMod(FALCON_JVM_TEST_JAR);
+    const ModReport r = runMod(FALCON_JVM_TEST_JAR, standIns());
     CHECK(r.supported && r.modId == "vmtest" && r.loader == "Fabric" && r.error.empty());
     CHECK(r.entrypoints.size() == 2);  // (main and client)
     const auto ids = byId(r);
@@ -66,7 +73,7 @@ void test_mod_start_up() {
 
 // The handlers a mod registered run again every tick, and what they do to the player is handed over: here, one line of chat on the third tick.
 void test_tick_handlers() {
-    ModInstance mod(FALCON_JVM_TEST_JAR);
+    ModInstance mod(FALCON_JVM_TEST_JAR, standIns());
     CHECK(mod.report().supported);
     std::vector<std::vector<std::string>> said;
     for (int i = 0; i < 5; ++i) said.push_back(mod.tick());
@@ -77,7 +84,7 @@ void test_tick_handlers() {
 
 // What a mod adds, read as facts: items with their properties, a block, the tabs the items are listed in, a key; and the HUD, the key and the button at work.
 void test_content() {
-    ModInstance mod(FALCON_JVM_CONTENT_JAR);
+    ModInstance mod(FALCON_JVM_CONTENT_JAR, standIns());
     CHECK(mod.report().supported && mod.report().error.empty());
     const ModContent& c = mod.content();
     CHECK(c.modId == "vmcontent");
@@ -138,6 +145,43 @@ void test_content() {
     CHECK(mod.report().error.empty());
 }
 
+// The same mod on the platform's own Java classes (modapi/falcon-modapi.jar): what it registers is read from real Item, Block and KeyMapping objects, its tick handler talks to a real LocalPlayer, and
+// its HUD draws through the platform's GuiGraphics into commands for the client.
+void test_platform() {
+    ModInstance mod(FALCON_JVM_CONTENT_JAR);
+    if (!mod.onPlatform()) {
+        std::puts("  (the platform jar is not there: the platform test is skipped)");
+        return;
+    }
+    CHECK(mod.report().supported && mod.report().error.empty());
+    const ModContent& c = mod.content();
+    CHECK(c.items.size() == 3 && c.blocks.size() == 1 && c.keys.size() == 1);
+    if (c.blocks.size() == 1) CHECK(c.blocks[0].id == "vmcontent:ruby_block" && c.blocks[0].hardness == 3.0f && c.blocks[0].resistance == 6.0f && c.blocks[0].light == 7 && c.blocks[0].sound == "amethyst_block");
+    for (const ModItemDef& i : c.items) {
+        if (i.id == "vmcontent:ruby") CHECK(i.stacksTo == 16 && i.food && i.nutrition == 4);
+        if (i.id == "vmcontent:ruby_sword") CHECK(i.durability == 250 && i.stacksTo == 1 && i.rarity == "epic");
+        if (i.id == "vmcontent:ruby_block") CHECK(i.block == "vmcontent:ruby_block");
+    }
+    if (c.keys.size() == 1) CHECK(c.keys[0].name == "key.vmcontent.hello" && c.keys[0].key == 72 && c.keys[0].category == "key.categories.vmcontent");
+    HostState& h = mod.host();
+    h.dimension = "minecraft:overworld";
+    h.playerName = "Tester";
+    h.playerUuid = "11111111-2222-3333-4444-555555555555";
+    h.textWidth = [](const std::string& t) { return static_cast<int>(t.size()) * 6; };
+    int clicks = 1;
+    h.consumeClick = [&](const std::string& name) {
+        if (name != "key.vmcontent.hello" || clicks == 0) return false;
+        --clicks;
+        return true;
+    };
+    const std::vector<std::string> said = mod.tick();
+    if (said != std::vector<std::string>{"the key was pressed 1"}) std::fprintf(stderr, "  platform tick said %zu line(s); error: %s\n", said.size(), mod.report().error.c_str());
+    CHECK(said == std::vector<std::string>{"the key was pressed 1"});
+    const std::vector<DrawCmd> hud = mod.renderHud();
+    CHECK(hud.size() == 2 && hud[0].kind == DrawCmd::Kind::Fill && hud[1].kind == DrawCmd::Kind::Text && hud[1].text == "Ruby HUD 1" && hud[1].x0 == 8 && hud[1].color == 0xFFFF5555u);
+    CHECK(mod.report().error.empty());
+}
+
 void test_speed_and_limits() {
     auto jar = falcon::ZipArchive::open(FALCON_JVM_TEST_JAR);
     CHECK(jar.has_value());
@@ -195,6 +239,7 @@ int main() {
     test_mod_start_up();
     test_tick_handlers();
     test_content();
+    test_platform();
     test_speed_and_limits();
     if (g_failures != 0) {
         std::fprintf(stderr, "%d check(s) failed\n", g_failures);

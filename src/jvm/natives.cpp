@@ -197,6 +197,48 @@ void installLang(Vm& reg) {
         for (const Value& v : a[1].a->elems) a[0].a->str.push_back(static_cast<char>(v.i));
         return V();
     });
+    // (a String holds its bytes: UTF-8 is what it already is)
+    NAT("java/lang/String", "<init>", "([B)V", {
+        a[0].a->kind = Kind::String;
+        for (const Value& v : a[1].a->elems) a[0].a->str.push_back(static_cast<char>(v.i));
+        return V();
+    });
+    NAT("java/lang/String", "<init>", "([BLjava/nio/charset/Charset;)V", {
+        a[0].a->kind = Kind::String;
+        for (const Value& v : a[1].a->elems) a[0].a->str.push_back(static_cast<char>(v.i));
+        return V();
+    });
+    NAT("java/lang/String", "<init>", "([BII)V", {
+        a[0].a->kind = Kind::String;
+        for (int i = a[2].i; i < a[2].i + a[3].i && i < static_cast<int>(a[1].a->elems.size()); ++i) a[0].a->str.push_back(static_cast<char>(a[1].a->elems[static_cast<std::size_t>(i)].i));
+        return V();
+    });
+    NAT("java/lang/String", "getBytes", "()[B", {
+        const std::string& str = vm.str(a[0].a);
+        Object* bytes = vm.newArray('B', static_cast<int>(str.size()));
+        for (std::size_t i = 0; i < str.size(); ++i) bytes->elems[i] = I(static_cast<signed char>(str[i]));
+        return R(bytes);
+    });
+    NAT("java/lang/String", "getBytes", "(Ljava/nio/charset/Charset;)[B", {
+        const std::string& str = vm.str(a[0].a);
+        Object* bytes = vm.newArray('B', static_cast<int>(str.size()));
+        for (std::size_t i = 0; i < str.size(); ++i) bytes->elems[i] = I(static_cast<signed char>(str[i]));
+        return R(bytes);
+    });
+    NAT("java/lang/String", "trim", "()Ljava/lang/String;", {
+        const std::string& str = vm.str(a[0].a);
+        std::size_t b = 0, e = str.size();
+        while (b < e && static_cast<unsigned char>(str[b]) <= ' ') ++b;
+        while (e > b && static_cast<unsigned char>(str[e - 1]) <= ' ') --e;
+        return R(vm.newString(str.substr(b, e - b)));
+    });
+    NAT("java/lang/String", "strip", "()Ljava/lang/String;", {
+        const std::string& str = vm.str(a[0].a);
+        std::size_t b = 0, e = str.size();
+        while (b < e && std::isspace(static_cast<unsigned char>(str[b])) != 0) ++b;
+        while (e > b && std::isspace(static_cast<unsigned char>(str[e - 1])) != 0) --e;
+        return R(vm.newString(str.substr(b, e - b)));
+    });
     NAT("java/lang/String", "length", "()I", return I(static_cast<int>(vm.str(a[0].a).size())););
     NAT("java/lang/String", "isEmpty", "()Z", return Z(vm.str(a[0].a).empty()););
     NAT("java/lang/String", "isBlank", "()Z", {
@@ -651,13 +693,33 @@ void installUtil(Vm& reg) {
     for (const char* cls : {"java/util/HashMap"}) {
         const std::string c = cls;
         const auto find = [](Vm& v, Object* m, Object* key) -> int {
-            for (std::size_t i = 0; i < m->map.size(); ++i) {
-                if (v.equalsJava(m->map[i].first.a, key)) return static_cast<int>(i);
+            if (m->map.size() <= 12) {
+                for (std::size_t i = 0; i < m->map.size(); ++i) {
+                    if (v.equalsJava(m->map[i].first.a, key)) return static_cast<int>(i);
+                }
+                return -1;
+            }
+            // a bigger map: by the hash of the key (the entries after the ones the index covers were only appended; removals make it start again)
+            if (m->mapIndexStale || m->mapIndexed > m->map.size()) {
+                m->mapIndex.clear();
+                m->mapIndexed = 0;
+                m->mapIndexStale = false;
+            }
+            for (; m->mapIndexed < m->map.size(); ++m->mapIndexed) m->mapIndex.emplace(v.hashJava(m->map[m->mapIndexed].first.a), static_cast<std::uint32_t>(m->mapIndexed));
+            const auto range = m->mapIndex.equal_range(v.hashJava(key));
+            for (auto it = range.first; it != range.second; ++it) {
+                if (it->second < m->map.size() && v.equalsJava(m->map[it->second].first.a, key)) return static_cast<int>(it->second);
             }
             return -1;
         };
         reg.defineNative(c, "<init>", "()V", false, [](Vm&, Value*) { return V(); });
         reg.defineNative(c, "<init>", "(I)V", false, [](Vm&, Value*) { return V(); });
+        reg.defineNative(c, "<init>", "(IF)V", false, [](Vm&, Value*) { return V(); });
+        reg.defineNative(c, "<init>", "(IFZ)V", false, [](Vm&, Value*) { return V(); });
+        reg.defineNative(c, "<init>", "(Ljava/util/Map;)V", false, [](Vm&, Value* a) {
+            if (a[1].a != nullptr) a[0].a->map = a[1].a->map;  // (a copy of the entries)
+            return V();
+        });
         reg.defineNative(c, "put", "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;", false, [find](Vm& v, Value* a) {
             const int at = find(v, a[0].a, a[1].a);
             if (at >= 0) {
@@ -682,6 +744,7 @@ void installUtil(Vm& reg) {
             if (at < 0) return R(nullptr);
             const Value old = a[0].a->map[static_cast<std::size_t>(at)].second;
             a[0].a->map.erase(a[0].a->map.begin() + at);
+            a[0].a->mapIndexStale = true;
             return old;
         });
         reg.defineNative(c, "putIfAbsent", "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;", false, [find](Vm& v, Value* a) {
@@ -699,7 +762,7 @@ void installUtil(Vm& reg) {
         });
         reg.defineNative(c, "size", "()I", false, [](Vm&, Value* a) { return I(static_cast<int>(a[0].a->map.size())); });
         reg.defineNative(c, "isEmpty", "()Z", false, [](Vm&, Value* a) { return Z(a[0].a->map.empty()); });
-        reg.defineNative(c, "clear", "()V", false, [](Vm&, Value* a) { a[0].a->map.clear(); return V(); });
+        reg.defineNative(c, "clear", "()V", false, [](Vm&, Value* a) { a[0].a->map.clear(); a[0].a->mapIndexStale = true; return V(); });
         reg.defineNative(c, "putAll", "(Ljava/util/Map;)V", false, [find](Vm& v, Value* a) {
             for (const auto& [k, val] : std::vector<std::pair<Value, Value>>(a[1].a->map)) {
                 const int at = find(v, a[0].a, k.a);

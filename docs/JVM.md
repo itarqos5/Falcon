@@ -1,5 +1,7 @@
 # The mod VM
 
+(What the mods call - the game, Fabric's API, the JDK - is the platform, [MODAPI.md](MODAPI.md); this page is the interpreter and the stand-ins.)
+
 Falcon is C++, so it cannot load a Java mod. This is the other way to meet one: a small **Java virtual machine** (`src/jvm/`, `include/falcon/jvm/`) that interprets the bytecode of a mod's
 own classes, answers every class of the game, the mod loader and the libraries with a **recording stand-in** (a "shim"), and reads from the shims what the mod did and wanted. The client then
 carries that out with its own code. Nothing of the mod is loaded into the client and no Mixin is applied.

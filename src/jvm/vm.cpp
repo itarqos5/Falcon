@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cctype>
+#include <cstdlib>
 #include <cstring>
 #include <unordered_set>
 
@@ -114,6 +116,10 @@ void Vm::parseDescriptor(const std::string& desc, std::vector<char>& params, cha
 std::string Vm::stripKey(const std::string& desc) { return desc; }
 
 Vm::Vm() : slab_(1u << 18) {
+    if (const char* trace = std::getenv("FALCON_JVM_TRACE")) {
+        tracePrefix_ = trace;
+        tracing_ = true;
+    }
     top_ = slab_.data();
     defineClass("java/lang/Object", "");
     objectClass_ = classes_["java/lang/Object"].get();
@@ -166,8 +172,17 @@ void Vm::defineNative(const std::string& cls, const std::string& name, const std
     m->native = std::move(fn);
 }
 
-Class* Vm::defineFromFile(std::shared_ptr<const ClassFile> file) {
-    Class* c = makeClass(file->name);
+Class* Vm::defineFromFile(std::shared_ptr<const ClassFile> file, Class* existing) {
+    Class* c = existing != nullptr ? existing : makeClass(file->name);
+    if (existing != nullptr) {  // a stand-in that turned out to be the platform's class: it is made over in place, so what already points at it points at the real one
+        c->shim = false;
+        c->methods.clear();
+        c->fields.clear();
+        c->fieldOrder.clear();
+        c->interfaces.clear();
+        c->shimStatics.clear();
+        c->state = Class::State::Uninitialized;
+    }
     c->file = file;
     c->isInterface = file->isInterface();
     c->super = file->superName.empty() ? nullptr : loadClass(file->superName);
@@ -180,6 +195,10 @@ Class* Vm::defineFromFile(std::shared_ptr<const ClassFile> file) {
         info.isStatic = (f.access & 0x0008) != 0;
         info.index = info.isStatic ? staticIndex++ : index++;
         info.constantIndex = f.constantIndex;
+        info.access = f.access;
+        info.signature = f.signature;
+        info.order = static_cast<int>(c->fieldOrder.size());
+        c->fieldOrder.push_back(f.name);
         c->fields[f.name] = info;
     }
     c->instanceSize = index;
@@ -187,18 +206,168 @@ Class* Vm::defineFromFile(std::shared_ptr<const ClassFile> file) {
     for (const Member& m : file->methods) {
         Method* method = makeMethod(c, m.name, m.desc, m.access);
         if (m.hasCode) method->code = &m.code;
+        if ((m.access & 0x0100) != 0) {  // native: a platform class asks the host
+            if (const auto it = hostNatives_.find(file->name + "." + m.name + m.desc); it != hostNatives_.end()) method->native = it->second;
+        }
     }
     c->cache.assign(file->cp.size(), nullptr);
+    if (!file->mixinTargets.empty()) applyMixinAccessors(c);
     return c;
 }
 
+// A Mixin class of a mod, as far as it can be honoured on the platform's own classes: its accessors (@Accessor("field")) read and write a field of the target, its invokers (@Invoker("method")) call a
+// method of it, and the target counts as implementing the mixin's interface (so that a cast to it holds). Injectors are not applied.
+void Vm::applyMixinAccessors(Class* mixin) {
+    const ClassFile& cf = *mixin->file;
+    for (const MixinHook& hook : cf.hooks) {
+        if (hook.kind != "Accessor" && hook.kind != "Invoker") continue;
+        for (const std::string& targetName : cf.mixinTargets) {
+            Class* target = loadClass(targetName);
+            if (target->shim) {
+                unsupported("mixin target " + targetName);
+                continue;
+            }
+            if (cf.isInterface() && std::find(target->interfaces.begin(), target->interfaces.end(), mixin) == target->interfaces.end()) target->interfaces.push_back(mixin);
+            for (auto& entry : mixin->methods) {
+                Method* m = entry.second.get();
+                if (m->name != hook.handler) continue;
+                std::string name = hook.targets.empty() ? std::string() : hook.targets[0];
+                if (name.empty()) {  // getFoo, isFoo, setFoo: foo
+                    name = m->name;
+                    const std::size_t dollar = name.find_last_of('$');
+                    if (dollar != std::string::npos) name = name.substr(dollar + 1);
+                    for (const char* prefix : {"get", "set", "is", "invoke", "call"}) {
+                        const std::string p = prefix;
+                        if (name.size() > p.size() && name.compare(0, p.size(), p) == 0 && std::isupper(static_cast<unsigned char>(name[p.size()]))) { name = name.substr(p.size()); break; }
+                    }
+                    if (!name.empty()) name[0] = static_cast<char>(std::tolower(static_cast<unsigned char>(name[0])));
+                }
+                const bool isStatic = m->isStatic();
+                if (hook.kind == "Accessor") {
+                    const auto find = [target, name]() -> std::pair<FieldInfo*, Class*> {
+                        for (Class* c = target; c != nullptr; c = c->super) {
+                            if (const auto it = c->fields.find(name); it != c->fields.end()) return {&it->second, c};
+                        }
+                        return {nullptr, nullptr};
+                    };
+                    if (m->params.empty() && m->ret != 'V') {
+                        m->native = [find, isStatic](Vm& v, Value* a) -> Value {
+                            const auto [field, owner] = find();
+                            if (field == nullptr) return Value();
+                            if (field->isStatic || isStatic) return static_cast<std::size_t>(field->index) < owner->statics.size() ? owner->statics[static_cast<std::size_t>(field->index)] : Value();
+                            Object* self = a[0].a;
+                            if (self == nullptr) v.throwNew("java/lang/NullPointerException");
+                            return static_cast<std::size_t>(field->index) < self->fields.size() ? self->fields[static_cast<std::size_t>(field->index)] : Value();
+                        };
+                    } else if (m->params.size() == 1 && m->ret == 'V') {
+                        m->native = [find, isStatic](Vm& v, Value* a) -> Value {
+                            const auto [field, owner] = find();
+                            if (field == nullptr) return Value();
+                            if (field->isStatic || isStatic) {
+                                if (static_cast<std::size_t>(field->index) < owner->statics.size()) owner->statics[static_cast<std::size_t>(field->index)] = a[0];
+                                return Value();
+                            }
+                            Object* self = a[0].a;
+                            if (self == nullptr) v.throwNew("java/lang/NullPointerException");
+                            if (static_cast<std::size_t>(field->index) < self->fields.size()) self->fields[static_cast<std::size_t>(field->index)] = a[1];
+                            return Value();
+                        };
+                    }
+                } else {
+                    const std::string desc = m->desc;
+                    const int count = static_cast<int>(m->params.size()) + (isStatic ? 0 : 1);
+                    const std::size_t paramCount = m->params.size();
+                    m->native = [target, name, desc, count, paramCount, isStatic](Vm& v, Value* a) -> Value {
+                        Class* from = isStatic || a[0].a == nullptr ? target : a[0].a->cls;
+                        Method* tm = v.findMethod(from, name, desc);
+                        if (tm == nullptr) {  // the same name and as many parameters
+                            for (Class* c = from; c != nullptr && tm == nullptr; c = c->super) {
+                                for (auto& e : c->methods) {
+                                    if (e.second->name == name && e.second->params.size() == paramCount && e.second->callable() && e.second->isStatic() == isStatic) { tm = e.second.get(); break; }
+                                }
+                            }
+                        }
+                        if (tm == nullptr) {
+                            v.unsupported("invoker " + target->name + "." + name);
+                            return Value();
+                        }
+                        v.ensureInitialized(tm->owner);
+                        return v.invoke(tm, a, count);
+                    };
+                }
+            }
+        }
+    }
+}
+
+Class* Vm::findPlatformClass(const std::string& name) {
+    if (const auto it = classes_.find(name); it != classes_.end() && !it->second->shim) return it->second.get();
+    if (noExtension_.count(name) != 0) return nullptr;
+    for (const auto& jar : platformJars_) {
+        if (!jar->contains(name + ".class")) continue;
+        Class* c = loadClass(name);
+        if (!c->shim) return c;
+    }
+    noExtension_.insert(name);
+    return nullptr;
+}
+
+// What a JDK class does in Java and a native class of the VM does not (modapi/src/net/falcon/jdk/<Class>Ext.java): a static method named like the one asked for, with the receiver as its first
+// parameter, found by walking the receiver's classes and interfaces ("ListExt" for a List, "CollectionExt" above it).
+Method* Vm::extensionMethod(const std::string& ownerName, Class* receiver, const MethodRef& r, bool isStatic) {
+    if (platformJars_.empty()) return nullptr;
+    std::vector<std::string> names;
+    if (isStatic || receiver == nullptr) {
+        names.push_back(ownerName);
+    } else {
+        const std::function<void(Class*)> walk = [&](Class* c) {
+            if (c == nullptr) return;
+            names.push_back(c->name);
+            for (Class* i : c->interfaces) walk(i);
+            walk(c->super);
+        };
+        walk(receiver);
+    }
+    const std::size_t skip = isStatic ? 0 : 1;
+    for (const std::string& n : names) {
+        const std::size_t at = n.find_last_of("/$");
+        const std::string simple = at == std::string::npos ? n : n.substr(at + 1);
+        Class* ext = findPlatformClass("net/falcon/jdk/" + simple + "Ext");
+        if (ext == nullptr) continue;
+        for (auto& e : ext->methods) {
+            Method* m = e.second.get();
+            if (!m->isStatic() || m->name != r.name || !m->callable() || m->params.size() != r.params.size() + skip) continue;
+            bool same = true;
+            for (std::size_t i = 0; i < r.params.size() && same; ++i) same = m->params[i + skip] == r.params[i];
+            if (same) return m;
+        }
+    }
+    return nullptr;
+}
+
 Class* Vm::loadClass(const std::string& name) {
-    if (const auto it = classes_.find(name); it != classes_.end()) return it->second.get();
+    if (const auto it = classes_.find(name); it != classes_.end()) {
+        Class* existing = it->second.get();
+        if (existing->shim && !existing->platformChecked && !platformJars_.empty()) {  // a stand-in made before the platform jar was added, or for a name only it has
+            existing->platformChecked = true;
+            for (const auto& jar : platformJars_) {
+                const auto bytes = jar->read(name + ".class");
+                if (!bytes) continue;
+                if (auto parsed = ClassFile::parse(bytes->data(), bytes->size())) return defineFromFile(std::make_shared<const ClassFile>(std::move(*parsed)), existing);
+            }
+        }
+        return existing;
+    }
     if (!name.empty() && name[0] == '[') {  // an array's class: an Object, for what is asked of it
         Class* c = makeClass(name);
         c->super = objectClass_;
         c->state = Class::State::Ready;
         return c;
+    }
+    for (const auto& jar : platformJars_) {
+        const auto bytes = jar->read(name + ".class");
+        if (!bytes) continue;
+        if (auto parsed = ClassFile::parse(bytes->data(), bytes->size())) return defineFromFile(std::make_shared<const ClassFile>(std::move(*parsed)));
     }
     for (const auto& jar : jars_) {
         if (isPlatformClass(name)) break;
@@ -211,6 +380,19 @@ Class* Vm::loadClass(const std::string& name) {
     c->super = objectClass_;
     c->state = Class::State::Ready;
     return c;
+}
+
+void Vm::addPlatformJar(std::shared_ptr<const ZipArchive> jar) { platformJars_.push_back(std::move(jar)); }
+
+void Vm::defineHostNative(const std::string& cls, const std::string& name, const std::string& desc, NativeFn fn) { hostNatives_[cls + "." + name + desc] = std::move(fn); }
+
+Value Vm::callStatic(const std::string& cls, const std::string& name, const std::string& desc, const Value* args, int count, bool* found) {
+    Class* c = loadClass(cls);
+    Method* m = c->shim ? nullptr : findMethod(c, name, desc);
+    if (found != nullptr) *found = m != nullptr;
+    if (m == nullptr) return Value();
+    ensureInitialized(c);
+    return invoke(m, args, count);
 }
 
 Method* Vm::findMethod(Class* cls, const std::string& name, const std::string& desc) {
@@ -326,7 +508,18 @@ Object* Vm::classObject(const std::string& name) {
     return o;
 }
 
+std::string Vm::stackTrace(int depth, int max) const {
+    std::string out;
+    for (int d = std::min(depth, 400) - 1; d >= 0 && d >= depth - max; --d) {
+        const Method* m = callStack_[static_cast<std::size_t>(d)];
+        if (m == nullptr) break;
+        out += (out.empty() ? "" : " <- ") + m->owner->simpleName() + "." + m->name;
+    }
+    return out;
+}
+
 void Vm::throwNew(const std::string& className, const std::string& message) {
+    throwDepth_ = depth_;
     Object* e = newObject(loadClass(className));
     e->str = message;
     e->primType = message.empty() ? 0 : 1;  // (a message was given)
@@ -690,6 +883,8 @@ Value Vm::call(Method* m, Value* args) {
     for (int i = 0; i < m->argSlots; ++i) locals[i] = args[i];
     for (std::size_t i = static_cast<std::size_t>(m->argSlots); i < frame; ++i) locals[i] = Value();
     top_ += frame;
+    if (tracing_ && m->owner->name.compare(0, tracePrefix_.size(), tracePrefix_) == 0) std::fprintf(stderr, "%*s%s.%s\n", depth_ < 40 ? depth_ : 40, "", m->owner->simpleName().c_str(), m->name.c_str());
+    callStack_[static_cast<std::size_t>(depth_)] = m;
     ++depth_;
     struct Guard {
         Vm& vm;
@@ -730,6 +925,7 @@ Value Vm::shimCall(MethodRef& r, int op, Value* args) {
         slot += k == 'J' || k == 'D' ? 2 : 1;
     }
     if (owner.rfind("java/", 0) == 0 || owner.rfind("javax/", 0) == 0) unsupported(owner + "." + r.name);
+    else if (!r.cls->shim && r.cls->file && !platformJars_.empty()) unsupported(owner + "." + r.name + r.desc);  // (a class the platform has, without this method)
     if (op == kSpecialOp && r.name == "<init>") {  // the constructor of a stand-in, run for an object of the mod's or for one of its own
         ShimCall call{"<init>", std::move(described), {}, {}};
         slot = 1;
@@ -763,6 +959,7 @@ Value Vm::dispatch(MethodRef& r, int op, Value* args) {
         Class* c = r.cls;
         if (c->state != Class::State::Ready) ensureInitialized(c);
         if (r.direct == nullptr) r.direct = findMethod(c, r.name, r.desc);
+        if (r.direct == nullptr && !c->shim) r.direct = extensionMethod(c->name, nullptr, r, true);
         if (r.direct != nullptr) return call(r.direct, args);
         return shimCall(r, op, args);
     }
@@ -785,6 +982,13 @@ Value Vm::dispatch(MethodRef& r, int op, Value* args) {
     }
     if (m != nullptr) return call(m, args);
     if (self->kind == Kind::Lambda) return lambdaInvoke(self, r, args);
+    if (!self->shim && !self->cls->shim) {
+        if (Method* e = extensionMethod(r.cls->name, self->cls, r, false)) {
+            r.lastClass = c;
+            r.lastMethod = e;
+            return call(e, args);
+        }
+    }
     return shimCall(r, op, args);
 }
 

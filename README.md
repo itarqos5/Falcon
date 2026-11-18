@@ -448,6 +448,9 @@ running next to it keeps the machine.
   what they say to the player appears in the chat (`FALCON_NO_MODS=1` turns it off). The items, blocks and keys a mod registers are added to the game (with the textures, models and translations of its jar), its HUD
   handlers draw on the screen, its buttons appear on the screens it names, and `KeyMapping` keys work. `falcon_jvm_run` runs a mod from
   the command line; `falcon_jvm_tests` runs one compiled by the JDK.
+- **The mod platform** (`modapi/`, [docs/MODAPI.md](docs/MODAPI.md)): the game's, Fabric's and the libraries' classes that mods call, written in Java as Falcon's own and loaded by the VM as real classes (events, registries, commands, a
+  reflective Gson, `java.nio.file`, streams ...), with what they draw (the screen, the level through a render pipeline) handed to the client, which draws it with its own OpenGL or Vulkan drawing. Driven by the
+  wWaypoints mod: it starts with its real configuration, registers its keys and commands, and submits the geometry of its highlights. Its screens, networking and Mixin injectors are not done.
 - **More F3 chords** (`src/game/game_session_debug.cpp`, geometry and colours from the 26.3 classes `ChunkBorderRenderer` and `EntityHitboxDebugRenderer`): F3 + G chunk borders
   (the corners of the chunks round yours in faint red, your chunk's four edges with a line every two blocks in yellow and teal, blue rings every 16 blocks, and your section as a box
   that shows through the ground), F3 + B hitboxes (each entity's box in green, a red line at its eyes, a blue arrow where it looks, a yellow one where it is going; the player's own from

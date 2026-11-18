@@ -37,6 +37,9 @@ struct ModReport {
 struct RunOptions {
     std::uint64_t budget = 200'000'000;  // instructions for the start-up
     bool runClient = true;               // run the client entry points
+    std::string gameDir, modsDir;        // for the mod's files (FabricLoader.getConfigDir is <gameDir>/config)
+    std::vector<std::string> loadedMods; // "id\0version\0name" of every mod, for FabricLoader.isModLoaded
+    bool platform = true;                // load the platform jar (Falcon's Java classes for the game) when there is one
 };
 
 // A mod's VM, kept after its start-up so that what it registered for can be run: Nothing is loaded into the client. The report says what the mod did and wanted; the client carries it out
@@ -62,7 +65,20 @@ public:
     [[nodiscard]] const std::vector<std::string>& namespaces() const { return namespaces_; }
 
     // The mod's HUD (HudRenderCallback, HudElementRegistry): its handlers run once, and what they drew is returned for the client to draw. A handler that fails or overruns is switched off.
-    [[nodiscard]] std::vector<DrawCmd> renderHud();
+    [[nodiscard]] std::vector<DrawCmd> renderHud(float partialTick = 0.0f);
+    // The level has been drawn up to the entities: what the mod submits to be drawn in it (LevelRenderEvents), camera-relative.
+    [[nodiscard]] std::vector<WorldSubmit> renderLevel(float partialTick = 0.0f);
+    // The client's life, as Fabric tells it to the mods: the client is up, a world was joined, it was left.
+    void clientStarted();
+    void joined();
+    void left();
+    // What the mod said to the player since it was last asked (the chat, and the action bar), without running anything of it.
+    [[nodiscard]] std::vector<std::string> takeChat();
+    // The mod's client commands (ClientCommandRegistrationCallback): whether it has one called this (the first word of a line, no slash), and running a line; -1 when none fits.
+    [[nodiscard]] bool hasCommand(const std::string& name);
+    [[nodiscard]] int runCommand(const std::string& line);
+    // Whether the mod runs on the platform's own Java classes (modapi/falcon-modapi.jar) instead of stand-ins for the game.
+    [[nodiscard]] bool onPlatform() const { return platform_; }
 
     // A button a mod put on a screen (ScreenEvents.AFTER_INIT and Screens.getButtons(screen).add(Button.builder(...).bounds(...).build())).
     struct ScreenWidget {
@@ -92,6 +108,9 @@ private:
         Object* button = nullptr;
         Object* onPress = nullptr;
     };
+    bool platform_ = false;
+    std::map<std::string, int> failures_;  // by event: how often in a row it threw
+    bool runEvent(const char* name, const char* desc, const Value* args, std::uint64_t budget);
     std::map<int, Pressable> widgets_;
     int nextWidget_ = 1;
     std::size_t gcAt_ = 50'000;
@@ -103,7 +122,7 @@ private:
 // Every Fabric and Quilt mod in a folder, started (the optimization mods are left out: Falcon does not support them), and ticked together.
 class ModHost {
 public:
-    explicit ModHost(const std::filesystem::path& modsDir);
+    explicit ModHost(const std::filesystem::path& modsDir, const std::filesystem::path& gameDir = {});
     ~ModHost();
     struct Said {
         std::string mod, text;
@@ -112,6 +131,14 @@ public:
     [[nodiscard]] const std::vector<std::unique_ptr<ModInstance>>& mods() const { return mods_; }
     // The mods' HUDs, drawn in the order the mods were started.
     [[nodiscard]] std::vector<DrawCmd> renderHud();
+    [[nodiscard]] std::vector<WorldSubmit> renderLevel(float partialTick = 0.0f);
+    void clientStarted();
+    void joined();
+    void left();
+    // The mods' client commands: the first mod that has one of this name runs the line (true when one did).
+    [[nodiscard]] bool runCommand(const std::string& line);
+    // What the mods said (to the chat) since it was last taken, without running anything.
+    [[nodiscard]] std::vector<Said> takeSaid();
     // What every mod ships to be looked up as resources, lowest priority first, and the namespaces they bring (for their language files).
     [[nodiscard]] std::vector<std::shared_ptr<const ResourceSource>> resourcePacks() const;
     [[nodiscard]] std::vector<std::string> namespaces() const;

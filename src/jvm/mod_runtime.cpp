@@ -3,6 +3,8 @@
 #include "falcon/mods/mod_info.hpp"
 #include "falcon/mods/optimization_mods.hpp"
 
+#include "falcon/jvm/modapi.hpp"
+
 #include "shim_util.hpp"
 
 #include <nlohmann/json.hpp>
@@ -105,6 +107,16 @@ ModInstance::ModInstance(const std::filesystem::path& jarPath, const RunOptions&
 
     vm_ = std::make_unique<Vm>();
     Vm& vm = *vm_;
+    if (options.platform) {
+        if (auto api = modApiJar()) {  // the game, as Falcon's own Java classes: real objects instead of stand-ins
+            vm.addPlatformJar(api);
+            installHostNatives(vm);
+            platform_ = true;
+        }
+    }
+    vm.host.gameDir = options.gameDir;
+    vm.host.modsDir = options.modsDir;
+    vm.host.loadedMods = options.loadedMods;
     vm.modId = report.modId;
     vm.budget = options.budget;
     vm.addJar(shared);
@@ -181,6 +193,9 @@ ModInstance::ModInstance(const std::filesystem::path& jarPath, const RunOptions&
         }
     }
     content_ = extractContent(vm, report.modId);
+    for (const ModItemDef& d : vm.capture.content.items) content_.items.push_back(d);  // (what the platform's registries told)
+    for (const ModBlockDef& b : vm.capture.content.blocks) content_.blocks.push_back(b);
+    for (const ModKeyDef& k : vm.capture.content.keys) content_.keys.push_back(k);
 
     report.registrations = vm.capture.registrations;
     for (Registration& r : report.registrations) r.object = nullptr;  // (the objects go with the VM)
@@ -194,8 +209,39 @@ ModInstance::ModInstance(const std::filesystem::path& jarPath, const RunOptions&
     finish();
 }
 
+// One of the platform's event entry points (modapi/src/net/falcon/Events.java), with a budget of its own; an event that throws five times in a row is switched off.
+bool ModInstance::runEvent(const char* name, const char* desc, const Value* args, std::uint64_t budget) {
+    if (!vm_) return false;
+    Vm& vm = *vm_;
+    int& failed = failures_[name];
+    if (failed >= 5) return false;
+    vm.budget = vm.instructionsRun() + budget;
+    bool found = false;
+    try {
+        vm.callStatic("net/falcon/Events", name, desc, args, desc[1] == ')' ? 0 : 1, &found);
+        failed = 0;
+    } catch (const JavaThrow& thrown) {
+        ++failed;
+        std::string why = vm.toJavaString(thrown.exception) + " at " + vm.stackTrace(vm.throwDepth(), 6);
+        report_.error += (report_.error.empty() ? "" : "; ") + std::string(name) + ": " + why;
+        if (failed >= 5) report_.error += " (switched off)";
+    } catch (const BudgetExceeded& over) {
+        ++failed;
+        report_.error += (report_.error.empty() ? "" : "; ") + std::string(name) + ": " + over.why;
+    }
+    return found;
+}
+
 std::vector<std::string> ModInstance::tick() {
     std::vector<std::string> said;
+    if (platform_) {
+        runEvent("tick", "()V", nullptr, 400000);
+        said.swap(vm_->capture.chat);
+        for (std::string& line : vm_->capture.overlay) said.push_back(std::move(line));
+        vm_->capture.overlay.clear();
+        collect();
+        return said;
+    }
     if (!vm_ || vm_->capture.handlers.empty()) return said;
     Vm& vm = *vm_;
     off_.resize(vm.capture.handlers.size(), false);
@@ -228,10 +274,74 @@ void ModInstance::collect() {
     gcAt_ = std::max<std::size_t>(50'000, vm_->heapSize() * 2);
 }
 
-std::vector<DrawCmd> ModInstance::renderHud() {
+std::vector<std::string> ModInstance::takeChat() {
+    std::vector<std::string> out;
+    if (!vm_) return out;
+    out.swap(vm_->capture.chat);
+    for (std::string& line : vm_->capture.overlay) out.push_back(std::move(line));
+    vm_->capture.overlay.clear();
+    return out;
+}
+
+void ModInstance::clientStarted() { if (platform_) runEvent("clientStarted", "()V", nullptr, 600'000); }
+void ModInstance::joined() { if (platform_) runEvent("join", "()V", nullptr, 3'000'000); }
+void ModInstance::left() { if (platform_) runEvent("disconnect", "()V", nullptr, 3'000'000); }
+
+bool ModInstance::hasCommand(const std::string& name) {
+    if (!platform_ || !vm_) return false;
+    Vm& vm = *vm_;
+    vm.budget = vm.instructionsRun() + 1'000'000;
+    Value arg = valueOfRef(vm.newString(name));
+    try {
+        bool found = false;
+        const Value r = vm.callStatic("net/falcon/Events", "hasCommand", "(Ljava/lang/String;)Z", &arg, 1, &found);
+        return found && r.i != 0;
+    } catch (const JavaThrow&) {
+    } catch (const BudgetExceeded&) {
+    }
+    return false;
+}
+
+int ModInstance::runCommand(const std::string& line) {
+    if (!platform_ || !vm_) return -1;
+    Vm& vm = *vm_;
+    vm.budget = vm.instructionsRun() + 3'000'000;
+    Value arg = valueOfRef(vm.newString(line));
+    try {
+        bool found = false;
+        const Value r = vm.callStatic("net/falcon/Events", "command", "(Ljava/lang/String;)I", &arg, 1, &found);
+        return found ? r.i : -1;
+    } catch (const JavaThrow& thrown) {
+        report_.error += (report_.error.empty() ? "" : "; ") + std::string("command: ") + vm.toJavaString(thrown.exception) + " at " + vm.stackTrace(vm.throwDepth(), 6);
+    } catch (const BudgetExceeded& over) {
+        report_.error += (report_.error.empty() ? "" : "; ") + std::string("command: ") + over.why;
+    }
+    return 0;
+}
+
+std::vector<WorldSubmit> ModInstance::renderLevel(float partialTick) {
+    std::vector<WorldSubmit> out;
+    if (!vm_ || !platform_) return out;
+    vm_->capture.submits.clear();
+    Value arg = valueOfFloat(partialTick);
+    runEvent("levelRender", "(F)V", &arg, 1'500'000);
+    out.swap(vm_->capture.submits);
+    collect();
+    return out;
+}
+
+std::vector<DrawCmd> ModInstance::renderHud(float partialTick) {
     std::vector<DrawCmd> out;
     if (!vm_) return out;
     Vm& vm = *vm_;
+    if (platform_) {
+        vm.capture.draw.clear();
+        Value arg = valueOfFloat(partialTick);
+        runEvent("hud", "(F)V", &arg, 400'000);
+        out.swap(vm.capture.draw);
+        collect();
+        return out;
+    }
     if (graphics_ == nullptr) {
         graphics_ = vm.makeShim("net/minecraft/client/gui/GuiGraphics");
         delta_ = vm.makeShim("net/minecraft/client/DeltaTracker");
@@ -364,14 +474,19 @@ ModReport runMod(const std::filesystem::path& jar, const RunOptions& options) { 
 
 ModHost::~ModHost() = default;
 
-ModHost::ModHost(const std::filesystem::path& modsDir) {
-    for (const ModInfo& info : readModsFolder(modsDir)) {
+ModHost::ModHost(const std::filesystem::path& modsDir, const std::filesystem::path& gameDir) {
+    const std::vector<ModInfo> infos = readModsFolder(modsDir);
+    RunOptions options;
+    options.gameDir = gameDir.generic_string();
+    options.modsDir = modsDir.generic_string();
+    for (const ModInfo& info : infos) options.loadedMods.push_back(info.id + std::string(1, '\0') + info.version + std::string(1, '\0') + info.name);
+    for (const ModInfo& info : infos) {
         if (info.loader != "Fabric" && info.loader != "Quilt") continue;
         std::vector<std::string> needs;
         for (const std::string& dependency : info.depends) needs.push_back(dependency.substr(0, dependency.find(' ')));
         if (judgeOptimization(info.id, info.name, {}, needs).blocked) continue;  // (not compatible with Falcon: not started)
         try {
-            auto instance = std::make_unique<ModInstance>(info.file);
+            auto instance = std::make_unique<ModInstance>(info.file, options);
             if (instance->report().supported) mods_.push_back(std::move(instance));
         } catch (...) {  // (a jar the VM cannot make sense of is left out)
         }
@@ -437,6 +552,44 @@ std::vector<DrawCmd> ModHost::renderHud() {
     return out;
 }
 
+void ModHost::clientStarted() {
+    for (const auto& mod : mods_) mod->clientStarted();
+}
+void ModHost::joined() {
+    for (const auto& mod : mods_) mod->joined();
+}
+void ModHost::left() {
+    for (const auto& mod : mods_) mod->left();
+}
+
+std::vector<ModHost::Said> ModHost::takeSaid() {
+    std::vector<Said> out;
+    for (const auto& mod : mods_) {
+        for (std::string& text : mod->takeChat()) out.push_back({mod->report().name.empty() ? mod->report().modId : mod->report().name, std::move(text)});
+    }
+    return out;
+}
+
+bool ModHost::runCommand(const std::string& line) {
+    std::string name = line.substr(0, line.find(' '));
+    for (const auto& mod : mods_) {
+        if (mod->hasCommand(name)) {
+            (void)mod->runCommand(line);
+            return true;
+        }
+    }
+    return false;
+}
+
+std::vector<WorldSubmit> ModHost::renderLevel(float partialTick) {
+    std::vector<WorldSubmit> out;
+    for (const auto& mod : mods_) {
+        std::vector<WorldSubmit> drawn = mod->renderLevel(partialTick);
+        out.insert(out.end(), std::make_move_iterator(drawn.begin()), std::make_move_iterator(drawn.end()));
+    }
+    return out;
+}
+
 std::vector<ModHost::HostWidget> ModHost::screenOpened(const std::string& screenClass, int width, int height) {
     std::vector<HostWidget> out;
     for (const auto& mod : mods_) {
@@ -461,6 +614,13 @@ void ModHost::setHost(const HostState& state) {
         h.food = state.food;
         h.textWidth = state.textWidth;
         h.translate = state.translate;
+        h.eyeHeight = state.eyeHeight;
+        h.playerFlags = state.playerFlags;
+        h.camX = state.camX; h.camY = state.camY; h.camZ = state.camZ; h.camYaw = state.camYaw; h.camPitch = state.camPitch; h.camFov = state.camFov;
+        h.framebufferWidth = state.framebufferWidth; h.framebufferHeight = state.framebufferHeight; h.guiScale = state.guiScale;
+        h.mouseX = state.mouseX; h.mouseY = state.mouseY; h.gameTime = state.gameTime;
+        h.dimension = state.dimension; h.worldName = state.worldName; h.playerName = state.playerName; h.playerUuid = state.playerUuid; h.worldKind = state.worldKind;
+        h.blockAt = state.blockAt; h.blockFlags = state.blockFlags; h.keyDown = state.keyDown; h.sendChat = state.sendChat; h.sendCommand = state.sendCommand;
     }
 }
 

@@ -206,6 +206,8 @@ add_library(falcon_base
     src/jvm/natives.cpp
     src/jvm/shims.cpp
     src/jvm/shims_game.cpp
+    src/jvm/host_natives.cpp
+    src/jvm/modapi.cpp
     src/jvm/mod_content.cpp
     src/jvm/mod_runtime.cpp
     src/text/text_layout.cpp
@@ -260,6 +262,7 @@ target_include_directories(falcon_base PUBLIC
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
     "$<BUILD_INTERFACE:${FALCON_GENERATED_DIR}>"
 )
+target_compile_definitions(falcon_base PRIVATE FALCON_MODAPI_DEV_JAR="${CMAKE_SOURCE_DIR}/modapi/falcon-modapi.jar")  # (the platform jar of the source tree: see src/jvm/modapi.cpp)
 target_link_libraries(falcon_base
     PUBLIC  glfw nlohmann_json::nlohmann_json falcon_build_flags
     PRIVATE falcon_stb falcon_warnings

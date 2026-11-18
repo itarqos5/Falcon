@@ -182,6 +182,8 @@ std::optional<ClassFile> ClassFile::parse(const std::uint8_t* data, std::size_t 
                 if (end > size) return std::nullopt;
                 if (attribute == "ConstantValue" && pass == 0) {
                     m.constantIndex = r.u2();
+                } else if (attribute == "Signature" && pass == 0) {
+                    m.signature = cf.utf8(r.u2());
                 } else if (attribute == "Code" && pass == 1) {
                     m.hasCode = true;
                     m.code.maxStack = r.u2();
@@ -227,7 +229,9 @@ std::optional<ClassFile> ClassFile::parse(const std::uint8_t* data, std::size_t 
         const std::uint32_t length = r.u4();
         const std::size_t end = r.at + length;
         if (end > size) return std::nullopt;
-        if (attribute == "BootstrapMethods") {
+        if (attribute == "Signature") {
+            cf.signature = cf.utf8(r.u2());
+        } else if (attribute == "BootstrapMethods") {
             const std::uint16_t count = r.u2();
             for (std::uint16_t i = 0; i < count && !r.bad; ++i) {
                 Bootstrap b;

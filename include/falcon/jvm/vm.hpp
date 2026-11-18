@@ -8,6 +8,7 @@
 
 #include "falcon/assets/zip_archive.hpp"
 #include "falcon/jvm/class_file.hpp"
+#include "falcon/jvm/mod_content.hpp"
 
 #include <cstdint>
 #include <deque>
@@ -17,6 +18,7 @@
 #include <set>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <array>
 #include <vector>
 
@@ -80,6 +82,9 @@ struct Object {
     std::vector<Value> elems;                   // an array's elements, a list's or set's contents, an Iterator's source
     char elemType = 0;                          // an array's component: B C D F I J S Z or L
     std::vector<std::pair<Value, Value>> map;   // a map's entries, in the order they were put
+    std::unordered_multimap<int, std::uint32_t> mapIndex;  // a big map's entries by the hash of their key (built when asked for, rebuilt when entries were removed)
+    std::size_t mapIndexed = 0;                 // how many entries the index covers
+    bool mapIndexStale = false;
     Value prim;                                 // a box's value
     char primType = 0;                          // a box's type (I J F D Z C B S)
     std::unique_ptr<Shim> shim;                 // set on the stand-ins (and on a mod's object whose base class is one)
@@ -111,6 +116,9 @@ struct FieldInfo {
     bool isStatic = false;
     int index = 0;
     std::uint16_t constantIndex = 0;
+    std::uint16_t access = 0;
+    std::string signature;
+    int order = 0;  // where the class declares it
 };
 
 struct Class {
@@ -119,9 +127,11 @@ struct Class {
     std::vector<Class*> interfaces;
     std::shared_ptr<const ClassFile> file;  // null for the built-in classes and the stand-ins
     bool shim = false, isInterface = false;
+    bool platformChecked = false;  // a stand-in that the platform jar was asked for once
     enum class State : std::uint8_t { Uninitialized, Initializing, Ready } state = State::Uninitialized;
     std::unordered_map<std::string, std::unique_ptr<Method>> methods;  // "name:desc"
     std::unordered_map<std::string, FieldInfo> fields;
+    std::vector<std::string> fieldOrder;  // the names, as the class declares them
     std::vector<Value> statics;
     int instanceSize = 0;
     std::vector<void*> cache;                       // the resolved entries of the constant pool, by index
@@ -175,6 +185,20 @@ struct HostState {
     float yaw = 0, pitch = 0;
     int guiWidth = 427, guiHeight = 240;
     int health = 20, food = 20;
+    double eyeHeight = 1.62;
+    int playerFlags = 32;                      // 1 sneaking, 2 on ground, 4 in water, 8 creative, 16 spectator, 32 alive
+    double camX = 0, camY = 0, camZ = 0, camYaw = 0, camPitch = 0, camFov = 70;
+    int framebufferWidth = 854, framebufferHeight = 480, guiScale = 2;
+    double mouseX = 0, mouseY = 0, gameTime = 0;
+    std::string gameDir, modsDir;              // where the mods may keep their files, and the folder they came from
+    std::vector<std::string> loadedMods;       // "id\0version\0name", one per mod
+    std::string dimension;                     // "minecraft:overworld"; empty with no world open
+    std::string worldName, playerName, playerUuid;
+    int worldKind = 0;                         // 0 single player, 1 multiplayer, 2 LAN
+    std::function<std::string(int, int, int)> blockAt;  // "minecraft:stone"
+    std::function<int(int, int, int)> blockFlags;       // 1 loaded, 2 opaque, 4 full collision
+    std::function<bool(int)> keyDown;                   // a GLFW key code
+    std::function<void(const std::string&)> sendChat, sendCommand;
     std::function<int(const std::string& text)> textWidth;                // the font's width of a text, 0 for the VM's guess
     std::function<bool(const std::string& keyName)> consumeClick;         // KeyMapping.consumeClick: a press not yet taken
     std::function<bool(const std::string& keyName)> isDown;               // KeyMapping.isDown
@@ -187,6 +211,15 @@ struct EventHandler {
     std::string event;
     Object* handler = nullptr;
 };
+// World geometry a mod submitted (SubmitNodeCollector.submitCustomGeometry): vertices of nine floats (x y z r g b a u v), camera-relative.
+struct WorldSubmit {
+    std::vector<float> vertices;
+    int topology = 1;  // 0 lines, 1 triangles, 2 quads
+    int state = 0;     // bit 0 depth test, 1 depth write, 2 blend, 3 cull, 4 line strip
+    float lineWidth = 1.0f;
+    std::string texture;
+};
+
 // An item a mod put into one of the game's creative tabs (ItemGroupEvents.modifyEntriesEvent(tab).register(entries -> entries.accept(item))).
 struct GroupItem {
     std::string group;  // "INGREDIENTS"
@@ -197,6 +230,9 @@ struct Capture {
     std::vector<Object*> keyObjects;     // the key mappings a mod registered
     std::vector<EventHandler> handlers;
     std::vector<DrawCmd> draw;           // what the mod drew since the client last took it
+    std::vector<WorldSubmit> submits;    // what it drew in the world
+    std::vector<std::string> overlay;    // what it put on the action bar
+    ModContent content;                  // what the platform's registries told of what the mod added
     std::vector<std::string> chat;       // what the mod said to the player (displayClientMessage and the like), until the client takes it
     std::vector<Registration> registrations;
     std::vector<std::string> events;     // "ClientTickEvents.END_CLIENT_TICK: handler lambda$onInitializeClient$0"
@@ -215,6 +251,12 @@ public:
 
     // The jars whose classes the mod can load (its own, and the ones inside it). Everything else is a stand-in.
     void addJar(std::shared_ptr<const ZipArchive> jar);
+    // The platform: Falcon's own Java classes for the game, the mod loader's API and the parts of the JDK this machine has no native class for. They are loaded as real classes (interpreted) under
+    // the names the game uses, before a mod's jar is asked; a class neither has is a stand-in. Methods declared native in them are answered by defineHostNative.
+    void addPlatformJar(std::shared_ptr<const ZipArchive> jar);
+    void defineHostNative(const std::string& cls, const std::string& name, const std::string& desc, NativeFn fn);
+    // Calls a static method of a loaded class by name; the arguments one Value each. Null when there is no such method.
+    Value callStatic(const std::string& cls, const std::string& name, const std::string& desc, const Value* args, int count, bool* found = nullptr);
 
     [[nodiscard]] Class* loadClass(const std::string& name);  // never null: a class nobody has becomes a stand-in
     // Runs a method: `args` one Value each (this first); throws JavaThrow.
@@ -271,6 +313,10 @@ public:
     void collectGarbage();
     [[nodiscard]] std::size_t heapSize() const { return heap_.size(); }
     void pin(Object* o) { pins_.push_back(o); }
+    // Where the VM was: the methods that were running, innermost first (at the last throw, or now): "Class.method <- Class.method ...".
+    [[nodiscard]] std::string stackTrace(int depth, int max = 10) const;
+    [[nodiscard]] int throwDepth() const { return throwDepth_; }
+    [[nodiscard]] int depth() const { return depth_; }
 
     Capture capture;
     HostState host;
@@ -294,13 +340,19 @@ private:
     FieldRef& fieldRef(Class* cls, int index);
     Method* makeMethod(Class* cls, const std::string& name, const std::string& desc, std::uint16_t access);
     Class* makeClass(const std::string& name);
-    Class* defineFromFile(std::shared_ptr<const ClassFile> file);
+    Class* defineFromFile(std::shared_ptr<const ClassFile> file, Class* existing = nullptr);
+    void applyMixinAccessors(Class* mixin);
+    Method* extensionMethod(const std::string& ownerName, Class* receiver, const MethodRef& r, bool isStatic);
+    Class* findPlatformClass(const std::string& name);
     Value fieldDefault(char kind);
     Value shimStatic(Class* cls, const FieldRef& f);
     static void parseDescriptor(const std::string& desc, std::vector<char>& params, char& ret, int& slots);
     Value defaultReturn(char ret, const std::string& desc, Object* receiver);
 
     std::vector<std::shared_ptr<const ZipArchive>> jars_;
+    std::vector<std::shared_ptr<const ZipArchive>> platformJars_;
+    std::unordered_map<std::string, NativeFn> hostNatives_;  // "owner.name(desc)": the natives of platform classes
+    std::unordered_set<std::string> noExtension_;           // extension classes looked for and not there
     std::vector<std::unique_ptr<IndySite>> sites_;
     std::map<std::string, std::unique_ptr<Class>> classes_;
     std::vector<std::unique_ptr<Object>> heap_;
@@ -319,9 +371,14 @@ private:
     Class* classClass_ = nullptr;
     Object* client_ = nullptr;
     std::vector<Object*> pins_;
+    std::array<Method*, 400> callStack_{};
+    std::string tracePrefix_;  // FALCON_JVM_TRACE=com/wwaypoints/: every call of a class under that name is printed (what runs, in what order)
+    bool tracing_ = false;
+    int throwDepth_ = 0;
 };
 
 void installNatives(Vm& vm);
 void installShims(Vm& vm);
+void installHostNatives(Vm& vm);
 
 }  // namespace falcon::jvm
