@@ -335,6 +335,51 @@ std::string manifestVersionOf(const ZipArchive& zip) {
 
 }  // namespace
 
+namespace {
+
+// A PNG, by its first bytes.
+bool isPng(const std::vector<unsigned char>& bytes) {
+    static constexpr unsigned char kSignature[8] = {0x89, 'P', 'N', 'G', '\r', '\n', 0x1A, '\n'};
+    return bytes.size() > 8 && std::equal(kSignature, kSignature + 8, bytes.begin());
+}
+
+// The mod's icon. The one it declares (fabric.mod.json's "icon", mods.toml's "logoFile"), when that file is in the jar; a path is looked up as written, with its case ignored, and by its file
+// name wherever it is in the jar (a mod that says "logo.png" and keeps it in assets/mod/). Many mods declare nothing or a file they do not ship (Xaero's maps name "xaeroworldmap.png" and
+// keep "assets/xaeroworldmap/icon.png"), so then the places mods put one are tried, the one Mod Menu looks in first: assets/<id>/icon.png.
+void loadIcon(const ZipArchive& zip, ModInfo& info) {
+    std::map<std::string, std::string> byLowerName;  // the jar's own spelling of every .png
+    for (std::string name : zip.entryNames()) {
+        if (!endsWith(lowered(name), ".png")) continue;
+        byLowerName.emplace(lowered(name), std::move(name));
+    }
+    const auto take = [&](std::string path) {
+        while (!path.empty() && (path.front() == '/' || path.front() == '.')) path.erase(0, path.front() == '.' && path.size() > 1 && path[1] == '/' ? 2 : 1);
+        const auto found = byLowerName.find(lowered(path));
+        if (found == byLowerName.end()) return false;
+        auto bytes = zip.read(found->second);
+        if (!bytes || !isPng(*bytes)) return false;
+        info.iconPath = found->second;
+        info.icon = std::move(*bytes);
+        return true;
+    };
+    if (!info.iconPath.empty()) {
+        if (take(info.iconPath)) return;
+        const std::string wanted = lowered(info.iconPath.substr(info.iconPath.find_last_of("/\\") == std::string::npos ? 0 : info.iconPath.find_last_of("/\\") + 1));
+        for (const auto& [lower, real] : byLowerName) {  // (the same file name somewhere else in the jar)
+            if (lower.substr(lower.find_last_of('/') == std::string::npos ? 0 : lower.find_last_of('/') + 1) == wanted && take(real)) return;
+        }
+    }
+    const std::string id = lowered(info.id);
+    for (const std::string& folder : std::vector<std::string>{"assets/" + id + "/", std::string(), "assets/" + id + "/textures/", "assets/" + id + "/textures/gui/", "assets/" + id + "/images/", "assets/" + id + "/icons/", "META-INF/", "assets/"}) {
+        for (const std::string& name : {std::string("icon.png"), std::string("logo.png"), id + ".png", std::string("pack.png"), std::string("mod_icon.png"), std::string("modicon.png")}) {
+            if (take(folder + name)) return;
+        }
+    }
+    info.iconPath.clear();
+}
+
+}  // namespace
+
 std::optional<ModInfo> readModJar(const std::filesystem::path& jar) {
     const auto zip = ZipArchive::open(jar);
     if (!zip) return std::nullopt;
@@ -357,11 +402,7 @@ std::optional<ModInfo> readModJar(const std::filesystem::path& jar) {
     std::error_code ec;
     const auto size = std::filesystem::file_size(jar, ec);
     info->size = ec ? 0 : static_cast<std::uint64_t>(size);
-    if (!info->iconPath.empty()) {
-        std::string path = info->iconPath;
-        while (!path.empty() && path.front() == '/') path.erase(0, 1);
-        if (auto icon = zip->read(path)) info->icon = std::move(*icon);
-    }
+    loadIcon(*zip, *info);
     for (const std::string& name : zip->entryNames()) {
         if ((startsWith(name, "META-INF/jars/") || startsWith(name, "META-INF/jarjar/")) && endsWith(lowered(name), ".jar")) ++info->bundled;
     }
