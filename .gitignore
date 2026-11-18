@@ -38,6 +38,7 @@ compile_commands.json
 *.jar
 # (the jars that are ours: the VM test mods, built from tests/jvm_mod by the JDK; it holds no game code)
 !tests/data/jvm/*.jar
+!modapi/falcon-modapi.jar
 *.class
 *.mca
 *.mcr
