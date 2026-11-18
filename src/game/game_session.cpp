@@ -620,6 +620,10 @@ void GameSession::update(double dt, bool active, int framebufferWidth, int frame
         } else renderer_.setZoom(player_.x, player_.z, -std::sin(yaw), std::cos(yaw), halfAngle, zoom ? reach : 0);
     }
     renderer_.update(player_.x, player_.z, distance, ready_ ? 1.5 : 6.0);
+    if (ready_) {  // far tiles are all work for the threads: while some are being made, more of the PC makes them
+        const unsigned workers = services_.options.lodsEnabled && renderer_.lodStats().tilesBuilding > 0 ? lodWorkerCount() : workerCount();
+        if (workers != renderer_.activeWorkers()) renderer_.setActiveWorkers(workers);
+    }
     // (The old idle call to trimWorkingSet() was removed: SetProcessWorkingSetSize(-1,-1) empties every page out of RAM, so the
     // next frame faults them all back in - a ~0.7 s stall that showed up as a stutter whenever the world went quiet. The memory it
     // saved is not worth the hitch; the working set is only trimmed once, after the initial load, from the client loop.)

@@ -160,6 +160,7 @@ public:
     void setSmoothLighting(bool on);
     // How many of the worker threads make chunks (the rest sleep): all of them while the world loads, fewer while it is played.
     void setActiveWorkers(unsigned n) { pool_.setActive(n); }
+    [[nodiscard]] unsigned activeWorkers() const { return pool_.activeCount(); }
     // The Leaves video option: true draws leaves see-through (Cutout), false solid (Opaque). Re-meshes the world on a change.
     void setCutoutLeaves(bool on);
     // The world's edits: every block changed through setBlock() is recorded in them, and every chunk made (again) has its edits put back before it is
