@@ -11,8 +11,8 @@ namespace falcon {
 
 // Where every title screen widget sits for a given GUI-scaled window size.
 struct TitleScreenLayout {
-    Rect singleplayer, multiplayer, realms;
-    Rect friends, language, accessibility;  // the three 20x20 icon buttons
+    Rect singleplayer, multiplayer, realms, mods;  // (Mods is this client's own: under Minecraft Realms)
+    Rect friends, language, accessibility;         // the three 20x20 icon buttons
     Rect options, quit;
     int copyrightX = 0;
     int copyrightY = 0;

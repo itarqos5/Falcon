@@ -374,14 +374,19 @@ void test_title_layout() {
     using falcon::Rect;
     // 854x480 window at scale 2 -> 427x240 GUI units; "Copyright ..." is 188 wide.
     const auto l = falcon::computeTitleScreenLayout(427, 240, 188);
-    CHECK((l.singleplayer == Rect{113, 108, 200, 20}));
-    CHECK((l.multiplayer == Rect{113, 132, 200, 20}));
-    CHECK((l.realms == Rect{113, 156, 200, 20}));
-    CHECK((l.friends == Rect{179, 180, 20, 20}));
-    CHECK((l.language == Rect{203, 180, 20, 20}));
-    CHECK((l.accessibility == Rect{227, 180, 20, 20}));
-    CHECK((l.options == Rect{113, 204, 98, 20}));
-    CHECK((l.quit == Rect{215, 204, 98, 20}));
+    // (the game's own rows start at 108; this client's Mods button under Realms is a row more, so they start at 90 and the last one still ends above the footer line)
+    CHECK((l.singleplayer == Rect{113, 90, 200, 20}));
+    CHECK((l.multiplayer == Rect{113, 114, 200, 20}));
+    CHECK((l.realms == Rect{113, 138, 200, 20}));
+    CHECK((l.mods == Rect{113, 162, 200, 20}));
+    CHECK((l.friends == Rect{179, 186, 20, 20}));
+    CHECK((l.language == Rect{203, 186, 20, 20}));
+    CHECK((l.accessibility == Rect{227, 186, 20, 20}));
+    CHECK((l.options == Rect{113, 210, 98, 20}));
+    CHECK((l.quit == Rect{215, 210, 98, 20}));
+    CHECK(l.options.y + l.options.height <= 230);  // above the line at the bottom
+    // A taller window keeps the game's own start (a quarter of the height and 48).
+    CHECK(falcon::computeTitleScreenLayout(480, 270, 188).singleplayer.y == 270 / 4 + 48);
     CHECK(l.copyrightX == 427 - 188 - 2);
     CHECK(l.copyrightY == 230);
 }

@@ -198,6 +198,8 @@ add_library(falcon_base
     src/assets/resource_manager.cpp
     src/assets/nbt.cpp
     src/assets/image.cpp
+    src/mods/mod_info.cpp
+    src/mods/optimization_mods.cpp
     src/text/text_layout.cpp
     src/text/styled_text.cpp
     src/text/language.cpp
@@ -424,6 +426,7 @@ add_library(falcon_core
     src/game/game_session_use.cpp
     src/game/game_session_render.cpp
     src/game/game_session_debug.cpp
+    src/game/mods_screen.cpp
     src/game/item_render.cpp
     src/game/container_screen.cpp
     src/game/inventory_screen.cpp

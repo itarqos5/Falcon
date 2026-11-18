@@ -27,6 +27,9 @@ int main() {
     test_sound_system_and_music();
     test_now_playing_toast();
     test_zip_archive();
+    test_mod_metadata();
+    test_mods_folder();
+    test_optimization_mods();
     test_nbt();
     test_options_file();
     test_game_options_round_trip();

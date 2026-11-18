@@ -49,6 +49,8 @@ struct ScreenServices {
     std::string accessToken;  // the account's Minecraft access token, for servers in online mode (empty when Falcon was not started by the launcher)
     // Joins the server at this address ("host" or "host:port"): the main loop starts the session between frames.
     std::function<void(const std::string& address)> joinServer;
+    // The folder the Mods screen lists (the launcher's Mods tab puts the mods it installs in Falcon's own folder, mods/).
+    std::filesystem::path modsDir;
 };
 
 // A button handler that opens screen T on top of the current one (T's constructor takes the

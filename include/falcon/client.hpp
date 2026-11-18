@@ -62,6 +62,7 @@ struct ClientOptions {
     std::optional<std::string> uuid;                 // --uuid <id>: the player's account id
     std::string accessToken;                         // FALCON_MC_TOKEN: the account's Minecraft access token (the launcher hands it over; kept for servers in online mode, never printed)
     std::optional<std::filesystem::path> gameDir;    // --game-dir <dir>: the ".minecraft" folder (resourcepacks/ lives in it)
+    std::optional<std::filesystem::path> modsDir;    // --mods-dir <dir>: the folder the Mods screen lists (Falcon's own mods folder by default, the game folder's mods/ with --game-dir)
     std::vector<ScriptedPacks> packs;                // --packs ID,ID@S, for tests
     int width = 854;                                  // --size WxH (the game's default window)
     int height = 480;

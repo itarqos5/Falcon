@@ -386,7 +386,8 @@ int Client::run() {
     int framebufferNowW = options_.width;  // the window's current size, for the GUI Scale button's range
     int framebufferNowH = options_.height;
     ScreenServices services{language, font, panorama, gameOptions, sounds, music, packs, {}, gameDir, {}, {},
-                            loadLanguageList(resources), nullptr, {}, {}, "Player", {}, {}, {}};
+                            loadLanguageList(resources), nullptr, {}, {}, "Player", {}, {}, {}, {}};
+    services.modsDir = options_.modsDir ? *options_.modsDir : options_.gameDir ? gameDir / "mods" : falconDataDir().value_or(std::filesystem::path(".")) / "mods";
     if (options_.username && !options_.username->empty()) services.playerName = *options_.username;
     if (options_.uuid) services.playerUuid = *options_.uuid;
     services.accessToken = options_.accessToken;

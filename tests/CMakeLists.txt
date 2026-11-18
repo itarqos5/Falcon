@@ -1,7 +1,7 @@
 # Built only on request so ordinary builds stay fast:
 #   cmake --build --preset check        (builds falcon_tests and runs it)
 add_executable(falcon_tests EXCLUDE_FROM_ALL test_client.cpp test_client_core.cpp test_client_audio_zip_save.cpp test_client_options_world.cpp test_client_server_keys.cpp
-    test_client_mesh_player.cpp test_client_player_world.cpp)
+    test_client_mesh_player.cpp test_client_player_world.cpp test_client_mods.cpp)
 target_link_libraries(falcon_tests PRIVATE falcon::core falcon_warnings)
 
 add_test(NAME falcon_tests COMMAND falcon_tests)

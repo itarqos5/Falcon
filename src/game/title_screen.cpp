@@ -2,6 +2,7 @@
 
 #include "falcon/game/join_multiplayer_screen.hpp"
 #include "falcon/game/language_screen.hpp"
+#include "falcon/game/mods_screen.hpp"
 #include "falcon/game/options_screen.hpp"
 #include "falcon/game/options_screens.hpp"
 #include "falcon/game/safety_screen.hpp"
@@ -28,13 +29,17 @@ int horizontalPosition(int width, int index, int count, int size) {
 
 TitleScreenLayout computeTitleScreenLayout(int width, int height, int copyrightWidth) {
     TitleScreenLayout l;
-    int y = height / 4 + 48;
+    // The game starts its buttons at a quarter of the height and 48 below; with the Mods button there is a row more, and at the default window (240 units) the last row would end
+    // below the bottom, so they start higher then, as far as the room under the logo allows (the footer line is 10 from the bottom, the logo and its badge end at 81).
+    int y = std::max(std::min(height / 4 + 48, height - 150), 84);
 
     l.singleplayer = {width / 2 - 100, y, 200, kButtonHeight};
     y += kRowSpacing;
     l.multiplayer = {width / 2 - 100, y, 200, kButtonHeight};
     y += kRowSpacing;
     l.realms = {width / 2 - 100, y, 200, kButtonHeight};
+    y += kRowSpacing;
+    l.mods = {width / 2 - 100, y, 200, kButtonHeight};
 
     y += kRowSpacing;
     l.friends = {horizontalPosition(width, 1, 3, kButtonHeight), y, kButtonHeight, kButtonHeight};
@@ -82,6 +87,8 @@ void TitleScreen::init() {
     // Minecraft Realms is a Mojang online service this client does not talk to: shown with the
     // padlock, like the other buttons that lead somewhere that does not exist here.
     addLockedButton(text("menu.online"), l.realms);
+    // Mods: the mods in Falcon's mods folder, listed with what they say about themselves (they are not loaded yet).
+    addButton("Mods", l.mods, openScreen<ModsScreen>(navigator_, services_));
     // The three icons under Minecraft Realms open the matching Options screens. The friends icon
     // opens Online Options, where the Friends List settings live.
     addIconButton("friends/friends", 15, l.friends, openScreen<OnlineOptionsScreen>(navigator_, services_));

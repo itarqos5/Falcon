@@ -86,6 +86,7 @@ std::string usageText() {
            "  --username <name>       The player's name (shown in chat); the launcher passes the account's\n"
            "  --uuid <id>             The player's account id\n"
            "  --game-dir <dir>        The .minecraft folder to use (its resourcepacks/ folder lists the packs)\n"
+           "  --mods-dir <dir>        The folder the Mods screen lists (Falcon's own mods folder by default)\n"
            "  --packs <ids>@<s>       Select resource packs (comma-separated ids, lowest priority first, e.g.\n"
            "                          high_contrast or file/MyPack.zip) after <s> seconds, as the packs screen would\n"
            "  --background            Hidden, unfocused window (implied by --capture): never pops up over other apps\n"
@@ -225,6 +226,8 @@ ClientOptions parseOptions(int argc, const char* const* argv) {
             o.uuid = nextValue(i, argc, argv);
         } else if (arg == "--game-dir") {
             o.gameDir = std::filesystem::path(nextValue(i, argc, argv));
+        } else if (arg == "--mods-dir") {
+            o.modsDir = std::filesystem::path(nextValue(i, argc, argv));
         } else if (arg == "--packs") {
             // ID,ID,...@SECONDS  (the list may be empty: "@5" deselects everything)
             const std::string v = nextValue(i, argc, argv);
