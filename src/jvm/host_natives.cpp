@@ -3,6 +3,7 @@
 #include "falcon/jvm/vm.hpp"
 
 #include "falcon/assets/image.hpp"
+#include "falcon/util/log.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -72,7 +73,10 @@ void installHostNatives(Vm& vm) {
     nat("loadedMods", "()[Ljava/lang/String;", [](Vm& v, Value*) { return ref(stringArray(v, v.host.loadedMods)); });
     nat("log", "(ILjava/lang/String;)V", [](Vm& v, Value* a) {
         static const char* const kLevels[] = {"debug", "info", "warn", "error"};
-        v.note(std::string("[") + kLevels[std::clamp(a[0].i, 0, 3)] + "] " + textOf(v, a[1].a));
+        const int lvl = std::clamp(a[0].i, 0, 3);
+        const std::string text = textOf(v, a[1].a);
+        v.note(std::string("[") + kLevels[lvl] + "] " + text);
+        falcon::log::line("[mod:%s] %s: %s\n", v.modId.c_str(), kLevels[lvl], text.c_str());
         return Value();
     });
     nat("translate", "(Ljava/lang/String;)Ljava/lang/String;", [](Vm& v, Value* a) {
@@ -123,9 +127,15 @@ void installHostNatives(Vm& vm) {
     nat("openScreen", "(ZLjava/lang/String;)V", [](Vm& v, Value* a) {
         v.capture.screenOpen = a[0].i != 0;
         v.capture.screenTitle = textOf(v, a[1].a);
+        falcon::log::line("[mod:%s] openScreen open=%d title='%s'\n", v.modId.c_str(), a[0].i, v.capture.screenTitle.c_str());
         return Value();
     });
-    nat("consumeClick", "(Ljava/lang/String;)Z", [](Vm& v, Value* a) { return valueOfInt(v.host.consumeClick && v.host.consumeClick(textOf(v, a[0].a)) ? 1 : 0); });
+    nat("consumeClick", "(Ljava/lang/String;)Z", [](Vm& v, Value* a) {
+        const std::string name = textOf(v, a[0].a);
+        const bool ok = v.host.consumeClick && v.host.consumeClick(name);
+        if (ok) falcon::log::line("[mod:%s] consumeClick('%s') -> true\n", v.modId.c_str(), name.c_str());
+        return valueOfInt(ok ? 1 : 0);
+    });
     nat("isDown", "(Ljava/lang/String;)Z", [](Vm& v, Value* a) { return valueOfInt(v.host.isDown && v.host.isDown(textOf(v, a[0].a)) ? 1 : 0); });
 
     // ---- what the mod adds ----

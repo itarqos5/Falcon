@@ -84,6 +84,7 @@ public:
     // Once a frame, before drawing. `active`: the player is steering (no menu is open). `keepTicking`: a menu is open that does not
     // stop the game (the inventory: in singleplayer the world goes on, the player only cannot steer).
     void update(double dt, bool active, int framebufferWidth, int framebufferHeight, bool keepTicking = false);
+    void tickMods();  // the mods' tick handlers, run by the VM (src/game/game_session_mods.cpp)
     void renderWorld(int framebufferWidth, int framebufferHeight);
     // The crosshair, hotbar, the survival bars (hearts, food, experience) and the (F3) debug screen.
     void renderHud(GuiGraphics& graphics, int guiWidth, int guiHeight, bool chatFocused = false);
@@ -384,7 +385,6 @@ private:
     [[nodiscard]] std::vector<WorldRenderer::DebugLine> debugGizmos();
     bool debugChord(int key);  // the rest of the F3 chords (D, C, A, B, G, Q), with the chat feedback the game gives; true if the key was one (it is then not a key of the game as well)
     void debugMessage(const std::string& text);
-    void tickMods();  // the mods' tick handlers, run by the VM (src/game/game_session_mods.cpp)
     void renderModHud(GuiGraphics& graphics, int guiWidth, int guiHeight);  // what the mods' HUDs draw
     void renderModLevel(const Camera& camera, int framebufferWidth, int framebufferHeight);  // what they draw in the level
     [[nodiscard]] bool runModCommand(const std::string& line);  // a client command of a mod (true when one answered it)

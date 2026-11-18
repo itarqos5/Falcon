@@ -36,6 +36,7 @@ jvm::HostState GameSession::modHostState(int guiWidth, int guiHeight) const {
     state.z = player_.z;
     state.yaw = player_.yaw;
     state.pitch = player_.pitch;
+    state.health = static_cast<int>(std::ceil(vitals_.health));
     state.food = player_.foodLevel;
     const Camera cam = camera();
     state.camX = cam.x;
@@ -51,12 +52,19 @@ jvm::HostState GameSession::modHostState(int guiWidth, int guiHeight) const {
     state.framebufferWidth = modFramebufferWidth_;
     state.framebufferHeight = modFramebufferHeight_;
     state.guiScale = guiWidth > 0 ? std::max(1, modFramebufferWidth_ / guiWidth) : 2;
+    double cx = 0.0, cy = 0.0;
+    int ww = 1, wh = 1;
+    window_.cursorPosition(cx, cy);
+    window_.windowSize(ww, wh);
+    state.mouseX = cx * static_cast<double>(guiWidth) / static_cast<double>(std::max(ww, 1));
+    state.mouseY = cy * static_cast<double>(guiHeight) / static_cast<double>(std::max(wh, 1));
     state.gameTime = static_cast<double>(playerAgeTicks_);
     state.dimension = dimension_ == 1 ? "minecraft:the_nether" : dimension_ == 2 ? "minecraft:the_end" : "minecraft:overworld";
     state.worldName = info_.name.empty() ? info_.folder : info_.name;
     state.worldKind = remote_ ? 1 : 0;
     state.playerName = services_.playerName;
     state.playerUuid = services_.playerUuid;
+    state.keyDown = [this](int k) { return window_.keyDown(k); };
     state.textWidth = [this](const std::string& text) { return services_.font.width(text); };
     state.translate = [this](const std::string& key) { return services_.language.get(key); };
     state.blockAt = [this](int x, int y, int z) {
@@ -95,7 +103,10 @@ void GameSession::modKeyEvent(const KeyId& key, bool pressed) {
     jvm::ModHost* host = services_.mods.get();
     if (modsDisabled() || host == nullptr || host->mods().empty()) return;
     for (std::size_t i = kKeyMappingCount; i < totalKeyMappingCount(); ++i) {
-        if (services_.options.keyBindings.key(i) == key) host->keyEvent(keyMappingAt(i).name, pressed);
+        if (services_.options.keyBindings.key(i) == key) {
+            falcon::log::line("[mod] key event: '%s' pressed=%d\n", keyMappingAt(i).name, pressed ? 1 : 0);
+            host->keyEvent(keyMappingAt(i).name, pressed);
+        }
     }
 }
 

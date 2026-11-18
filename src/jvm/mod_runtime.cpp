@@ -2,6 +2,7 @@
 
 #include "falcon/mods/mod_info.hpp"
 #include "falcon/mods/optimization_mods.hpp"
+#include "falcon/util/log.hpp"
 
 #include "falcon/jvm/modapi.hpp"
 
@@ -224,10 +225,15 @@ bool ModInstance::runEvent(const char* name, const char* desc, const Value* args
         ++failed;
         std::string why = vm.toJavaString(thrown.exception) + " at " + vm.stackTrace(vm.throwDepth(), 6);
         report_.error += (report_.error.empty() ? "" : "; ") + std::string(name) + ": " + why;
-        if (failed >= 5) report_.error += " (switched off)";
+        falcon::log::line("[mod:%s] event '%s' threw: %s\n", vm.modId.c_str(), name, why.c_str());
+        if (failed >= 5) {
+            report_.error += " (switched off)";
+            falcon::log::line("[mod:%s] event '%s' switched off after 5 failures\n", vm.modId.c_str(), name);
+        }
     } catch (const BudgetExceeded& over) {
         ++failed;
         report_.error += (report_.error.empty() ? "" : "; ") + std::string(name) + ": " + over.why;
+        falcon::log::line("[mod:%s] event '%s' budget exceeded: %s\n", vm.modId.c_str(), name, over.why.c_str());
     }
     return found;
 }
@@ -480,9 +486,12 @@ std::vector<DrawCmd> ModInstance::renderScreen(int mouseX, int mouseY, float par
         bool found = false;
         vm_->callStatic("net/falcon/Screens", "render", "(IIF)V", args, 3, &found);
     } catch (const JavaThrow& thrown) {
-        report_.error += (report_.error.empty() ? "" : "; ") + std::string("screen render: ") + vm_->toJavaString(thrown.exception) + " at " + vm_->stackTrace(vm_->throwDepth(), 6);
+        const std::string err = vm_->toJavaString(thrown.exception) + " at " + vm_->stackTrace(vm_->throwDepth(), 6);
+        report_.error += (report_.error.empty() ? "" : "; ") + std::string("screen render: ") + err;
+        falcon::log::line("[mod:%s] screen render threw: %s\n", vm_->modId.c_str(), err.c_str());
     } catch (const BudgetExceeded& over) {
         report_.error += (report_.error.empty() ? "" : "; ") + std::string("screen render: ") + over.why;
+        falcon::log::line("[mod:%s] screen render budget exceeded: %s\n", vm_->modId.c_str(), over.why.c_str());
     }
     out.swap(vm_->capture.draw);
     collect();
@@ -495,6 +504,10 @@ void ModInstance::screenResize(int width, int height) {
     vm_->budget = vm_->instructionsRun() + 5'000'000;
     try {
         vm_->callStatic("net/falcon/Screens", "resize", "(II)V", args, 2);
+    } catch (const JavaThrow& thrown) {
+        falcon::log::line("[mod:%s] screenResize threw: %s at %s\n", vm_->modId.c_str(), vm_->toJavaString(thrown.exception).c_str(), vm_->stackTrace(vm_->throwDepth(), 6).c_str());
+    } catch (const std::exception& e) {
+        falcon::log::line("[mod:%s] screenResize error: %s\n", vm_->modId.c_str(), e.what());
     } catch (...) {}
 }
 
@@ -503,6 +516,10 @@ void ModInstance::screenTick() {
     vm_->budget = vm_->instructionsRun() + 5'000'000;
     try {
         vm_->callStatic("net/falcon/Screens", "tick", "()V", nullptr, 0);
+    } catch (const JavaThrow& thrown) {
+        falcon::log::line("[mod:%s] screenTick threw: %s at %s\n", vm_->modId.c_str(), vm_->toJavaString(thrown.exception).c_str(), vm_->stackTrace(vm_->throwDepth(), 6).c_str());
+    } catch (const std::exception& e) {
+        falcon::log::line("[mod:%s] screenTick error: %s\n", vm_->modId.c_str(), e.what());
     } catch (...) {}
 }
 
@@ -514,6 +531,8 @@ bool ModInstance::screenMouseClicked(double x, double y, int button, bool double
         bool found = false;
         const Value r = vm_->callStatic("net/falcon/Screens", "mouseClicked", "(DDIZ)Z", args, 4, &found);
         return found && r.i != 0;
+    } catch (const JavaThrow& thrown) {
+        falcon::log::line("[mod:%s] screenMouseClicked threw: %s\n", vm_->modId.c_str(), vm_->toJavaString(thrown.exception).c_str());
     } catch (...) {}
     return false;
 }
@@ -526,6 +545,8 @@ bool ModInstance::screenMouseReleased(double x, double y, int button) {
         bool found = false;
         const Value r = vm_->callStatic("net/falcon/Screens", "mouseReleased", "(DDI)Z", args, 3, &found);
         return found && r.i != 0;
+    } catch (const JavaThrow& thrown) {
+        falcon::log::line("[mod:%s] screenMouseReleased threw: %s\n", vm_->modId.c_str(), vm_->toJavaString(thrown.exception).c_str());
     } catch (...) {}
     return false;
 }
@@ -538,6 +559,8 @@ bool ModInstance::screenMouseDragged(double x, double y, int button, double dx, 
         bool found = false;
         const Value r = vm_->callStatic("net/falcon/Screens", "mouseDragged", "(DDIDD)Z", args, 5, &found);
         return found && r.i != 0;
+    } catch (const JavaThrow& thrown) {
+        falcon::log::line("[mod:%s] screenMouseDragged threw: %s\n", vm_->modId.c_str(), vm_->toJavaString(thrown.exception).c_str());
     } catch (...) {}
     return false;
 }
@@ -550,6 +573,8 @@ bool ModInstance::screenMouseScrolled(double mouseX, double mouseY, double horiz
         bool found = false;
         const Value r = vm_->callStatic("net/falcon/Screens", "mouseScrolled", "(DDDD)Z", args, 4, &found);
         return found && r.i != 0;
+    } catch (const JavaThrow& thrown) {
+        falcon::log::line("[mod:%s] screenMouseScrolled threw: %s\n", vm_->modId.c_str(), vm_->toJavaString(thrown.exception).c_str());
     } catch (...) {}
     return false;
 }
@@ -562,6 +587,8 @@ bool ModInstance::screenKeyPressed(int key, int scancode, int modifiers) {
         bool found = false;
         const Value r = vm_->callStatic("net/falcon/Screens", "keyPressed", "(III)Z", args, 3, &found);
         return found && r.i != 0;
+    } catch (const JavaThrow& thrown) {
+        falcon::log::line("[mod:%s] screenKeyPressed threw: %s\n", vm_->modId.c_str(), vm_->toJavaString(thrown.exception).c_str());
     } catch (...) {}
     return false;
 }
@@ -574,6 +601,8 @@ bool ModInstance::screenKeyReleased(int key, int scancode, int modifiers) {
         bool found = false;
         const Value r = vm_->callStatic("net/falcon/Screens", "keyReleased", "(III)Z", args, 3, &found);
         return found && r.i != 0;
+    } catch (const JavaThrow& thrown) {
+        falcon::log::line("[mod:%s] screenKeyReleased threw: %s\n", vm_->modId.c_str(), vm_->toJavaString(thrown.exception).c_str());
     } catch (...) {}
     return false;
 }
@@ -586,6 +615,8 @@ bool ModInstance::screenCharTyped(int codePoint, int modifiers) {
         bool found = false;
         const Value r = vm_->callStatic("net/falcon/Screens", "charTyped", "(II)Z", args, 2, &found);
         return found && r.i != 0;
+    } catch (const JavaThrow& thrown) {
+        falcon::log::line("[mod:%s] screenCharTyped threw: %s\n", vm_->modId.c_str(), vm_->toJavaString(thrown.exception).c_str());
     } catch (...) {}
     return false;
 }
@@ -595,6 +626,8 @@ void ModInstance::screenClose() {
     vm_->budget = vm_->instructionsRun() + 10'000'000;
     try {
         vm_->callStatic("net/falcon/Screens", "close", "()V", nullptr, 0);
+    } catch (const JavaThrow& thrown) {
+        falcon::log::line("[mod:%s] screenClose threw: %s\n", vm_->modId.c_str(), vm_->toJavaString(thrown.exception).c_str());
     } catch (...) {}
     vm_->capture.screenOpen = false;
 }
@@ -633,6 +666,7 @@ ModHost::ModHost(const std::filesystem::path& modsDir, const std::filesystem::pa
 }
 
 void ModHost::keyEvent(const std::string& keyName, bool pressed) {
+    falcon::log::line("[mod] ModHost::keyEvent: '%s' pressed=%d\n", keyName.c_str(), pressed ? 1 : 0);
     if (pressed) {
         if (down_.insert(keyName).second) ++clicks_[keyName];  // (a held key repeats: only the first press counts)
     } else {

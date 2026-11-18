@@ -1,6 +1,7 @@
 // The stand-ins that know what a call means: registering something in a registry, an identifier, a text, an event, a key, the mod's logger. Every other call on a class this machine does not have
 // is recorded as it is (vm.cpp, shimCall), so these are only the ones whose result the mod's own code goes on to use, or that the client wants to read.
 #include "falcon/jvm/vm.hpp"
+#include "falcon/util/log.hpp"
 
 #include "shim_util.hpp"
 
@@ -233,6 +234,7 @@ void installShims(Vm& vm) {
                 }
             }
             v.note(std::string("[") + level + "] " + text);
+            falcon::log::line("[mod:%s] %s: %s\n", v.modId.c_str(), level, text.c_str());
             return true;
         };
     };
@@ -242,7 +244,9 @@ void installShims(Vm& vm) {
     for (const char* method : {"println", "print"}) {
         vm.defineShimHandler(std::string("java/io/PrintStream.") + method, [](Vm& v, Value* a, const MethodRef& r, Value&) {
             if (r.params.empty()) return true;
-            v.note("[out] " + v.describe(a[1], r.params[0]));
+            const std::string desc = v.describe(a[1], r.params[0]);
+            v.note("[out] " + desc);
+            falcon::log::line("[mod:%s] out: %s\n", v.modId.c_str(), desc.c_str());
             return true;
         });
     }

@@ -2,6 +2,7 @@
 
 #include "falcon/gfx/texture_manager.hpp"
 #include "falcon/jvm/mod_runtime.hpp"
+#include "falcon/util/log.hpp"
 
 #include <cmath>
 #include <set>
@@ -88,6 +89,7 @@ ModScreen::ModScreen(ScreenNavigator& navigator, ScreenServices& services)
 ModScreen::~ModScreen() = default;
 
 void ModScreen::init() {
+    falcon::log::line("[mod_screen] init (width=%d, height=%d)\n", width_, height_);
     if (services_.mods && services_.mods->hasActiveScreen()) {
         services_.mods->screenResize(width_, height_);
     }
@@ -95,6 +97,7 @@ void ModScreen::init() {
 
 void ModScreen::render(GuiGraphics& graphics, int mouseX, int mouseY, const FrameTime& time) {
     if (!services_.mods || !services_.mods->hasActiveScreen()) {
+        falcon::log::line("[mod_screen] render: popping (hasActiveScreen=%d)\n", services_.mods ? services_.mods->hasActiveScreen() : 0);
         navigator_.pop();
         return;
     }
@@ -159,9 +162,13 @@ bool ModScreen::mouseScrolled(double x, double y, double dy) {
 
 bool ModScreen::keyPressed(int key, int mods) {
     constexpr int kEscape = 256;
+    falcon::log::line("[mod_screen] keyPressed: key=%d mods=%d\n", key, mods);
     if (services_.mods && services_.mods->hasActiveScreen()) {
         if (services_.mods->screenKeyPressed(key, 0, mods)) {
-            if (!services_.mods->hasActiveScreen()) navigator_.pop();
+            if (!services_.mods->hasActiveScreen()) {
+                falcon::log::line("[mod_screen] screenKeyPressed closed screen -> popping\n");
+                navigator_.pop();
+            }
             return true;
         }
     }
@@ -175,7 +182,10 @@ bool ModScreen::keyPressed(int key, int mods) {
 void ModScreen::keyReleased(int key, int mods) {
     if (services_.mods && services_.mods->hasActiveScreen()) {
         services_.mods->screenKeyReleased(key, 0, mods);
-        if (!services_.mods->hasActiveScreen()) navigator_.pop();
+        if (!services_.mods->hasActiveScreen()) {
+            falcon::log::line("[mod_screen] screenKeyReleased closed screen -> popping\n");
+            navigator_.pop();
+        }
     }
     Screen::keyReleased(key, mods);
 }
@@ -183,7 +193,10 @@ void ModScreen::keyReleased(int key, int mods) {
 void ModScreen::charTyped(unsigned int codePoint) {
     if (services_.mods && services_.mods->hasActiveScreen()) {
         if (services_.mods->screenCharTyped(static_cast<int>(codePoint), 0)) {
-            if (!services_.mods->hasActiveScreen()) navigator_.pop();
+            if (!services_.mods->hasActiveScreen()) {
+                falcon::log::line("[mod_screen] screenCharTyped closed screen -> popping\n");
+                navigator_.pop();
+            }
             return;
         }
     }
@@ -191,6 +204,7 @@ void ModScreen::charTyped(unsigned int codePoint) {
 }
 
 void ModScreen::onClose() {
+    falcon::log::line("[mod_screen] onClose\n");
     if (services_.mods && services_.mods->hasActiveScreen()) {
         services_.mods->screenClose();
     }

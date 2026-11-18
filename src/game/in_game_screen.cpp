@@ -50,6 +50,7 @@ bool InGameScreen::keyPressed(int key, int mods) {
             return true;
         }
         services_.session->onKey(key, mods);
+        services_.session->tickMods();
         if (services_.mods && services_.mods->hasActiveScreen()) {
             navigator_.push(std::make_unique<ModScreen>(navigator_, services_));
             return true;
