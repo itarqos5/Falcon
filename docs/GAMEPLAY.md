@@ -77,3 +77,15 @@ What a singleplayer world does beyond its terrain, how it is built, and what was
 
 `world/random_ticks.cpp`: grass spreads to dirt and dies under a roof, leaves rot away when no log is within six blocks, wheat, carrots, potatoes, beetroots and nether wart ripen (the game's
 speed rule for farmland and neighbours), sugar cane and cactus grow, farmland drinks and dries, saplings become a plain tree. Not done: stems and fruit, vines, bamboo, kelp, mushrooms, moss.
+
+## Advancements, Statistics and World Options (the Game Menu)
+
+All three are in the Game Menu (Escape) and work.
+
+* **Advancements** (`game/progress_screens.cpp`, `game/advancements.cpp`): the tree is read from the game's own `data/minecraft/advancement/{story,nether,end,adventure,husbandry}`. The layout is a simple
+  tidy tree, not the game's own (`TreeNodePosition`), so the positions differ. Only the criteria Falcon can check are met: an inventory change (items and item tags), changing dimension, and the tick
+  trigger; kills, trades, structures, potions and the rest stay locked. Progress is saved in the world (`falcon_save.dat`), checked every second, and the chat says "<player> has made the advancement [Title]".
+* **Statistics**: counters for time, distances (walking, sprinting, crouching, swimming, falling, flying), jumps, deaths, blocks mined, items picked up, mobs killed, damage dealt and taken; tabs General,
+  Items and Mobs; saved in the world. Not counted: crafted, used, broken and dropped items, mobs killed by arrows or TNT, climbing.
+* **World Options**: difficulty, game mode (needs cheats), the cheats switch, and Edit Game Rules (every rule Falcon knows, as switches and sliders, applied at once like `/gamerule`).
+* **The spyglass**: the zoom (field of view x 0.1) makes the chunks it looks at (see RENDERING.md, "Zoom").

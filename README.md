@@ -1,6 +1,6 @@
 # Falcon
 
-**A from-scratch C++20 / OpenGL reimplementation of the Minecraft Java Edition client (26.3)** - the menus, the options screens and a
+**A from-scratch C++20 reimplementation (OpenGL and Vulkan) of the Minecraft Java Edition client (26.3)** - the menus, the options screens and a
 real singleplayer world with the game's own terrain generator, light, physics and inventory. It starts in **16 MB** and a
 **32-chunk world settles at about 1 GB** (more while it loads).
 
@@ -364,7 +364,7 @@ how much of it is free), the screen and the graphics card (its name, its video m
 properties. In survival and adventure the hotbar has the hearts above its left half, the food above its right half and the experience strip
 between them, laid out as the game's `Hud` does (the numbers are in `tests/test_client.cpp`, `test_survival_hud`); in creative and spectator
 they are not drawn. Escape opens the Game Menu (Back to Game, Options, Save and Quit to
-Title; Advancements, Statistics and World Options are locked). FOV, Render Distance, Mouse Sensitivity, Invert Mouse, VSync
+Title; Advancements, Statistics and World Options are there too, see docs/GAMEPLAY.md). FOV, Render Distance, Mouse Sensitivity, Invert Mouse, VSync
 and Max Framerate act live. Losing the keyboard focus opens the Game Menu, and an unfocused Falcon is held to 20 fps, so a game
 running next to it keeps the machine.
 
@@ -628,9 +628,8 @@ All of these follow the 26.3 layouts and strings (read from the game's classes),
   friends section is shown but inactive: it needs a signed-in account)
 - **Video Settings** (Display, Quality & Performance with the Preset slider that rewrites its 17
   options, Preferences), **Controls**, **Mouse Settings**. The **Graphics API** button offers OpenGL and Vulkan (no "Default"; Metal
-  is meant to follow). Only OpenGL draws the game so far: Vulkan is remembered but OpenGL runs, and the start-up log and the
-  button's tooltip say so. What a real second backend needs, measured on this code, and the order to build it in is in
-  [docs/RENDERING.md](docs/RENDERING.md).
+  is meant to follow). Both draw the game; when Vulkan cannot be used the window falls back to OpenGL and the start-up log says why. How the Vulkan
+  renderer works, how it was checked and what is not done is in [docs/RENDERING.md](docs/RENDERING.md). The Video Settings screen has tabs down the left (Display, Quality & Performance, Preferences, LODs).
 - **Key Binds** (Controls → "Key Binds..."): all 62 actions of the 26.3 client in the game's eight
   categories (Movement, Miscellaneous, Multiplayer, Gameplay, Inventory, Creative Mode, Spectator,
   Debug), sorted by their names in the current language like the game does, each with its key button
