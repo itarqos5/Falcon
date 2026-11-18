@@ -1,5 +1,6 @@
 #include "app.hpp"
 
+#include "falcon/mods/mod_info.hpp"
 #include "avatar.hpp"
 #include "secure_store.hpp"
 #include "util.hpp"
@@ -125,7 +126,7 @@ App::App(HttpClient& http, AppOptions options, AppHooks hooks, Blob bundledClien
                   {"account", nullptr},
                   {"game", {{"status", "unknown"}, {"phase", ""}, {"label", ""}, {"done", 0}, {"total", 0}, {"error", nullptr}, {"version", options_.gameVersion}, {"data", mock || files_.findGameData(options_.gameVersion).has_value()}}},
                   {"settings", {{"keepOpen", true}}},
-                  {"mods", {{"dir", narrow(modsDir().wstring())}, {"gameVersion", options_.gameVersion}, {"installed", json::object()}, {"busy", json::object()}}}};
+                  {"mods", {{"dir", narrow(modsDir().wstring())}, {"gameVersion", options_.gameVersion}, {"installed", json::object()}, {"busy", json::object()}, {"blocked", json::array()}}}};
 }
 
 App::~App() { shutdown(); }
@@ -392,14 +393,19 @@ std::string App::handleMessage(const std::string& message) {
 void App::uiReady() {
     logLine("the UI is ready after " + std::to_string(static_cast<int>(millisSinceStart())) + " ms");
     const json installed = loadInstalledMods();
+    const json blocked = scanBlockedMods();
     if (!booted_.exchange(true)) {
         mutate([&](json& s) {
             s["settings"]["keepOpen"] = loadConfig().value("keepOpen", true);
             s["mods"]["installed"] = installed;
+            s["mods"]["blocked"] = blocked;
         });
         beginBoot();
     } else {
-        mutate([&](json& s) { s["mods"]["installed"] = installed; });  // (the page was reloaded: it gets the state again)
+        mutate([&](json& s) {  // (the page was reloaded: it gets the state again)
+            s["mods"]["installed"] = installed;
+            s["mods"]["blocked"] = blocked;
+        });
     }
 }
 
@@ -929,7 +935,9 @@ json mockSearch(const std::string& text, const std::string& loader, int offset) 
             if (comma == std::string::npos) break;
             from = comma + 1;
         }
-        hits.push_back(json{{"projectId", mod.id}, {"slug", ""}, {"title", mod.title}, {"description", mod.description}, {"author", mod.author}, {"icon", mockModIcon(mod)}, {"downloads", mod.downloads}, {"categories", categories}});
+        const falcon::OptimizationVerdict verdict = falcon::judgeOptimization("", mod.title, categories.get<std::vector<std::string>>(), {});
+        hits.push_back(json{{"projectId", mod.id}, {"slug", ""}, {"title", mod.title}, {"description", mod.description}, {"author", mod.author}, {"icon", mockModIcon(mod)}, {"downloads", mod.downloads}, {"categories", categories},
+                            {"blocked", verdict.blocked}, {"blockedReason", verdict.reason}});
     }
     return json{{"hits", hits}, {"offset", offset}, {"limit", kModsPageSize}, {"total", total}, {"query", text}};
 }
@@ -960,6 +968,18 @@ json App::loadInstalledMods() const {
     for (const auto& [projectId, entry] : index.items()) {
         if (!entry.is_object() || !entry.contains("file") || !entry["file"].is_string()) continue;
         if (fs::exists(modsDir() / fs::path(widen(entry["file"].get<std::string>())), ec)) out[projectId] = entry;
+    }
+    return out;
+}
+
+json App::scanBlockedMods() const {
+    json out = json::array();
+    if (options_.mock || !options_.mockState.empty()) return out;
+    for (const falcon::ModInfo& mod : falcon::readModsFolder(modsDir())) {
+        std::vector<std::string> needs;
+        for (const std::string& dependency : mod.depends) needs.push_back(dependency.substr(0, dependency.find(' ')));
+        const falcon::OptimizationVerdict verdict = falcon::judgeOptimization(mod.id, mod.name, {}, needs);
+        if (verdict.blocked) out.push_back(json{{"file", narrow(mod.file.filename().wstring())}, {"name", mod.name}, {"reason", verdict.reason}});
     }
     return out;
 }
@@ -1033,7 +1053,11 @@ void App::searchModsTask(const json& id, int generation, std::string text, std::
     query.limit = kModsPageSize;
     {  // (the mods folder is the truth about what is installed: a file deleted by hand stops showing, and a restarted launcher knows)
         const json installed = loadInstalledMods();
-        mutate([&](json& s) { s["mods"]["installed"] = installed; });
+        const json blocked = scanBlockedMods();
+        mutate([&](json& s) {
+            s["mods"]["installed"] = installed;
+            s["mods"]["blocked"] = blocked;
+        });
     }
     const auto page = modrinth_.search(query);
     if (!page) return answerLater(id, false, errorJson(page.error));
@@ -1044,7 +1068,8 @@ void App::searchModsTask(const json& id, int generation, std::string text, std::
     json hits = json::array();
     for (std::size_t i = 0; i < page->hits.size(); ++i) {
         const ModHit& hit = page->hits[i];
-        hits.push_back(json{{"projectId", hit.projectId}, {"slug", hit.slug}, {"title", hit.title}, {"description", hit.description}, {"author", hit.author}, {"icon", icons[i]}, {"downloads", hit.downloads}, {"categories", hit.categories}});
+        hits.push_back(json{{"projectId", hit.projectId}, {"slug", hit.slug}, {"title", hit.title}, {"description", hit.description}, {"author", hit.author}, {"icon", icons[i]}, {"downloads", hit.downloads}, {"categories", hit.categories},
+                            {"blocked", hit.blocked}, {"blockedReason", hit.blockedReason}});
     }
     answerLater(id, true, json{{"hits", hits}, {"offset", page->offset}, {"limit", page->limit}, {"total", page->total}, {"query", text}});
 }
@@ -1067,13 +1092,47 @@ void App::installModTask(const json& id, std::string projectId, std::string titl
             const Error closing{"cancelled", "The launcher is closing."};
             return finish(json::object(), &closing);
         }
+        for (const MockMod& mod : kMockMods) {  // (the demo refuses what the real one refuses)
+            if (projectId != mod.id) continue;
+            std::vector<std::string> categories;
+            for (std::size_t from = 0, comma = 0; comma != std::string::npos; from = comma + 1) {
+                comma = std::string(mod.categories).find(',', from);
+                categories.push_back(std::string(mod.categories).substr(from, comma == std::string::npos ? std::string::npos : comma - from));
+            }
+            const falcon::OptimizationVerdict verdict = falcon::judgeOptimization("", mod.title, categories, {});
+            if (verdict.blocked) {
+                const Error blockedError{"optimization_mod", verdict.reason};
+                return finish(json::object(), &blockedError);
+            }
+        }
         const json entry = {{"title", title}, {"version", "1.0.0"}, {"file", "sample-" + projectId + "-1.0.0.jar"}, {"loader", loader.empty() ? "fabric" : loader}};
         return finish(entry, nullptr);
+    }
+    // Optimization mods are not installed (not compatible with Falcon, and never will be): asked again here, whatever the page showed.
+    const auto project = modrinth_.vetProject(projectId);
+    if (!project) {
+        const Error error = project.error;
+        return finish(json::object(), &error);
+    }
+    if (project->blocked) {
+        logLine("the mod " + projectId + " was refused: " + project->reason);
+        const Error refused{"optimization_mod", project->reason};
+        return finish(json::object(), &refused);
     }
     const auto file = modrinth_.chooseFile(projectId, options_.gameVersion, loader);
     if (!file) {
         const Error error = file.error;
         return finish(json::object(), &error);
+    }
+    const auto needs = modrinth_.vetDependencies(*file, title);
+    if (!needs) {
+        const Error error = needs.error;
+        return finish(json::object(), &error);
+    }
+    if (needs->blocked) {
+        logLine("the mod " + projectId + " was refused: " + needs->reason);
+        const Error refused{"optimization_mod", needs->reason};
+        return finish(json::object(), &refused);
     }
     mutate([&](json& s) { s["mods"]["busy"][projectId] = "Downloading " + file->filename + "…"; });
     const auto done = modrinth_.install(*file, title.empty() ? projectId : title, modsDir(), modsCancel_);

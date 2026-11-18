@@ -1008,12 +1008,12 @@ void test_not_configured_and_errors() {
 // ---- the Mods tab (Modrinth) ---------------------------------------------------------------------------------------------------------
 
 const char* const kSearchReply = R"({"hits":[
-  {"project_id":"AANobbMI","slug":"sodium","title":"Sodium","description":"A rendering engine replacement.","author":"jelly","icon_url":"https://cdn.modrinth.com/data/AANobbMI/icon.png","downloads":253751616,"display_categories":["fabric","optimization"],"categories":["fabric"]},
+  {"project_id":"AANobbMI","slug":"lumen","title":"Lumen","description":"A rendering engine replacement.","author":"jelly","icon_url":"https://cdn.modrinth.com/data/AANobbMI/icon.png","downloads":253751616,"display_categories":["fabric","utility"],"categories":["fabric"]},
   {"project_id":"bad id!","title":"Not a project id"},
   {"project_id":"P7dR8mSH","slug":"fabric-api","title":"Fabric API","description":"The library.","author":"modmuss","icon_url":"https://evil.example/icon.png","downloads":1,"categories":["fabric","library"]}
 ],"offset":0,"limit":20,"total_hits":2})";
 
-std::string versionsReply(const std::string& url, const std::string& sha1, std::size_t size, const std::string& filename = "sodium-fabric-0.5.0+mc26.3.jar") {
+std::string versionsReply(const std::string& url, const std::string& sha1, std::size_t size, const std::string& filename = "lumen-fabric-0.5.0+mc26.3.jar") {
     return json::array({json{{"id", "BETA0001"}, {"version_number", "0.6.0-beta"}, {"version_type", "beta"}, {"loaders", json::array({"fabric"})},
                              {"files", json::array({json{{"filename", "beta.jar"}, {"primary", true}, {"url", "https://cdn.modrinth.com/data/AANobbMI/versions/BETA0001/beta.jar"}, {"size", 5}, {"hashes", {{"sha1", std::string(40, 'a')}}}}})}},
                         json{{"id", "REL00001"}, {"version_number", "0.5.0"}, {"version_type", "release"}, {"loaders", json::array({"fabric"})},
@@ -1036,7 +1036,7 @@ void test_mods_parts() {
     CHECK(Modrinth::isProjectId("AANobbMI") && Modrinth::isProjectId("fabric-api") && Modrinth::isProjectId("a_b"));
     CHECK(!Modrinth::isProjectId("") && !Modrinth::isProjectId("../x") && !Modrinth::isProjectId("a/b") && !Modrinth::isProjectId("a b") && !Modrinth::isProjectId(std::string(65, 'a')));
 
-    CHECK(Modrinth::safeFileName("sodium-fabric-0.5.0+mc26.3.jar") == "sodium-fabric-0.5.0+mc26.3.jar");
+    CHECK(Modrinth::safeFileName("lumen-fabric-0.5.0+mc26.3.jar") == "lumen-fabric-0.5.0+mc26.3.jar");
     CHECK(Modrinth::safeFileName("../../Windows/evil.jar") == "evil.jar");
     CHECK(Modrinth::safeFileName("C:\\Users\\x\\evil.JAR") == "evil.JAR");
     CHECK(Modrinth::safeFileName("not a jar.zip").empty());
@@ -1058,13 +1058,13 @@ void test_mods_parts() {
     FakeHttp http;
     Modrinth api(http, "https://api.modrinth.com/");
     ModQuery q;
-    q.text = "sodium & co";
+    q.text = "lumen & co";
     q.gameVersion = "26.3";
     q.loader = "fabric";
     q.offset = 40;
     const std::string url = api.searchUrl(q);
     CHECK(url.rfind("https://api.modrinth.com/v2/search?", 0) == 0);  // (the slash at the end of the base is dropped)
-    CHECK(url.find("query=sodium%20%26%20co") != std::string::npos || url.find("query=sodium+%26+co") != std::string::npos);
+    CHECK(url.find("query=lumen%20%26%20co") != std::string::npos || url.find("query=lumen+%26+co") != std::string::npos);
     CHECK(url.find("project_type%3Amod") != std::string::npos && url.find("versions%3A26.3") != std::string::npos && url.find("categories%3Afabric") != std::string::npos);
     CHECK(url.find("offset=40") != std::string::npos && url.find("index=relevance") != std::string::npos);
     ModQuery empty;
@@ -1080,15 +1080,15 @@ void test_mods_parts() {
     const auto page = Modrinth::parseSearch(kSearchReply);
     CHECK(page.ok() && page->hits.size() == 2 && page->total == 2 && page->limit == 20);
     if (page.ok() && page->hits.size() == 2) {
-        CHECK(page->hits[0].projectId == "AANobbMI" && page->hits[0].title == "Sodium" && page->hits[0].downloads == 253751616 && page->hits[0].categories.size() == 2);
+        CHECK(page->hits[0].projectId == "AANobbMI" && page->hits[0].title == "Lumen" && page->hits[0].downloads == 253751616 && page->hits[0].categories.size() == 2);
         CHECK(page->hits[1].categories[1] == "library");
     }
     CHECK(!Modrinth::parseSearch("not json").ok() && !Modrinth::parseSearch("{}").ok() && !Modrinth::parseSearch("[]").ok());
 
     // the file to take: the newest RELEASE (not the beta that is listed first), its primary .jar (not the sources)
-    const std::string good = "https://cdn.modrinth.com/data/AANobbMI/versions/REL00001/sodium.jar";
+    const std::string good = "https://cdn.modrinth.com/data/AANobbMI/versions/REL00001/lumen.jar";
     const auto file = Modrinth::pickFile(versionsReply(good, std::string(40, 'c'), 123), "AANobbMI");
-    CHECK(file.ok() && file->versionNumber == "0.5.0" && file->filename == "sodium-fabric-0.5.0+mc26.3.jar" && file->url == good && file->size == 123 && file->loader == "fabric");
+    CHECK(file.ok() && file->versionNumber == "0.5.0" && file->filename == "lumen-fabric-0.5.0+mc26.3.jar" && file->url == good && file->size == 123 && file->loader == "fabric");
     // a version whose only file is from another host or has no checksum is skipped, and with nothing left there is no file
     CHECK(Modrinth::pickFile(versionsReply("https://evil.example/x.jar", std::string(40, 'c'), 1), "AANobbMI")->versionNumber == "0.6.0-beta");  // (the beta's file is fine)
     CHECK(Modrinth::pickFile(R"([{"version_type":"release","files":[{"filename":"a.jar","url":"https://evil.example/a.jar","hashes":{"sha1":"0000000000000000000000000000000000000000"}}]}])", "x").error.code == "no_file");
@@ -1099,7 +1099,7 @@ void test_mods_parts() {
 void test_mods_network() {
     const fs::path dir = freshFolder("mods");
     const std::string jar = std::string("PK\x03\x04 pretend this is a mod") + std::string(200, 'x');
-    const std::string jarUrl = "https://cdn.modrinth.com/data/AANobbMI/versions/REL00001/sodium.jar";
+    const std::string jarUrl = "https://cdn.modrinth.com/data/AANobbMI/versions/REL00001/lumen.jar";
     FakeHttp http;
     Modrinth api(http);
 
@@ -1134,10 +1134,10 @@ void test_mods_network() {
     const auto chosen = api.chooseFile("AANobbMI", "26.3", "");
     CHECK(chosen.ok());
     std::atomic<bool> cancel{false};
-    const auto done = api.install(*chosen, "Sodium", dir / "mods", cancel);
-    CHECK(done.ok() && done->file == "sodium-fabric-0.5.0+mc26.3.jar" && done->versionNumber == "0.5.0");
+    const auto done = api.install(*chosen, "Lumen", dir / "mods", cancel);
+    CHECK(done.ok() && done->file == "lumen-fabric-0.5.0+mc26.3.jar" && done->versionNumber == "0.5.0");
     std::string written;
-    CHECK(readFile(dir / "mods" / "sodium-fabric-0.5.0+mc26.3.jar", written) && written == jar);
+    CHECK(readFile(dir / "mods" / "lumen-fabric-0.5.0+mc26.3.jar", written) && written == jar);
     int leftovers = 0;
     for (const auto& entry : fs::directory_iterator(dir / "mods")) leftovers += entry.path().extension() == ".part" ? 1 : 0;
     CHECK(leftovers == 0);
@@ -1217,7 +1217,7 @@ void test_mods_messages() {
         const fs::path home = freshFolder("modsreal");
         _putenv_s("FALCON_LAUNCHER_HOME", home.string().c_str());
         const std::string jar = std::string("PK\x03\x04 the mod") + std::string(64, 'y');
-        const std::string jarUrl = "https://cdn.modrinth.com/data/AANobbMI/versions/REL00001/sodium.jar";
+        const std::string jarUrl = "https://cdn.modrinth.com/data/AANobbMI/versions/REL00001/lumen.jar";
         FakeHttp http;
         Modrinth api(http);
         ModQuery q;
@@ -1226,23 +1226,25 @@ void test_mods_messages() {
         http.on("GET", "https://cdn.modrinth.com/data/AANobbMI/icon.png", {FakeHttp::reply(200, std::string("\x89PNG\r\n\x1a\n and some more", 20))});
         http.on("GET", api.versionsUrl("AANobbMI", "26.3", ""), {FakeHttp::reply(200, versionsReply(jarUrl, sha1Hex(jar), jar.size()))});
         http.on("GET", jarUrl, {FakeHttp::reply(200, jar)});
+        http.on("GET", "https://api.modrinth.com/v2/project/AANobbMI", {FakeHttp::reply(200, R"({"id":"AANobbMI","slug":"lumen","title":"Lumen","categories":["fabric","utility"]})")});
+        http.on("GET", "https://api.modrinth.com/v2/project/P7dR8mSH", {FakeHttp::reply(200, R"({"id":"P7dR8mSH","slug":"fabric-api","title":"Fabric API","categories":["fabric","library"]})")});
         Events events;
         AppOptions options;
         App app(http, options, hooksFor(events), Blob{});
         CHECK(app.handleMessage(R"({"id":20,"method":"searchMods","params":{"query":""}})").empty());
         const json found = answerOf(events, 20);
-        CHECK(found["ok"].get<bool>() && found["result"]["hits"].size() == 2 && found["result"]["hits"][0]["title"] == "Sodium" && found["result"]["hits"][0]["icon"].get<std::string>().rfind("data:image/png", 0) == 0);
+        CHECK(found["ok"].get<bool>() && found["result"]["hits"].size() == 2 && found["result"]["hits"][0]["title"] == "Lumen" && found["result"]["hits"][0]["icon"].get<std::string>().rfind("data:image/png", 0) == 0);
         CHECK(found["result"]["hits"][1]["icon"].get<std::string>().empty());  // (a picture on a host that is not Modrinth's is not fetched)
         // the search fails: the page is told why
         (void)app.handleMessage(R"({"id":21,"method":"searchMods","params":{"query":"nothing here"}})");
         const json failed = answerOf(events, 21);
         CHECK(!failed["ok"].get<bool>() && failed["error"]["code"] == "http");
         // installing: the file is in the mods folder, noted in mods.json, and still noted after a restart of the launcher
-        (void)app.handleMessage(R"({"id":22,"method":"installMod","params":{"projectId":"AANobbMI","title":"Sodium","loader":""}})");
+        (void)app.handleMessage(R"({"id":22,"method":"installMod","params":{"projectId":"AANobbMI","title":"Lumen","loader":""}})");
         const json done = answerOf(events, 22);
-        CHECK(done["ok"].get<bool>() && done["result"]["file"] == "sodium-fabric-0.5.0+mc26.3.jar");
+        CHECK(done["ok"].get<bool>() && done["result"]["file"] == "lumen-fabric-0.5.0+mc26.3.jar");
         app.waitIdle();
-        CHECK(fs::exists(home / "mods" / "sodium-fabric-0.5.0+mc26.3.jar"));
+        CHECK(fs::exists(home / "mods" / "lumen-fabric-0.5.0+mc26.3.jar"));
         CHECK(parse(app.stateJson())["mods"]["installed"]["AANobbMI"]["version"] == "0.5.0");
         {  // (a search also looks at the mods folder, which is the truth: so a restarted launcher knows what is installed, and a mod deleted by hand stops showing)
             Events again;
@@ -1251,7 +1253,7 @@ void test_mods_messages() {
             CHECK(answerOf(again, 30)["ok"].get<bool>());
             restarted.waitIdle();
             CHECK(parse(restarted.stateJson())["mods"]["installed"].contains("AANobbMI"));
-            fs::remove(home / "mods" / "sodium-fabric-0.5.0+mc26.3.jar");
+            fs::remove(home / "mods" / "lumen-fabric-0.5.0+mc26.3.jar");
             (void)restarted.handleMessage(R"({"id":31,"method":"searchMods","params":{"query":""}})");
             CHECK(answerOf(again, 31)["ok"].get<bool>());
             restarted.waitIdle();
@@ -1264,6 +1266,165 @@ void test_mods_messages() {
         CHECK(!none["ok"].get<bool>() && none["error"]["code"] == "no_file");
         app.waitIdle();
         CHECK(parse(app.stateJson())["mods"]["busy"].empty());
+    }
+    _putenv_s("FALCON_LAUNCHER_MOCK_SPEED", "1");
+}
+
+// A zip of stored entries (what a mod's .jar is, for the reader of the mod's own metadata; it does not check the CRC).
+std::string storedZip(const std::vector<std::pair<std::string, std::string>>& files) {
+    std::string out;
+    const auto le16 = [&](std::string& to, unsigned v) { to.push_back(static_cast<char>(v & 0xFF)), to.push_back(static_cast<char>((v >> 8) & 0xFF)); };
+    const auto le32 = [&](std::string& to, unsigned v) { le16(to, v & 0xFFFF), le16(to, v >> 16); };
+    std::vector<unsigned> offsets;
+    for (const auto& [name, data] : files) {
+        offsets.push_back(static_cast<unsigned>(out.size()));
+        le32(out, 0x04034b50);
+        le16(out, 20), le16(out, 0), le16(out, 0), le16(out, 0), le16(out, 0), le32(out, 0);
+        le32(out, static_cast<unsigned>(data.size())), le32(out, static_cast<unsigned>(data.size()));
+        le16(out, static_cast<unsigned>(name.size())), le16(out, 0);
+        out += name + data;
+    }
+    const unsigned centralStart = static_cast<unsigned>(out.size());
+    for (std::size_t i = 0; i < files.size(); ++i) {
+        const auto& [name, data] = files[i];
+        le32(out, 0x02014b50);
+        le16(out, 20), le16(out, 20), le16(out, 0), le16(out, 0), le16(out, 0), le16(out, 0), le32(out, 0);
+        le32(out, static_cast<unsigned>(data.size())), le32(out, static_cast<unsigned>(data.size()));
+        le16(out, static_cast<unsigned>(name.size())), le16(out, 0), le16(out, 0), le16(out, 0), le16(out, 0), le32(out, 0), le32(out, offsets[i]);
+        out += name;
+    }
+    const unsigned centralSize = static_cast<unsigned>(out.size()) - centralStart;
+    le32(out, 0x06054b50);
+    le16(out, 0), le16(out, 0), le16(out, static_cast<unsigned>(files.size())), le16(out, static_cast<unsigned>(files.size())), le32(out, centralSize), le32(out, centralStart), le16(out, 0);
+    return out;
+}
+
+// Optimization mods (Sodium and the like) are not installed, however they are asked for: marked in the search, refused before the download, refused after it by what the jar says.
+void test_mods_blocker() {
+    const std::string reply = R"({"hits":[
+      {"project_id":"AANobbMI","slug":"sodium","title":"Sodium","description":"d","author":"a","categories":["fabric"]},
+      {"project_id":"NEWSPEED","slug":"brand-new-speedup","title":"Brand New Speedup","description":"d","author":"a","display_categories":["fabric"],"categories":["fabric","optimization"]},
+      {"project_id":"P7dR8mSH","slug":"fabric-api","title":"Fabric API","description":"d","author":"a","categories":["fabric","library"]}
+    ],"offset":0,"limit":20,"total_hits":3})";
+    const auto page = Modrinth::parseSearch(reply);
+    CHECK(page.ok() && page->hits.size() == 3);
+    if (page.ok() && page->hits.size() == 3) {
+        CHECK(page->hits[0].blocked && page->hits[0].blockedReason.find("never will be") != std::string::npos);                      // a known one, by its slug
+        CHECK(page->hits[1].blocked && page->hits[1].blockedReason.find("Optimization on Modrinth") != std::string::npos);           // one nobody listed: Modrinth's category
+        CHECK(!page->hits[2].blocked && page->hits[2].blockedReason.empty());
+    }
+    // a project's page, and a list of them: every category counts, the extra ones too
+    const auto projects = Modrinth::parseProjects(R"([{"id":"X1","slug":"shiny","title":"Shiny","categories":["decoration"],"additional_categories":["optimization"]},{"id":"X2","slug":"modmenu","title":"Mod Menu","categories":["utility"]}])");
+    CHECK(projects.ok() && projects->size() == 2 && (*projects)[0].categories.size() == 2 && (*projects)[1].slug == "modmenu");
+    CHECK(Modrinth::parseProjects(R"({"id":"X3","slug":"one","title":"One","categories":[]})").ok() && !Modrinth::parseProjects("nonsense").ok());
+    // a version says which projects it needs; only the required ones count
+    const std::string needed = json::array({json{{"id", "REL00001"}, {"version_number", "1"}, {"version_type", "release"}, {"loaders", json::array({"fabric"})},
+                                                  {"dependencies", json::array({json{{"project_id", "AANobbMI"}, {"dependency_type", "required"}}, json{{"project_id", "OPTIONAL"}, {"dependency_type", "optional"}}, json{{"project_id", "bad id!"}, {"dependency_type", "required"}}})},
+                                                  {"files", json::array({json{{"filename", "a.jar"}, {"primary", true}, {"url", "https://cdn.modrinth.com/data/X/a.jar"}, {"size", 5}, {"hashes", {{"sha1", std::string(40, 'c')}}}}})}}})
+                                .dump();
+    const auto picked = Modrinth::pickFile(needed, "SHADERIS");
+    CHECK(picked.ok() && picked->requiredProjects == std::vector<std::string>{"AANobbMI"});
+
+    // the check against the network: a known one, one by category, a harmless one, and no answer (nothing is installed that was not checked)
+    const fs::path dir = freshFolder("modsblock");
+    FakeHttp http;
+    Modrinth api(http);
+    http.on("GET", "https://api.modrinth.com/v2/project/AANobbMI", {FakeHttp::reply(200, R"({"id":"AANobbMI","slug":"sodium","title":"Sodium","categories":["fabric"]})")});
+    http.on("GET", "https://api.modrinth.com/v2/project/NEWSPEED", {FakeHttp::reply(200, R"({"id":"NEWSPEED","slug":"brand-new-speedup","title":"Brand New Speedup","categories":["fabric","optimization"]})")});
+    http.on("GET", "https://api.modrinth.com/v2/project/FINE0001", {FakeHttp::reply(200, R"({"id":"FINE0001","slug":"modmenu","title":"Mod Menu","categories":["fabric","utility"]})")});
+    http.on("GET", "https://api.modrinth.com/v2/project/DOWN0001", {FakeHttp::unreachable()});
+    const auto known = api.vetProject("AANobbMI");
+    CHECK(known.ok() && known->blocked);
+    const auto filed = api.vetProject("NEWSPEED");
+    CHECK(filed.ok() && filed->blocked);
+    const auto fine = api.vetProject("FINE0001");
+    CHECK(fine.ok() && !fine->blocked);
+    CHECK(api.vetProject("DOWN0001").error.code == "network" && api.vetProject("../evil").error.code == "bad_project");
+
+    // what a version needs: Iris-like mods need Sodium; one that needs only a harmless library is fine; none needed asks nothing
+    const std::string list = "https://api.modrinth.com/v2/projects?" + formEncode({{"ids", R"(["AANobbMI","FINE0001"])"}});
+    http.on("GET", list, {FakeHttp::reply(200, R"([{"id":"AANobbMI","slug":"sodium","title":"Sodium","categories":["fabric"]},{"id":"FINE0001","slug":"modmenu","title":"Mod Menu","categories":["utility"]}])")});
+    ModFile shaderish;
+    shaderish.requiredProjects = {"AANobbMI", "FINE0001"};
+    const auto needs = api.vetDependencies(shaderish, "Shaderish");
+    CHECK(needs.ok() && needs->blocked && needs->reason.find("Shaderish needs Sodium") != std::string::npos);
+    CHECK(api.vetDependencies(ModFile{}, "Nothing").ok() && !api.vetDependencies(ModFile{}, "Nothing")->blocked);
+
+    // the jar itself: a blocked mod under another name is refused after the download and nothing stays; a jar that needs one too; a harmless one is kept
+    std::atomic<bool> cancel{false};
+    const auto download = [&](const std::string& jar, const std::string& name) {
+        const std::string url = "https://cdn.modrinth.com/data/RENAMED1/versions/V1/" + name;
+        http.on("GET", url, {FakeHttp::reply(200, jar)});
+        ModFile file;
+        file.projectId = "RENAMED1";
+        file.url = url;
+        file.sha1 = sha1Hex(jar);
+        file.filename = name;
+        file.size = jar.size();
+        return api.install(file, "Some Mod", dir / "mods", cancel);
+    };
+    const auto renamed = download(storedZip({{"fabric.mod.json", R"({"schemaVersion":1,"id":"sodium","version":"1","name":"Sodium"})"}}), "totally-different.jar");
+    CHECK(!renamed.ok() && renamed.error.code == "optimization_mod" && !fs::exists(dir / "mods" / "totally-different.jar"));
+    const auto dependent = download(storedZip({{"fabric.mod.json", R"({"schemaVersion":1,"id":"shaderish","version":"1","depends":{"sodium":">=0.5","fabricloader":"*"}})"}}), "shaderish.jar");
+    CHECK(!dependent.ok() && dependent.error.code == "optimization_mod" && dependent.error.message.find("needs sodium") != std::string::npos && !fs::exists(dir / "mods" / "shaderish.jar"));
+    const auto harmless = download(storedZip({{"fabric.mod.json", R"({"schemaVersion":1,"id":"modmenu","version":"1","name":"Mod Menu"})"}}), "modmenu.jar");
+    CHECK(harmless.ok() && fs::exists(dir / "mods" / "modmenu.jar"));
+    const auto library = download(storedZip({{"com/example/Thing.class", "x"}}), "library.jar");  // (no mod information: nothing to judge by)
+    CHECK(library.ok());
+    int leftovers = 0;
+    for (const auto& entry : fs::directory_iterator(dir / "mods")) leftovers += entry.path().extension() == ".part" ? 1 : 0;
+    CHECK(leftovers == 0);
+
+    // through the app: the search says which are blocked, the install is refused with its reason (nothing downloaded), and the mods folder is looked at too
+    const fs::path home = freshFolder("modsblockapp");
+    _putenv_s("FALCON_LAUNCHER_HOME", home.string().c_str());
+    FakeHttp appHttp;
+    Modrinth appApi(appHttp);
+    ModQuery q;
+    q.gameVersion = "26.3";
+    appHttp.on("GET", appApi.searchUrl(q), {FakeHttp::reply(200, reply)});
+    appHttp.on("GET", "https://api.modrinth.com/v2/project/AANobbMI", {FakeHttp::reply(200, R"({"id":"AANobbMI","slug":"sodium","title":"Sodium","categories":["fabric"]})")});
+    fs::create_directories(home / "mods");
+    {
+        std::ofstream out(home / "mods" / "sodium-fabric-0.5.jar", std::ios::binary);
+        const std::string jar = storedZip({{"fabric.mod.json", R"({"schemaVersion":1,"id":"sodium","version":"0.5","name":"Sodium"})"}});
+        out.write(jar.data(), static_cast<std::streamsize>(jar.size()));
+        std::ofstream modmenuFile(home / "mods" / "modmenu.jar", std::ios::binary);
+        const std::string ok = storedZip({{"fabric.mod.json", R"({"schemaVersion":1,"id":"modmenu","version":"1"})"}});
+        modmenuFile.write(ok.data(), static_cast<std::streamsize>(ok.size()));
+    }
+    Events events;
+    AppOptions options;
+    App app(appHttp, options, hooksFor(events), Blob{});
+    (void)app.handleMessage(R"({"id":40,"method":"searchMods","params":{"query":""}})");
+    const json found = answerOf(events, 40);
+    CHECK(found["ok"].get<bool>() && found["result"]["hits"].size() == 3 && found["result"]["hits"][0]["blocked"].get<bool>() && found["result"]["hits"][1]["blocked"].get<bool>() && !found["result"]["hits"][2]["blocked"].get<bool>());
+    CHECK(!found["result"]["hits"][0]["blockedReason"].get<std::string>().empty());
+    (void)app.handleMessage(R"({"id":41,"method":"installMod","params":{"projectId":"AANobbMI","title":"Sodium","loader":""}})");
+    const json refused = answerOf(events, 41);
+    CHECK(!refused["ok"].get<bool>() && refused["error"]["code"] == "optimization_mod" && refused["error"]["message"].get<std::string>().find("Sodium") != std::string::npos);
+    app.waitIdle();
+    const json state = parse(app.stateJson());
+    CHECK(state["mods"]["busy"].empty() && !state["mods"]["installed"].contains("AANobbMI"));
+    CHECK(state["mods"]["blocked"].size() == 1 && state["mods"]["blocked"][0]["file"] == "sodium-fabric-0.5.jar" && !state["mods"]["blocked"][0]["reason"].get<std::string>().empty());
+
+    // the demo mode refuses the same way (its first sample is filed under Optimization)
+    _putenv_s("FALCON_LAUNCHER_HOME", freshFolder("modsblockdemo").string().c_str());
+    _putenv_s("FALCON_LAUNCHER_MOCK_SPEED", "0.02");
+    {
+        FakeHttp demoHttp;
+        Events demoEvents;
+        AppOptions demoOptions;
+        demoOptions.mockState = "home";
+        App demo(demoHttp, demoOptions, hooksFor(demoEvents), Blob{});
+        (void)demo.handleMessage(R"({"id":1,"method":"uiReady"})");
+        (void)demo.handleMessage(R"({"id":50,"method":"searchMods","params":{"query":"lighting"}})");
+        const json lighting = answerOf(demoEvents, 50);
+        CHECK(lighting["result"]["hits"].size() == 1 && lighting["result"]["hits"][0]["blocked"].get<bool>());
+        (void)demo.handleMessage(R"({"id":51,"method":"installMod","params":{"projectId":"mock0001","title":"Sample Lighting"}})");
+        const json no = answerOf(demoEvents, 51);
+        CHECK(!no["ok"].get<bool>() && no["error"]["code"] == "optimization_mod");
+        demo.waitIdle();
     }
     _putenv_s("FALCON_LAUNCHER_MOCK_SPEED", "1");
 }
@@ -1291,6 +1452,7 @@ int main() {
     test_mods_parts();
     test_mods_network();
     test_mods_messages();
+    test_mods_blocker();
     if (g_failures != 0) {
         std::fprintf(stderr, "%d check(s) failed\n", g_failures);
         return 1;

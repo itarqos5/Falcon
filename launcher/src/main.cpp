@@ -159,16 +159,39 @@ int selfTestMods(const std::wstring& dir) {
     int pictures = 0;
     for (const std::string& icon : modrinth.icons(urls)) pictures += icon.empty() ? 0 : 1;
     const std::atomic<bool> cancel{false};
-    std::string last;
+    std::string last, refused;
+    int blocked = 0;
+    // The optimization mods of the page (Sodium and the like) are marked in the search, and the check that asks Modrinth about the project refuses the first of them too.
     for (const ModHit& hit : page->hits) {
+        if (!hit.blocked) continue;
+        ++blocked;
+        if (!refused.empty()) continue;
+        const auto verdict = modrinth.vetProject(hit.projectId);
+        if (!verdict) return finish(false, hit.title + ": the check: " + verdict.error.message);
+        if (!verdict->blocked) return finish(false, hit.title + " is marked as an optimization mod in the search but the check let it through");
+        refused = hit.title;
+    }
+    for (const ModHit& hit : page->hits) {
+        if (hit.blocked) continue;
+        const auto project = modrinth.vetProject(hit.projectId);
+        if (!project || project->blocked) {
+            last = hit.title + ": " + (project ? project->reason : project.error.message);
+            continue;
+        }
         const auto file = modrinth.chooseFile(hit.projectId, "26.3", "");
         if (!file) {
             last = hit.title + ": " + file.error.message;
             continue;
         }
+        const auto needs = modrinth.vetDependencies(*file, hit.title);
+        if (!needs || needs->blocked) {
+            last = hit.title + ": " + (needs ? needs->reason : needs.error.message);
+            continue;
+        }
         const auto done = modrinth.install(*file, hit.title, out / "mods", cancel);
         if (!done) return finish(false, hit.title + ": " + done.error.message);
-        return finish(true, std::to_string(page->hits.size()) + " mods of " + std::to_string(page->total) + ", " + std::to_string(pictures) + " pictures, installed " + hit.title + " " + done->versionNumber + " as " + done->file);
+        return finish(true, std::to_string(page->hits.size()) + " mods of " + std::to_string(page->total) + ", " + std::to_string(pictures) + " pictures, " + std::to_string(blocked) + " optimization mods marked" +
+                                (refused.empty() ? std::string() : " (" + refused + " refused by the check)") + ", installed " + hit.title + " " + done->versionNumber + " as " + done->file);
     }
     return finish(false, "no mod of the first page had a .jar for 26.3 (" + last + ")");
 }

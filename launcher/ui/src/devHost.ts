@@ -26,7 +26,7 @@ const base = (): LauncherState => ({
   account: { name: 'FalconPlayer', uuid: '069a79f444e94726a5befca90e38aaf5', owns: true, hasProfile: true, avatar: devAvatar() },
   game: { status: 'ready', phase: '', label: '', done: 0, total: 0, error: null, version: '26.3', data: true },
   settings: { keepOpen: true },
-  mods: { dir: 'C:/Users/you/AppData/Local/Falcon/mods', gameVersion: '26.3', installed: {}, busy: {} },
+  mods: { dir: 'C:/Users/you/AppData/Local/Falcon/mods', gameVersion: '26.3', installed: {}, busy: {}, blocked: [] },
 });
 
 function stateFor(name: string): LauncherState {
@@ -92,7 +92,7 @@ function devIcon(letter: string, color: string): string {
 }
 
 const devMods = [
-  { projectId: 'dev00001', slug: 'a', title: 'Sample Lighting', description: 'Soft, smooth lighting for caves and nights. A made-up mod for working on the page.', author: 'someone', downloads: 4_200_000, categories: ['fabric', 'neoforge', 'optimization'], color: '#e0a33d' },
+  { projectId: 'dev00001', slug: 'a', title: 'Sample Lighting', description: 'Soft, smooth lighting for caves and nights. A made-up mod for working on the page.', author: 'someone', downloads: 4_200_000, categories: ['fabric', 'neoforge', 'optimization'], color: '#e0a33d', blocked: true, blockedReason: 'Sample Lighting is filed under Optimization on Modrinth. Optimization mods replace parts of the game that Falcon has written itself, so they are not compatible with Falcon and never will be.' },
   { projectId: 'dev00002', slug: 'b', title: 'Sample Minimap', description: 'A small map of what is round you, with waypoints.', author: 'somebody', downloads: 2_750_000, categories: ['fabric', 'forge', 'utility'], color: '#3d8fe0' },
   { projectId: 'dev00003', slug: 'c', title: 'Sample Zoom', description: 'Hold a key to look far away, with a smooth field of view.', author: 'someone', downloads: 87_000, categories: ['fabric', 'quilt'], color: '#9b59e0' },
 ].map((m) => ({ ...m, icon: devIcon(m.title[7], m.color) }));
@@ -116,6 +116,10 @@ export function createDevHost(deliver: (message: unknown) => void): { send: (mes
       }
       if (request.method === 'installMod') {
         const projectId = String(request.params?.projectId ?? '');
+        if (devMods.find((m) => m.projectId === projectId)?.blocked) {
+          window.setTimeout(() => deliver({ id: request.id, ok: false, error: { code: 'optimization_mod', message: 'Optimization mods are not compatible with Falcon and never will be.' } }), 300);
+          return;
+        }
         state = { ...state, mods: { ...state.mods, busy: { [projectId]: 'Downloading…' } } };
         deliver({ event: 'state', state });
         window.setTimeout(() => {

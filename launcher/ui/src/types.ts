@@ -48,7 +48,14 @@ export interface LauncherState {
   };
   settings: { keepOpen: boolean };
   /** The Mods tab: the folder, the game version mods are searched for, the mods that are installed (by Modrinth project id) and the ones being installed now (with what is going on). */
-  mods: { dir: string; gameVersion: string; installed: Record<string, InstalledMod>; busy: Record<string, string> };
+  mods: { dir: string; gameVersion: string; installed: Record<string, InstalledMod>; busy: Record<string, string>; blocked: BlockedMod[] };
+}
+
+/** A file in the mods folder that is an optimization mod (or needs one): Falcon does not support those, whoever put them there. */
+export interface BlockedMod {
+  file: string;
+  name: string;
+  reason: string;
 }
 
 export interface InstalledMod {
@@ -68,6 +75,9 @@ export interface ModHit {
   icon: string;
   downloads: number;
   categories: string[];
+  /** An optimization mod (Sodium and the like) or one that needs one: not compatible with Falcon, never will be, so it is not installed. */
+  blocked?: boolean;
+  blockedReason?: string;
 }
 
 export interface ModSearchResult {

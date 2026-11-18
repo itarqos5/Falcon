@@ -1,5 +1,6 @@
 #include "mods.hpp"
 
+#include "falcon/mods/mod_info.hpp"
 #include "avatar.hpp"  // base64
 #include "sha1.hpp"
 #include "util.hpp"
@@ -34,6 +35,18 @@ bool isLoader(std::string_view loader) { return loader == "fabric" || loader == 
 // A game version as Modrinth writes it ("26.3", "1.21.1", "26.4-snapshot-10"): letters, digits, ".", "-", "_" and "+".
 bool isGameVersion(std::string_view version) {
     return !version.empty() && version.size() <= 40 && std::all_of(version.begin(), version.end(), [](char c) { return std::isalnum(static_cast<unsigned char>(c)) != 0 || c == '.' || c == '-' || c == '_' || c == '+'; });
+}
+
+// Every category a Modrinth project or search hit is filed under: "categories", "display_categories" and "additional_categories".
+std::vector<std::string> categoriesOf(const json& project) {
+    std::vector<std::string> out;
+    for (const char* key : {"categories", "display_categories", "additional_categories"}) {
+        if (!project.contains(key) || !project[key].is_array()) continue;
+        for (const json& c : project[key]) {
+            if (c.is_string() && std::find(out.begin(), out.end(), c.get<std::string>()) == out.end()) out.push_back(c.get<std::string>());
+        }
+    }
+    return out;
 }
 
 template <class T>
@@ -147,6 +160,11 @@ Result<ModSearchPage> Modrinth::parseSearch(const std::string& text) {
                 if (c.is_string() && h.categories.size() < 8) h.categories.push_back(c.get<std::string>());
             }
         }
+        // (judged on every category it has, not only the few it shows)
+        std::vector<std::string> allCategories = categoriesOf(hit);
+        const falcon::OptimizationVerdict verdict = falcon::judgeOptimization(h.slug.empty() ? h.projectId : h.slug, h.title, allCategories, {});
+        h.blocked = verdict.blocked;
+        h.blockedReason = verdict.reason;
         page.hits.push_back(std::move(h));
     }
     page.offset = j.value("offset", 0);
@@ -176,6 +194,12 @@ Result<ModFile> Modrinth::pickFile(const std::string& text, const std::string& p
             out.versionId = stringOf(version, "id");
             out.versionNumber = stringOf(version, "version_number");
             if (version.contains("loaders") && version["loaders"].is_array() && !version["loaders"].empty() && version["loaders"][0].is_string()) out.loader = version["loaders"][0].get<std::string>();
+            if (version.contains("dependencies") && version["dependencies"].is_array()) {
+                for (const json& dependency : version["dependencies"]) {
+                    const std::string project = stringOf(dependency, "project_id");
+                    if (stringOf(dependency, "dependency_type") == "required" && isProjectId(project) && out.requiredProjects.size() < 20) out.requiredProjects.push_back(project);
+                }
+            }
             out.filename = stringOf(*best, "filename");
             out.url = stringOf(*best, "url");
             out.sha1 = lowerCase(stringOf((*best)["hashes"], "sha1"));
@@ -184,6 +208,29 @@ Result<ModFile> Modrinth::pickFile(const std::string& text, const std::string& p
         }
     }
     return Result<ModFile>::fail("no_file", "This mod has no .jar file for this version of Minecraft.");
+}
+
+Result<std::vector<ModProject>> Modrinth::parseProjects(const std::string& text) {
+    using R = Result<std::vector<ModProject>>;
+    const json j = json::parse(text, nullptr, false);
+    std::vector<ModProject> out;
+    const auto one = [&](const json& p) {
+        if (!p.is_object()) return;
+        ModProject project;
+        project.id = stringOf(p, "id");
+        project.slug = stringOf(p, "slug");
+        project.title = stringOf(p, "title");
+        project.categories = categoriesOf(p);
+        out.push_back(std::move(project));
+    };
+    if (j.is_array()) {
+        for (const json& p : j) one(p);
+    } else if (j.is_object()) {
+        one(j);
+    } else {
+        return R::fail("bad_reply", "Modrinth's answer was not a mod.");
+    }
+    return R::success(std::move(out));
 }
 
 // ---- the network --------------------------------------------------------------------------------------------------------------------------------------------
@@ -234,6 +281,40 @@ Result<ModFile> Modrinth::chooseFile(const std::string& projectId, const std::st
     return pickFile(r.body, projectId);
 }
 
+Result<falcon::OptimizationVerdict> Modrinth::vetProject(const std::string& projectId) {
+    using R = Result<falcon::OptimizationVerdict>;
+    if (!isProjectId(projectId)) return R::fail("bad_project", "That is not a Modrinth project.");
+    const HttpResponse r = http_.get(apiBase_ + "/v2/project/" + projectId, {{"Accept", "application/json"}});
+    if (!r.ok()) return httpFailure<falcon::OptimizationVerdict>(r, "the mod's page");
+    const auto projects = parseProjects(r.body);
+    if (!projects || projects->empty()) return R::fail("bad_reply", "Modrinth's answer was not a mod.");
+    const ModProject& project = projects->front();
+    return R::success(falcon::judgeOptimization(project.slug.empty() ? projectId : project.slug, project.title, project.categories, {}));
+}
+
+Result<falcon::OptimizationVerdict> Modrinth::vetDependencies(const ModFile& file, const std::string& title) {
+    using R = Result<falcon::OptimizationVerdict>;
+    if (file.requiredProjects.empty()) return R::success(falcon::OptimizationVerdict{});
+    std::vector<std::string> ids;
+    for (const std::string& id : file.requiredProjects) {
+        if (isProjectId(id) && ids.size() < 20) ids.push_back(id);
+    }
+    const HttpResponse r = http_.get(apiBase_ + "/v2/projects?" + formEncode({{"ids", json(ids).dump()}}), {{"Accept", "application/json"}});
+    if (!r.ok()) return httpFailure<falcon::OptimizationVerdict>(r, "what the mod needs");
+    const auto projects = parseProjects(r.body);
+    if (!projects) return R::fail(projects.error.code, projects.error.message);
+    for (const ModProject& needed : *projects) {
+        const falcon::OptimizationVerdict inner = falcon::judgeOptimization(needed.slug.empty() ? needed.id : needed.slug, needed.title, needed.categories, {});
+        if (!inner.blocked) continue;
+        falcon::OptimizationVerdict verdict;
+        verdict.blocked = true;
+        verdict.reason = (title.empty() ? std::string("This mod") : title) + " needs " + (needed.title.empty() ? needed.slug : needed.title) +
+                         ", an optimization mod. Optimization mods are not compatible with Falcon and never will be.";
+        return R::success(std::move(verdict));
+    }
+    return R::success(falcon::OptimizationVerdict{});
+}
+
 Result<InstalledMod> Modrinth::install(const ModFile& file, const std::string& title, const fs::path& modsDir, const std::atomic<bool>& cancel) {
     using R = Result<InstalledMod>;
     if (!isModrinthFileUrl(file.url) || !isHex40(file.sha1)) return R::fail("bad_file", "Modrinth named a file this launcher will not download.");
@@ -263,6 +344,16 @@ Result<InstalledMod> Modrinth::install(const ModFile& file, const std::string& t
     if (sha1FileHex(temporary) != file.sha1) {
         discard();
         return R::fail("hash_mismatch", "The download does not match Modrinth's checksum, so it was not installed.");
+    }
+    // The jar says what it is: an optimization mod under another name, or one that needs one, is not kept (a jar that says nothing of the kind, a library, is).
+    if (const auto mod = falcon::readModJar(temporary)) {
+        std::vector<std::string> needs;
+        for (const std::string& dependency : mod->depends) needs.push_back(dependency.substr(0, dependency.find(' ')));
+        const falcon::OptimizationVerdict verdict = falcon::judgeOptimization(mod->id, mod->name.empty() ? title : mod->name, {}, needs);
+        if (verdict.blocked) {
+            discard();
+            return R::fail("optimization_mod", verdict.reason);
+        }
     }
     const fs::path target = modsDir / name;
     fs::remove(target, ec);  // (an update of the same file, or the same mod again)

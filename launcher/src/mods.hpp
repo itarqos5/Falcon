@@ -1,5 +1,6 @@
 #pragma once
 
+#include "falcon/mods/optimization_mods.hpp"
 #include "http.hpp"
 #include "result.hpp"
 
@@ -19,6 +20,9 @@ struct ModHit {
     std::string projectId, slug, title, description, author, iconUrl;
     std::int64_t downloads = 0;
     std::vector<std::string> categories;  // the loaders and kinds it is filed under: "fabric", "neoforge", "optimization" ...
+    // An optimization mod (Sodium, Lithium ...), or one that needs one: Falcon does not support them and never will, so it is not installed (mods/optimization_mods.hpp).
+    bool blocked = false;
+    std::string blockedReason;
 };
 
 struct ModSearchPage {
@@ -38,6 +42,13 @@ struct ModQuery {
 struct ModFile {
     std::string projectId, versionId, versionNumber, loader, filename, url, sha1;
     std::uint64_t size = 0;
+    std::vector<std::string> requiredProjects;  // the projects (ids) this version says it needs
+};
+
+// A project as Modrinth describes it (for the check that it is not an optimization mod).
+struct ModProject {
+    std::string id, slug, title;
+    std::vector<std::string> categories;  // every category it is filed under, the extra ones too
 };
 
 struct InstalledMod {
@@ -55,6 +66,11 @@ public:
     [[nodiscard]] std::vector<std::string> icons(const std::vector<std::string>& urls);
     // The newest release (else the newest version) of the project for the game version, with its .jar (the one marked primary when there are several).
     [[nodiscard]] Result<ModFile> chooseFile(const std::string& projectId, const std::string& gameVersion, const std::string& loader);
+    // The check that keeps optimization mods out (they are asked again here, not only marked in the search: a message to the launcher cannot get one through). A project is one when it is a
+    // known one, when Modrinth files it under Optimization, or (vetDependencies) when the version needs one; the jar that was downloaded is looked at once more by install(). A failure to ask
+    // is a failure to install: nothing is installed that was not checked.
+    [[nodiscard]] Result<falcon::OptimizationVerdict> vetProject(const std::string& projectId);
+    [[nodiscard]] Result<falcon::OptimizationVerdict> vetDependencies(const ModFile& file, const std::string& title);
     // Downloads the file into `modsDir` (through a temporary name, checked, then moved to its place; a file of the same name is replaced).
     [[nodiscard]] Result<InstalledMod> install(const ModFile& file, const std::string& title, const std::filesystem::path& modsDir, const std::atomic<bool>& cancel);
 
@@ -63,6 +79,8 @@ public:
     [[nodiscard]] std::string versionsUrl(const std::string& projectId, const std::string& gameVersion, const std::string& loader) const;
     [[nodiscard]] static Result<ModSearchPage> parseSearch(const std::string& json);
     [[nodiscard]] static Result<ModFile> pickFile(const std::string& versionsJson, const std::string& projectId);
+    // One project (GET /v2/project/{id}) or a list of them (GET /v2/projects?ids=[...]).
+    [[nodiscard]] static Result<std::vector<ModProject>> parseProjects(const std::string& json);
     // https on Modrinth's file servers (cdn.modrinth.com), nothing else: no other host, no port, no login part.
     [[nodiscard]] static bool isModrinthFileUrl(std::string_view url);
     // A project id ("AANobbMI") or slug ("sodium"): letters, digits, "-" and "_".

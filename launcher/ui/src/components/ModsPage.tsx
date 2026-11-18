@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { call } from '../bridge';
 import { formatCount } from '../format';
-import { Check, Download, Folder, Search, Spinner } from '../icons';
+import { Check, Download, Folder, Search, ShieldAlert, Spinner } from '../icons';
 import type { LauncherState, ModHit, ModSearchResult } from '../types';
 import { ErrorCard } from './ErrorCard';
 
@@ -17,7 +17,7 @@ function ModCard({ hit, state, onInstall, failure }: { hit: ModHit; state: Launc
   const installed = state.mods.installed[hit.projectId];
   const busy = state.mods.busy[hit.projectId];
   return (
-    <li className="mod">
+    <li className={hit.blocked ? 'mod blocked' : 'mod'}>
       {hit.icon ? <img className="mod-icon" src={hit.icon} alt="" width={64} height={64} draggable={false} /> : <span className="mod-icon placeholder" aria-hidden="true" />}
       <div className="mod-text">
         <div className="mod-head">
@@ -33,10 +33,15 @@ function ModCard({ hit, state, onInstall, failure }: { hit: ModHit; state: Launc
             </span>
           ))}
         </div>
+        {hit.blocked && <div className="mod-error">{hit.blockedReason || 'Optimization mods are not compatible with Falcon and never will be.'}</div>}
         {failure && <div className="mod-error">{failure}</div>}
       </div>
       <div className="mod-action">
-        {busy ? (
+        {hit.blocked ? (
+          <button className="btn small" disabled title={hit.blockedReason}>
+            <ShieldAlert size={14} /> Not compatible
+          </button>
+        ) : busy ? (
           <button className="btn small" disabled title={busy}>
             <Spinner size={14} /> Installing
           </button>
@@ -52,6 +57,46 @@ function ModCard({ hit, state, onInstall, failure }: { hit: ModHit; state: Launc
         {installed && !busy && <span className="mod-version">{installed.version}</span>}
       </div>
     </li>
+  );
+}
+
+/** Said at the top of the tab, always: optimization mods are not compatible with Falcon, and the launcher does not install them. */
+function OptimizationNotice({ state }: { state: LauncherState }) {
+  return (
+    <>
+      <div className="admonition warn" role="note">
+        <span className="admonition-icon">
+          <ShieldAlert size={20} />
+        </span>
+        <div className="admonition-body">
+          <div className="admonition-title">Optimization mods are not compatible with Falcon, and never will be</div>
+          <p>
+            Mods like <strong>Sodium</strong>, <strong>Lithium</strong>, <strong>Iris</strong> and <strong>FerriteCore</strong> replace parts of the game that Falcon has written itself: the renderer, the lighting and the
+            chunk loading. They cannot work with it, so Falcon does not support them and the launcher does not install them. Mods that need one are left out too.
+          </p>
+        </div>
+      </div>
+      {state.mods.blocked.length > 0 && (
+        <div className="admonition warn" role="alert">
+          <span className="admonition-icon">
+            <ShieldAlert size={20} />
+          </span>
+          <div className="admonition-body">
+            <div className="admonition-title">
+              {state.mods.blocked.length === 1 ? 'An optimization mod is in your mods folder' : `${state.mods.blocked.length} optimization mods are in your mods folder`}
+            </div>
+            <ul className="mods-blocked">
+              {state.mods.blocked.map((mod) => (
+                <li key={mod.file} title={mod.reason}>
+                  <strong>{mod.name}</strong> <span className="path">{mod.file}</span>
+                </li>
+              ))}
+            </ul>
+            <p>Falcon will not use {state.mods.blocked.length === 1 ? 'it' : 'them'}. You can delete {state.mods.blocked.length === 1 ? 'the file' : 'the files'} from the mods folder.</p>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -102,6 +147,7 @@ export function ModsPage({ state }: { state: LauncherState }) {
   const more = hits.length < total;
   return (
     <div className="stack">
+      <OptimizationNotice state={state} />
       <section className="card mods-bar">
         <div className="mods-search">
           <label className="search">

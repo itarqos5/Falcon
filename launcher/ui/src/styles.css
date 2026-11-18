@@ -239,6 +239,11 @@ p { line-height: 1.55; }
 .mod-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; color: var(--muted); font-size: 12px; }
 .chip { padding: 1px 8px; border-radius: 999px; background: var(--super); color: var(--text-2); font-size: 11.5px; font-weight: 600; text-transform: capitalize; }
 .mod-error { margin-top: 7px; color: #ff7f98; font-size: 12.5px; }
+.mod.blocked { box-shadow: inset 0 0 0 1px rgba(255, 73, 110, 0.28); }
+.mod.blocked .mod-icon { filter: grayscale(1); opacity: 0.55; }
+.mod.blocked .mod-title { color: var(--text-2); }
+.mods-blocked { margin: 6px 0 0; padding: 0; list-style: none; font-size: 13px; color: var(--text-2); }
+.mods-blocked .path { font-size: 11.5px !important; }
 .mod-action { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 5px; min-width: 104px; }
 .mod-version { color: var(--muted); font-size: 11.5px; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .btn.installed:disabled { background: var(--brand-soft); color: var(--brand); opacity: 1; }

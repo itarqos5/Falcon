@@ -86,6 +86,8 @@ private:
     void searchModsTask(const nlohmann::json& id, int generation, std::string text, std::string loader, int offset);
     void installModTask(const nlohmann::json& id, std::string projectId, std::string title, std::string loader);
     [[nodiscard]] nlohmann::json loadInstalledMods() const;
+    // The files in the mods folder that are optimization mods (put there by hand, or by an older launcher): [{file, name, reason}]. Falcon does not support them; the page says so.
+    [[nodiscard]] nlohmann::json scanBlockedMods() const;
     [[nodiscard]] std::filesystem::path modsDir() const;
     [[nodiscard]] std::filesystem::path modsIndexFile() const;
     bool modsSleep(int milliseconds);
