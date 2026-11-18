@@ -36,6 +36,8 @@ compile_commands.json
 /vanilla/
 /vserver/
 *.jar
+# (the one jar that is ours: the VM test mod, built from tests/jvm_mod by the JDK; it holds no game code)
+!tests/data/jvm/vmtest.jar
 *.class
 *.mca
 *.mcr

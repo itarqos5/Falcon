@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "id": "vmtest",
+  "version": "1.0.0",
+  "name": "VM Test Mod",
+  "description": "Exercises the VM: arithmetic, strings, collections, lambdas, enums, records, exceptions and registrations.",
+  "authors": ["Falcon"],
+  "license": "MIT",
+  "environment": "client",
+  "entrypoints": { "main": ["com.example.test.TestMod"], "client": ["com.example.test.TestMod"] },
+  "mixins": ["vmtest.mixins.json"],
+  "depends": { "fabricloader": ">=0.15.0" }
+}

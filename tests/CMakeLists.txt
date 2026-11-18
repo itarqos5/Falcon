@@ -67,11 +67,21 @@ add_test(NAME falcon_net_tests COMMAND falcon_net_tests)
 
 add_custom_target(check
     COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure
-    DEPENDS falcon_tests falcon_worldgen_tests falcon_worldgen_chunk_tests falcon_item_tests falcon_world_tests falcon_net_tests falcon_lod_tests falcon_advancement_tests falcon_log_tests falcon_logic_tests
+    DEPENDS falcon_tests falcon_worldgen_tests falcon_worldgen_chunk_tests falcon_item_tests falcon_world_tests falcon_net_tests falcon_lod_tests falcon_advancement_tests falcon_log_tests falcon_logic_tests falcon_jvm_tests
     WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
     COMMENT "Running the unit tests"
     USES_TERMINAL
 )
+
+# The VM that runs a mod's start-up code (jvm/vm.hpp), on a mod the JDK compiled (jvm_mod/, built into data/jvm/vmtest.jar by jvm_mod/build.ps1).
+add_executable(falcon_jvm_tests EXCLUDE_FROM_ALL test_jvm.cpp)
+target_link_libraries(falcon_jvm_tests PRIVATE falcon::core falcon_warnings)
+target_compile_definitions(falcon_jvm_tests PRIVATE FALCON_JVM_TEST_JAR="${CMAKE_CURRENT_SOURCE_DIR}/data/jvm/vmtest.jar")
+add_test(NAME falcon_jvm_tests COMMAND falcon_jvm_tests)
+
+# Runs the start-up code of mods through the VM (jvm/vm.hpp) and says what they did.
+add_executable(falcon_jvm_run EXCLUDE_FROM_ALL ../tools/jvm_run.cpp)
+target_link_libraries(falcon_jvm_run PRIVATE falcon::core falcon_warnings)
 
 # A world folder without any screen (level.dat and session.lock, as Create New World writes them): for scripted runs that open a world with --play (the CI builds, the benchmarks).
 add_executable(falcon_make_world EXCLUDE_FROM_ALL ../tools/make_world.cpp)
