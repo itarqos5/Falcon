@@ -10,7 +10,7 @@ A small native launcher for Falcon (Windows and Linux), written in C++20 with a 
 - **Checks that you own Minecraft: Java Edition** before it does anything else, and shows your skin's head and your player name.
 - **Pressing Play** downloads the game's assets from Mojang the first time (the client jar's `assets/` and `data/`, plus the sounds and languages, all hash-verified), and Falcon's data tables (one zip of about 2.4 MB from Falcon's own GitHub release, checked against a SHA-256 the launcher carries), then starts Falcon with your account's name and a 1280x720 window. (The launcher's own window has no system title bar, it draws its own; the game keeps an ordinary one.)
 
-The interface follows the layout of launchers such as Modrinth App: an icon sidebar (Home, Settings, and your account at the bottom), a Falcon page with an Overview and a Logs tab, and a Settings page.
+The interface follows the layout of launchers such as Modrinth App: an icon sidebar (Home, Settings, and your account at the bottom), a Falcon page with an Overview, a Mods and a Logs tab, and a Settings page.
 
 ## Build
 
@@ -38,6 +38,16 @@ The client id is the **Minecraft launcher's own public id, `00000000402b5328`**.
 - To use another id, set `FALCON_MS_CLIENT_ID`, or `msClientId` in `%LOCALAPPDATA%\Falcon\launcher.json`, or build with `-DFALCON_LAUNCHER_MS_CLIENT_ID=…`. Only ids that work with Microsoft's older account service (`login.live.com`, like the launcher's) are supported; Azure application ids (the long GUIDs) are not.
 - The token is kept in `account.bin`, encrypted with Windows DPAPI for your user. Signing out deletes it.
 
+## Mods
+
+The **Mods** tab of the Falcon page searches **Modrinth** (its public API, <https://docs.modrinth.com>) for mods that list the game version (26.3), shows each one's icon, title, author, description, downloads and loaders, and has an **Install** button that puts the mod's .jar into `%LOCALAPPDATA%\Falcon\mods` (`~/.local/share/Falcon/mods` on Linux). A filter picks a loader (Fabric, NeoForge, Forge, Quilt), and "Open mods folder" shows the folder.
+
+- **Which file:** the newest *release* of the project for the game version (the newest version of any kind when there is no release), and in it the .jar marked primary. A newer install of the same mod replaces the older file.
+- **Checked:** the download address must be Modrinth's own file server (`cdn.modrinth.com`, https, no port or login part); the file's name is cut down to plain characters and must end in `.jar`; the size and the SHA-1 Modrinth names must match, else nothing is kept. It is downloaded under a temporary name and moved into place when it is good.
+- **Icons** are fetched by the launcher (only from Modrinth's file server, 400 KB at most, only real pictures) and handed to the page as `data:` addresses, because the page may not load anything from the network itself.
+- **The network does not hold the window:** the search and the install run on their own worker thread; `searchMods` and `installMod` answer through the event channel when Modrinth has answered, and the page ignores the answer of a search that a newer one replaced.
+- **What Falcon does with a mod:** nothing yet. Falcon is written in C++, not Java, so it cannot run a .jar mod; the tab puts the file where a mod loader would look for it, and says so.
+
 ## Where things live
 
 `%LOCALAPPDATA%\Falcon\` (override with `FALCON_LAUNCHER_HOME`)
@@ -50,6 +60,8 @@ The client id is the **Minecraft launcher's own public id, `00000000402b5328`**.
 | `account.bin` | the sign-in token, encrypted with Windows DPAPI for your user |
 | `launcher.json` | settings |
 | `webview\` | the web view's profile |
+| `mods\` | the .jar mods installed from the Mods tab |
+| `mods.json` | which Modrinth project each of them is (so the tab can say "Installed") |
 | `logs\launcher.log` | what the launcher did, with timings |
 | `logs\latest.log` | the game's log while it runs, then `<date>_<time of launch>.log` (shown in the Logs tab; see docs/LOGS.md) |
 
@@ -61,6 +73,7 @@ The client id is the **Minecraft launcher's own public id, `00000000402b5328`**.
 | `--screenshot <png> [--wait ms]` | Draw one state in an invisible window, save a PNG, quit |
 | `--page settings\|logs` | Open the Settings page, or the Logs tab, first (for screenshots) |
 | `--selftest-signin` | The invisible sign-in window check described above |
+| `--selftest-mods <dir>` | The Mods tab's whole way with the real network: a search for mods of 26.3, their icons, and the install of the first one that has a .jar into `<dir>\mods`. Exit code 0 when it worked |
 | `--devtools` | Enable the browser's developer tools (F12) |
 
 Developing the page alone: `cd launcher/ui && npm install && npm run dev`. In a normal browser a fake host plays the launcher's part; put a state after the URL (`#home`, `#signin`, `#waiting`, `#installing`, `#error`, …), or `#settings` / `#logs` for those pages.

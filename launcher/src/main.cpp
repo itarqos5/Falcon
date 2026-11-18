@@ -6,11 +6,13 @@
 //                                  --selftest-signin      open the Microsoft sign-in window invisibly, check that it hands back the redirect and that it can be cancelled (no network), exit code 0 when it does
 //                                  --selftest-tables <dir>   download Falcon's data tables into <dir>/26.3 like the installation does (real network), check them, write <dir>/selftest-tables.txt, exit code 0 when they are good
 //                                  --selftest-install <dir>  download the game's files and Falcon's data tables into <dir>/26.3 like the installation does (real network, a few hundred MB), write <dir>/selftest-install.txt, exit code 0 when it worked
+//                                  --selftest-mods <dir>     search Modrinth for mods of 26.3, fetch their icons and install the first one that has a .jar into <dir>/mods (real network), write <dir>/selftest-mods.txt, exit code 0 when it worked
 //                                  --devtools             F12 and the page's context menu
 //
 // One program for Windows (WebView2) and Linux (WebKitGTK): the few places where they differ are marked.
 #include "app.hpp"
 #include "http.hpp"
+#include "mods.hpp"
 #include "setup.hpp"
 #include "util.hpp"
 
@@ -44,6 +46,7 @@ struct Args {
     bool selfTestSignIn = false;
     std::wstring selfTestTables;   // --selftest-tables <dir>
     std::wstring selfTestInstall;  // --selftest-install <dir>
+    std::wstring selfTestMods;     // --selftest-mods <dir>
     std::string page;  // --page settings|logs: open the page there (for screenshots)
 };
 
@@ -67,6 +70,8 @@ Args parseArgs(int, char**) {
             args.selfTestTables = argv[++i];
         } else if (a == L"--selftest-install" && i + 1 < argc) {
             args.selfTestInstall = argv[++i];
+        } else if (a == L"--selftest-mods" && i + 1 < argc) {
+            args.selfTestMods = argv[++i];
         } else if (a == L"--selftest-signin") {
             args.selfTestSignIn = true;
         } else if (a == L"--devtools") {
@@ -94,6 +99,8 @@ Args parseArgs(int argc, char** argv) {
             args.selfTestTables = widen(argv[++i]);
         } else if (a == "--selftest-install" && i + 1 < argc) {
             args.selfTestInstall = widen(argv[++i]);
+        } else if (a == "--selftest-mods" && i + 1 < argc) {
+            args.selfTestMods = widen(argv[++i]);
         } else if (a == "--selftest-signin") {
             args.selfTestSignIn = true;
         } else if (a == "--devtools") {
@@ -134,6 +141,38 @@ int selfTestTables(const std::wstring& dir) {
     return good ? 0 : 1;
 }
 
+// --selftest-mods: the Mods tab's whole way, with the real network: a search for mods of 26.3 (the most downloaded first), their icons, and the install of the first one that has a .jar.
+int selfTestMods(const std::wstring& dir) {
+    const std::unique_ptr<HttpClient> http = makeSystemHttpClient(std::string("FalconLauncher/") + FALCON_LAUNCHER_VERSION);
+    Modrinth modrinth(*http);
+    const std::filesystem::path out = std::filesystem::path(dir);
+    const auto finish = [&](bool good, const std::string& text) {
+        writeFileAtomic(out / "selftest-mods.txt", (good ? "ok: " : "failed: ") + text);
+        return good ? 0 : 1;
+    };
+    ModQuery query;
+    query.gameVersion = "26.3";
+    const auto page = modrinth.search(query);
+    if (!page || page->hits.empty()) return finish(false, page ? "the search found nothing for 26.3" : "the search: " + page.error.message);
+    std::vector<std::string> urls;
+    for (const ModHit& hit : page->hits) urls.push_back(hit.iconUrl);
+    int pictures = 0;
+    for (const std::string& icon : modrinth.icons(urls)) pictures += icon.empty() ? 0 : 1;
+    const std::atomic<bool> cancel{false};
+    std::string last;
+    for (const ModHit& hit : page->hits) {
+        const auto file = modrinth.chooseFile(hit.projectId, "26.3", "");
+        if (!file) {
+            last = hit.title + ": " + file.error.message;
+            continue;
+        }
+        const auto done = modrinth.install(*file, hit.title, out / "mods", cancel);
+        if (!done) return finish(false, hit.title + ": " + done.error.message);
+        return finish(true, std::to_string(page->hits.size()) + " mods of " + std::to_string(page->total) + ", " + std::to_string(pictures) + " pictures, installed " + hit.title + " " + done->versionNumber + " as " + done->file);
+    }
+    return finish(false, "no mod of the first page had a .jar for 26.3 (" + last + ")");
+}
+
 // --selftest-install: everything Play downloads before it starts the game (the client jar's assets and data, the sounds and languages, the data tables), into a folder of its own.
 // What the Linux build's tests run on: the game's own data is where the checks of the world generator get theirs.
 int selfTestInstall(const std::wstring& dir) {
@@ -168,6 +207,7 @@ int launcherMain(Instance instance, const Args& args) {
     logLine(std::string("Falcon Launcher ") + FALCON_LAUNCHER_VERSION + " starting");
     if (!args.selfTestTables.empty()) return selfTestTables(args.selfTestTables);
     if (!args.selfTestInstall.empty()) return selfTestInstall(args.selfTestInstall);
+    if (!args.selfTestMods.empty()) return selfTestMods(args.selfTestMods);
 
     // One launcher at a time: a second start just brings the first to the front (Windows) or leaves it be (Linux, where a program cannot raise another's window).
 #ifdef _WIN32

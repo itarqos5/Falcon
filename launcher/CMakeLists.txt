@@ -40,6 +40,7 @@ add_library(falcon_launcher_core STATIC EXCLUDE_FROM_ALL
     src/app.cpp
     src/stb_impl.cpp
     src/avatar.cpp
+    src/mods.cpp
     "${CMAKE_SOURCE_DIR}/src/assets/zip_archive.cpp"
     "${CMAKE_SOURCE_DIR}/src/platform/mapped_file.cpp"
 )

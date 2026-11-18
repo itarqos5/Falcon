@@ -4,6 +4,7 @@
 #include "auth.hpp"
 #include "game_files.hpp"
 #include "http.hpp"
+#include "mods.hpp"
 #include "secure_store.hpp"
 #include "setup.hpp"
 #include "sha1.hpp"
@@ -681,6 +682,7 @@ struct Events {
     std::mutex mutex;
     std::vector<json> states;
     std::vector<bool> running;
+    std::vector<json> answers;  // the answers that came later, through emit ({"id": ...})
     bool quit = false;
     // The stand-in for the sign-in window: how the "player" answers (ok, cancel, denied, badstate, window, hang = never), and what it was asked.
     std::string signInMode = "ok";
@@ -715,6 +717,9 @@ AppHooks hooksFor(Events& e) {
         if (j.is_object() && j.value("event", "") == "state") {
             std::lock_guard<std::mutex> lock(e.mutex);
             e.states.push_back(j["state"]);
+        } else if (j.is_object() && j.contains("id")) {
+            std::lock_guard<std::mutex> lock(e.mutex);
+            e.answers.push_back(j);
         }
     };
     h.gameRunning = [&e](bool r) {
@@ -1000,6 +1005,269 @@ void test_not_configured_and_errors() {
 
 }  // namespace
 
+// ---- the Mods tab (Modrinth) ---------------------------------------------------------------------------------------------------------
+
+const char* const kSearchReply = R"({"hits":[
+  {"project_id":"AANobbMI","slug":"sodium","title":"Sodium","description":"A rendering engine replacement.","author":"jelly","icon_url":"https://cdn.modrinth.com/data/AANobbMI/icon.png","downloads":253751616,"display_categories":["fabric","optimization"],"categories":["fabric"]},
+  {"project_id":"bad id!","title":"Not a project id"},
+  {"project_id":"P7dR8mSH","slug":"fabric-api","title":"Fabric API","description":"The library.","author":"modmuss","icon_url":"https://evil.example/icon.png","downloads":1,"categories":["fabric","library"]}
+],"offset":0,"limit":20,"total_hits":2})";
+
+std::string versionsReply(const std::string& url, const std::string& sha1, std::size_t size, const std::string& filename = "sodium-fabric-0.5.0+mc26.3.jar") {
+    return json::array({json{{"id", "BETA0001"}, {"version_number", "0.6.0-beta"}, {"version_type", "beta"}, {"loaders", json::array({"fabric"})},
+                             {"files", json::array({json{{"filename", "beta.jar"}, {"primary", true}, {"url", "https://cdn.modrinth.com/data/AANobbMI/versions/BETA0001/beta.jar"}, {"size", 5}, {"hashes", {{"sha1", std::string(40, 'a')}}}}})}},
+                        json{{"id", "REL00001"}, {"version_number", "0.5.0"}, {"version_type", "release"}, {"loaders", json::array({"fabric"})},
+                             {"files", json::array({json{{"filename", "sources.zip"}, {"primary", false}, {"url", "https://cdn.modrinth.com/data/AANobbMI/versions/REL00001/sources.zip"}, {"size", 9}, {"hashes", {{"sha1", std::string(40, 'b')}}}},
+                                                    json{{"filename", filename}, {"primary", true}, {"url", url}, {"size", size}, {"hashes", {{"sha1", sha1}}}}})}}})
+        .dump();
+}
+
+void test_mods_parts() {
+    CHECK(Modrinth::isModrinthFileUrl("https://cdn.modrinth.com/data/a/versions/b/c.jar"));
+    CHECK(Modrinth::isModrinthFileUrl("https://cdn-raw.modrinth.com/x/y.jar"));
+    CHECK(!Modrinth::isModrinthFileUrl("http://cdn.modrinth.com/x.jar"));                    // no https
+    CHECK(!Modrinth::isModrinthFileUrl("https://cdn.modrinth.com.evil.example/x.jar"));      // another host
+    CHECK(!Modrinth::isModrinthFileUrl("https://cdn.modrinth.com@evil.example/x.jar"));      // a login part
+    CHECK(!Modrinth::isModrinthFileUrl("https://cdn.modrinth.com:8443/x.jar"));              // a port
+    CHECK(!Modrinth::isModrinthFileUrl("https://evil.example/cdn.modrinth.com/x.jar"));
+    CHECK(!Modrinth::isModrinthFileUrl("https://cdn.modrinth.com"));
+    CHECK(!Modrinth::isModrinthFileUrl("https://cdn.modrinth.com/a b.jar"));
+
+    CHECK(Modrinth::isProjectId("AANobbMI") && Modrinth::isProjectId("fabric-api") && Modrinth::isProjectId("a_b"));
+    CHECK(!Modrinth::isProjectId("") && !Modrinth::isProjectId("../x") && !Modrinth::isProjectId("a/b") && !Modrinth::isProjectId("a b") && !Modrinth::isProjectId(std::string(65, 'a')));
+
+    CHECK(Modrinth::safeFileName("sodium-fabric-0.5.0+mc26.3.jar") == "sodium-fabric-0.5.0+mc26.3.jar");
+    CHECK(Modrinth::safeFileName("../../Windows/evil.jar") == "evil.jar");
+    CHECK(Modrinth::safeFileName("C:\\Users\\x\\evil.JAR") == "evil.JAR");
+    CHECK(Modrinth::safeFileName("not a jar.zip").empty());
+    CHECK(Modrinth::safeFileName(".jar").empty() && Modrinth::safeFileName("").empty() && Modrinth::safeFileName("..").empty());
+    CHECK(Modrinth::safeFileName("a<b>:c|d?.jar") == "a_b__c_d_.jar");
+    CHECK(Modrinth::safeFileName("CON.jar") == "_CON.jar");
+    CHECK(Modrinth::safeFileName("mod.jar ") == "mod.jar");
+    CHECK(Modrinth::safeFileName(std::string(300, 'a') + ".jar").size() <= 150);
+
+    CHECK(Modrinth::imageMime(std::string("\x89PNG\r\n\x1a\n....", 12)) == "image/png");
+    CHECK(Modrinth::imageMime("\xFF\xD8\xFF\xE0....") == "image/jpeg");
+    CHECK(Modrinth::imageMime("GIF89a....") == "image/gif");
+    CHECK(Modrinth::imageMime(std::string("RIFF\x10\0\0\0WEBPVP8 ", 16)) == "image/webp");
+    CHECK(Modrinth::imageMime("<svg xmlns='http://www.w3.org/2000/svg'></svg>") == "image/svg+xml");
+    CHECK(Modrinth::imageMime("<?xml version='1.0'?><svg></svg>") == "image/svg+xml");
+    CHECK(Modrinth::imageMime("<html><script>alert(1)</script>").empty());
+    CHECK(Modrinth::imageMime("MZ\x90\0 an executable").empty() && Modrinth::imageMime("").empty());
+
+    FakeHttp http;
+    Modrinth api(http, "https://api.modrinth.com/");
+    ModQuery q;
+    q.text = "sodium & co";
+    q.gameVersion = "26.3";
+    q.loader = "fabric";
+    q.offset = 40;
+    const std::string url = api.searchUrl(q);
+    CHECK(url.rfind("https://api.modrinth.com/v2/search?", 0) == 0);  // (the slash at the end of the base is dropped)
+    CHECK(url.find("query=sodium%20%26%20co") != std::string::npos || url.find("query=sodium+%26+co") != std::string::npos);
+    CHECK(url.find("project_type%3Amod") != std::string::npos && url.find("versions%3A26.3") != std::string::npos && url.find("categories%3Afabric") != std::string::npos);
+    CHECK(url.find("offset=40") != std::string::npos && url.find("index=relevance") != std::string::npos);
+    ModQuery empty;
+    empty.gameVersion = "26.3";
+    CHECK(api.searchUrl(empty).find("index=downloads") != std::string::npos);
+    ModQuery odd;
+    odd.gameVersion = "26.3\"],[\"x";  // not a game version: it is left out rather than put in the facets
+    odd.loader = "pirate";
+    CHECK(api.searchUrl(odd).find("versions") == std::string::npos && api.searchUrl(odd).find("pirate") == std::string::npos);
+    CHECK(api.versionsUrl("AANobbMI", "26.3", "").find("/v2/project/AANobbMI/version?game_versions=") != std::string::npos);
+
+    // the search answer: a hit without a usable id is skipped, the fields are what they were
+    const auto page = Modrinth::parseSearch(kSearchReply);
+    CHECK(page.ok() && page->hits.size() == 2 && page->total == 2 && page->limit == 20);
+    if (page.ok() && page->hits.size() == 2) {
+        CHECK(page->hits[0].projectId == "AANobbMI" && page->hits[0].title == "Sodium" && page->hits[0].downloads == 253751616 && page->hits[0].categories.size() == 2);
+        CHECK(page->hits[1].categories[1] == "library");
+    }
+    CHECK(!Modrinth::parseSearch("not json").ok() && !Modrinth::parseSearch("{}").ok() && !Modrinth::parseSearch("[]").ok());
+
+    // the file to take: the newest RELEASE (not the beta that is listed first), its primary .jar (not the sources)
+    const std::string good = "https://cdn.modrinth.com/data/AANobbMI/versions/REL00001/sodium.jar";
+    const auto file = Modrinth::pickFile(versionsReply(good, std::string(40, 'c'), 123), "AANobbMI");
+    CHECK(file.ok() && file->versionNumber == "0.5.0" && file->filename == "sodium-fabric-0.5.0+mc26.3.jar" && file->url == good && file->size == 123 && file->loader == "fabric");
+    // a version whose only file is from another host or has no checksum is skipped, and with nothing left there is no file
+    CHECK(Modrinth::pickFile(versionsReply("https://evil.example/x.jar", std::string(40, 'c'), 1), "AANobbMI")->versionNumber == "0.6.0-beta");  // (the beta's file is fine)
+    CHECK(Modrinth::pickFile(R"([{"version_type":"release","files":[{"filename":"a.jar","url":"https://evil.example/a.jar","hashes":{"sha1":"0000000000000000000000000000000000000000"}}]}])", "x").error.code == "no_file");
+    CHECK(Modrinth::pickFile(R"([{"version_type":"release","files":[{"filename":"a.jar","url":"https://cdn.modrinth.com/a.jar","hashes":{}}]}])", "x").error.code == "no_file");
+    CHECK(Modrinth::pickFile("[]", "x").error.code == "no_file" && Modrinth::pickFile("oops", "x").error.code == "bad_reply");
+}
+
+void test_mods_network() {
+    const fs::path dir = freshFolder("mods");
+    const std::string jar = std::string("PK\x03\x04 pretend this is a mod") + std::string(200, 'x');
+    const std::string jarUrl = "https://cdn.modrinth.com/data/AANobbMI/versions/REL00001/sodium.jar";
+    FakeHttp http;
+    Modrinth api(http);
+
+    ModQuery q;
+    q.gameVersion = "26.3";
+    http.on("GET", api.searchUrl(q), {FakeHttp::reply(200, kSearchReply)});
+    const auto page = api.search(q);
+    CHECK(page.ok() && page->hits.size() == 2);
+    ModQuery down;
+    down.text = "down";
+    http.on("GET", api.searchUrl(down), {FakeHttp::unreachable()});
+    CHECK(api.search(down).error.code == "network");
+    ModQuery limited;
+    limited.text = "limited";
+    http.on("GET", api.searchUrl(limited), {FakeHttp::reply(429, "{}")});
+    CHECK(api.search(limited).error.code == "rate_limited");
+
+    // icons: a real picture becomes a data address, a page that is not a picture and a host that is not Modrinth's are left out, and a second ask is answered from memory
+    const std::string png("\x89PNG\r\n\x1a\n and some more", 20);
+    http.on("GET", "https://cdn.modrinth.com/data/AANobbMI/icon.png", {FakeHttp::reply(200, png)});
+    http.on("GET", "https://cdn.modrinth.com/data/P7dR8mSH/icon.png", {FakeHttp::reply(200, "<html>not a picture</html>")});
+    const std::vector<std::string> urls = {"https://cdn.modrinth.com/data/AANobbMI/icon.png", "https://evil.example/icon.png", "https://cdn.modrinth.com/data/P7dR8mSH/icon.png", ""};
+    const auto icons = api.icons(urls);
+    CHECK(icons.size() == 4 && icons[0].rfind("data:image/png;base64,", 0) == 0 && icons[1].empty() && icons[2].empty() && icons[3].empty());
+    CHECK(http.count("GET", "https://evil.example/icon.png") == 0);
+    (void)api.icons(urls);
+    CHECK(http.count("GET", "https://cdn.modrinth.com/data/AANobbMI/icon.png") == 1);
+
+    // installing: the right version is chosen, the file is checked, and it lands in the mods folder
+    http.on("GET", api.versionsUrl("AANobbMI", "26.3", ""), {FakeHttp::reply(200, versionsReply(jarUrl, sha1Hex(jar), jar.size()))});
+    http.on("GET", jarUrl, {FakeHttp::reply(200, jar)});
+    const auto chosen = api.chooseFile("AANobbMI", "26.3", "");
+    CHECK(chosen.ok());
+    std::atomic<bool> cancel{false};
+    const auto done = api.install(*chosen, "Sodium", dir / "mods", cancel);
+    CHECK(done.ok() && done->file == "sodium-fabric-0.5.0+mc26.3.jar" && done->versionNumber == "0.5.0");
+    std::string written;
+    CHECK(readFile(dir / "mods" / "sodium-fabric-0.5.0+mc26.3.jar", written) && written == jar);
+    int leftovers = 0;
+    for (const auto& entry : fs::directory_iterator(dir / "mods")) leftovers += entry.path().extension() == ".part" ? 1 : 0;
+    CHECK(leftovers == 0);
+
+    // a file that is not the one Modrinth named (corrupted, or swapped) is not kept, and nothing is left behind
+    ModFile bad = *chosen;
+    bad.sha1 = std::string(40, 'f');
+    bad.filename = "other.jar";
+    CHECK(api.install(bad, "Other", dir / "mods", cancel).error.code == "hash_mismatch");
+    CHECK(!fs::exists(dir / "mods" / "other.jar"));
+    ModFile wrongSize = *chosen;
+    wrongSize.size = jar.size() + 1;
+    wrongSize.filename = "size.jar";
+    CHECK(api.install(wrongSize, "Size", dir / "mods", cancel).error.code == "bad_file" && !fs::exists(dir / "mods" / "size.jar"));
+    // a name that tries to leave the folder is cut down to its last part; an address that is not Modrinth's is refused before anything is asked of it
+    ModFile sneaky = *chosen;
+    sneaky.filename = "../../escape.jar";
+    CHECK(api.install(sneaky, "Sneaky", dir / "mods", cancel).ok() && fs::exists(dir / "mods" / "escape.jar") && !fs::exists(dir / "escape.jar"));
+    ModFile foreign = *chosen;
+    foreign.url = "https://evil.example/x.jar";
+    CHECK(api.install(foreign, "Foreign", dir / "mods", cancel).error.code == "bad_file" && http.count("DOWNLOAD", "https://evil.example/x.jar") == 0);
+    ModFile notJar = *chosen;
+    notJar.filename = "readme.txt";
+    CHECK(api.install(notJar, "Text", dir / "mods", cancel).error.code == "bad_file");
+    // a download that fails says why
+    ModFile missing = *chosen;
+    missing.url = "https://cdn.modrinth.com/data/none.jar";
+    missing.filename = "none.jar";
+    CHECK(api.install(missing, "None", dir / "mods", cancel).error.code == "http" && !fs::exists(dir / "mods" / "none.jar"));
+}
+
+// The messages: the answers of searchMods and installMod come through hooks.emit, not as the return value.
+json answerOf(Events& events, int id) {
+    for (int waited = 0; waited < 500; ++waited) {
+        {
+            std::lock_guard<std::mutex> lock(events.mutex);
+            for (const json& a : events.answers) {
+                if (a["id"] == id) return a;
+            }
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    return json::object();
+}
+
+void test_mods_messages() {
+    _putenv_s("FALCON_LAUNCHER_HOME", freshFolder("modshome").string().c_str());
+    _putenv_s("FALCON_LAUNCHER_MOCK_SPEED", "0.02");
+    {  // the demo mode: made-up mods, no network and no disk
+        FakeHttp http;
+        Events events;
+        AppOptions options;
+        options.mockState = "home";
+        App app(http, options, hooksFor(events), Blob{});
+        (void)app.handleMessage(R"({"id":1,"method":"uiReady"})");
+        CHECK(app.handleMessage(R"({"id":10,"method":"searchMods","params":{"query":"","loader":"","offset":0}})").empty());  // (answered later)
+        const json all = answerOf(events, 10);
+        CHECK(all["ok"].get<bool>() && all["result"]["hits"].size() == 7 && all["result"]["total"] == 7 && all["result"]["hits"][0]["icon"].get<std::string>().rfind("data:image/svg+xml;base64,", 0) == 0);
+        (void)app.handleMessage(R"({"id":11,"method":"searchMods","params":{"query":"zoom","loader":"","offset":0}})");
+        const json zoom = answerOf(events, 11);
+        CHECK(zoom["result"]["hits"].size() == 1 && zoom["result"]["hits"][0]["title"] == "Sample Zoom");
+        (void)app.handleMessage(R"({"id":12,"method":"searchMods","params":{"query":"","loader":"quilt","offset":0}})");
+        CHECK(answerOf(events, 12)["result"]["total"] == 2);
+        // installing: busy at once, installed when it is done (in the state the page draws), and not twice at the same time
+        CHECK(app.handleMessage(R"({"id":13,"method":"installMod","params":{"projectId":"mock0003","title":"Sample Zoom","loader":""}})").empty());
+        CHECK(parse(app.stateJson())["mods"]["busy"].contains("mock0003"));
+        CHECK(parse(app.handleMessage(R"({"id":14,"method":"installMod","params":{"projectId":"mock0003"}})"))["error"]["code"] == "busy");
+        const json installed = answerOf(events, 13);
+        CHECK(installed["ok"].get<bool>() && installed["result"]["projectId"] == "mock0003");
+        app.waitIdle();
+        const json s = parse(app.stateJson());
+        CHECK(s["mods"]["busy"].empty() && s["mods"]["installed"]["mock0003"]["title"] == "Sample Zoom" && !s["mods"]["dir"].get<std::string>().empty());
+        CHECK(parse(app.handleMessage(R"({"id":15,"method":"installMod","params":{"projectId":"../evil"}})"))["error"]["code"] == "bad_project");
+        CHECK(parse(app.handleMessage(R"({"id":16,"method":"installMod"})"))["error"]["code"] == "bad_project");
+    }
+    {  // the real thing, against the fake network
+        const fs::path home = freshFolder("modsreal");
+        _putenv_s("FALCON_LAUNCHER_HOME", home.string().c_str());
+        const std::string jar = std::string("PK\x03\x04 the mod") + std::string(64, 'y');
+        const std::string jarUrl = "https://cdn.modrinth.com/data/AANobbMI/versions/REL00001/sodium.jar";
+        FakeHttp http;
+        Modrinth api(http);
+        ModQuery q;
+        q.gameVersion = "26.3";
+        http.on("GET", api.searchUrl(q), {FakeHttp::reply(200, kSearchReply)});
+        http.on("GET", "https://cdn.modrinth.com/data/AANobbMI/icon.png", {FakeHttp::reply(200, std::string("\x89PNG\r\n\x1a\n and some more", 20))});
+        http.on("GET", api.versionsUrl("AANobbMI", "26.3", ""), {FakeHttp::reply(200, versionsReply(jarUrl, sha1Hex(jar), jar.size()))});
+        http.on("GET", jarUrl, {FakeHttp::reply(200, jar)});
+        Events events;
+        AppOptions options;
+        App app(http, options, hooksFor(events), Blob{});
+        CHECK(app.handleMessage(R"({"id":20,"method":"searchMods","params":{"query":""}})").empty());
+        const json found = answerOf(events, 20);
+        CHECK(found["ok"].get<bool>() && found["result"]["hits"].size() == 2 && found["result"]["hits"][0]["title"] == "Sodium" && found["result"]["hits"][0]["icon"].get<std::string>().rfind("data:image/png", 0) == 0);
+        CHECK(found["result"]["hits"][1]["icon"].get<std::string>().empty());  // (a picture on a host that is not Modrinth's is not fetched)
+        // the search fails: the page is told why
+        (void)app.handleMessage(R"({"id":21,"method":"searchMods","params":{"query":"nothing here"}})");
+        const json failed = answerOf(events, 21);
+        CHECK(!failed["ok"].get<bool>() && failed["error"]["code"] == "http");
+        // installing: the file is in the mods folder, noted in mods.json, and still noted after a restart of the launcher
+        (void)app.handleMessage(R"({"id":22,"method":"installMod","params":{"projectId":"AANobbMI","title":"Sodium","loader":""}})");
+        const json done = answerOf(events, 22);
+        CHECK(done["ok"].get<bool>() && done["result"]["file"] == "sodium-fabric-0.5.0+mc26.3.jar");
+        app.waitIdle();
+        CHECK(fs::exists(home / "mods" / "sodium-fabric-0.5.0+mc26.3.jar"));
+        CHECK(parse(app.stateJson())["mods"]["installed"]["AANobbMI"]["version"] == "0.5.0");
+        {  // (a search also looks at the mods folder, which is the truth: so a restarted launcher knows what is installed, and a mod deleted by hand stops showing)
+            Events again;
+            App restarted(http, options, hooksFor(again), Blob{});
+            (void)restarted.handleMessage(R"({"id":30,"method":"searchMods","params":{"query":""}})");
+            CHECK(answerOf(again, 30)["ok"].get<bool>());
+            restarted.waitIdle();
+            CHECK(parse(restarted.stateJson())["mods"]["installed"].contains("AANobbMI"));
+            fs::remove(home / "mods" / "sodium-fabric-0.5.0+mc26.3.jar");
+            (void)restarted.handleMessage(R"({"id":31,"method":"searchMods","params":{"query":""}})");
+            CHECK(answerOf(again, 31)["ok"].get<bool>());
+            restarted.waitIdle();
+            CHECK(!parse(restarted.stateJson())["mods"]["installed"].contains("AANobbMI"));
+        }
+        // a mod whose version list has no file for this game version: said plainly, nothing installed
+        http.on("GET", api.versionsUrl("P7dR8mSH", "26.3", ""), {FakeHttp::reply(200, "[]")});
+        (void)app.handleMessage(R"({"id":23,"method":"installMod","params":{"projectId":"P7dR8mSH","title":"Fabric API"}})");
+        const json none = answerOf(events, 23);
+        CHECK(!none["ok"].get<bool>() && none["error"]["code"] == "no_file");
+        app.waitIdle();
+        CHECK(parse(app.stateJson())["mods"]["busy"].empty());
+    }
+    _putenv_s("FALCON_LAUNCHER_MOCK_SPEED", "1");
+}
+
 int main() {
     _putenv_s("FALCON_LAUNCHER_NO_BROWSER", "1");
     std::printf("launcher tests\n");
@@ -1020,6 +1288,9 @@ int main() {
     test_sign_in_outcomes();
     test_real_flow();
     test_not_configured_and_errors();
+    test_mods_parts();
+    test_mods_network();
+    test_mods_messages();
     if (g_failures != 0) {
         std::fprintf(stderr, "%d check(s) failed\n", g_failures);
         return 1;

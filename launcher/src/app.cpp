@@ -116,7 +116,7 @@ fs::path clientLogFile() {
 }  // namespace
 
 App::App(HttpClient& http, AppOptions options, AppHooks hooks, Blob bundledClient)
-    : http_(http), options_(std::move(options)), hooks_(std::move(hooks)), client_(bundledClient), auth_(http, options_.clientId), files_(http, dataRoot() / "game", options_.tables) {
+    : http_(http), options_(std::move(options)), hooks_(std::move(hooks)), client_(bundledClient), auth_(http, options_.clientId), files_(http, dataRoot() / "game", options_.tables), modrinth_(http) {
     const bool mock = options_.mock || !options_.mockState.empty();
     state_ = json{{"phase", "boot"},
                   {"app", {{"version", FALCON_LAUNCHER_VERSION}, {"mock", mock}, {"gameVersion", options_.gameVersion}, {"clientBundled", !client_.empty()}, {"gameDir", narrow(files_.versionDir(options_.gameVersion).wstring())}, {"platform", kPlatform}}},
@@ -124,7 +124,8 @@ App::App(HttpClient& http, AppOptions options, AppHooks hooks, Blob bundledClien
                   {"auth", {{"configured", auth_.configured() || mock}, {"status", "signedOut"}, {"message", ""}, {"error", nullptr}}},
                   {"account", nullptr},
                   {"game", {{"status", "unknown"}, {"phase", ""}, {"label", ""}, {"done", 0}, {"total", 0}, {"error", nullptr}, {"version", options_.gameVersion}, {"data", mock || files_.findGameData(options_.gameVersion).has_value()}}},
-                  {"settings", {{"keepOpen", true}}}};
+                  {"settings", {{"keepOpen", true}}},
+                  {"mods", {{"dir", narrow(modsDir().wstring())}, {"gameVersion", options_.gameVersion}, {"installed", json::object()}, {"busy", json::object()}}}};
 }
 
 App::~App() { shutdown(); }
@@ -132,11 +133,18 @@ App::~App() { shutdown(); }
 void App::shutdown() {
     stopping_ = true;
     cancel_ = true;
+    modsCancel_ = true;
+    {
+        std::lock_guard<std::mutex> lock(modsMutex_);
+        modsStop_ = true;
+    }
+    modsWake_.notify_all();
+    if (modsThread_.joinable()) modsThread_.join();
     if (job_.joinable()) job_.join();
 }
 
 void App::waitIdle() {
-    while (busy_.load()) std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    while (busy_.load() || modsPending_.load() > 0) std::this_thread::sleep_for(std::chrono::milliseconds(10));
     if (job_.joinable()) job_.join();
 }
 
@@ -298,10 +306,32 @@ std::string App::handleMessage(const std::string& message) {
         openInBrowser(url);
         return ok();
     }
+    if (method == "searchMods") {
+        const std::string text = stringParam(params, "query");
+        const std::string loader = stringParam(params, "loader");
+        const int offset = params.is_object() && params.contains("offset") && params["offset"].is_number_integer() ? std::max(0, params["offset"].get<int>()) : 0;
+        const int generation = ++modsSearchGeneration_;
+        enqueueMods([this, id, generation, text, loader, offset] { searchModsTask(id, generation, text, loader, offset); });
+        return {};  // (the answer comes through hooks_.emit when the network has answered)
+    }
+    if (method == "installMod") {
+        const std::string projectId = stringParam(params, "projectId");
+        if (!Modrinth::isProjectId(projectId)) return fail("bad_project", "That is not a Modrinth project.");
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (state_["mods"]["busy"].contains(projectId)) return fail("busy", "That mod is already being installed.");
+        }
+        const std::string title = stringParam(params, "title").substr(0, 200);
+        const std::string loader = stringParam(params, "loader");
+        mutate([&](json& s) { s["mods"]["busy"][projectId] = "Looking for the file…"; });
+        enqueueMods([this, id, projectId, title, loader] { installModTask(id, projectId, title, loader); });
+        return {};
+    }
     if (method == "openFolder") {
         const std::string which = stringParam(params, "which");
         fs::path folder = dataRoot();
         if (which == "logs") folder /= "logs";
+        else if (which == "mods") folder = modsDir();
         else if (which == "game") folder = files_.versionDir(options_.gameVersion);
         std::error_code ec;
         fs::create_directories(folder, ec);
@@ -361,11 +391,15 @@ std::string App::handleMessage(const std::string& message) {
 
 void App::uiReady() {
     logLine("the UI is ready after " + std::to_string(static_cast<int>(millisSinceStart())) + " ms");
+    const json installed = loadInstalledMods();
     if (!booted_.exchange(true)) {
-        mutate([&](json& s) { s["settings"]["keepOpen"] = loadConfig().value("keepOpen", true); });
+        mutate([&](json& s) {
+            s["settings"]["keepOpen"] = loadConfig().value("keepOpen", true);
+            s["mods"]["installed"] = installed;
+        });
         beginBoot();
     } else {
-        mutate([](json&) {});  // (the page was reloaded: it gets the state again)
+        mutate([&](json& s) { s["mods"]["installed"] = installed; });  // (the page was reloaded: it gets the state again)
     }
 }
 
@@ -843,6 +877,222 @@ void App::applyMockState(const std::string& which) {
             }
         }
     });
+}
+
+// ---------------------------------------------------------------------------------------------------------------------------
+// The Mods tab (Modrinth)
+// ---------------------------------------------------------------------------------------------------------------------------
+
+namespace {
+
+constexpr int kModsPageSize = 20;
+
+// How the demo mode's mods look: made up, so that nothing of Modrinth is needed to work on the page (and nobody's real mod is shown).
+struct MockMod {
+    const char* id;
+    const char* title;
+    const char* description;
+    const char* author;
+    long long downloads;
+    const char* color;
+    const char* categories;  // comma separated
+};
+const MockMod kMockMods[] = {
+    {"mock0001", "Sample Lighting", "Soft, smooth lighting for caves and nights. A made-up mod, shown in the launcher's demo mode.", "someone", 4'200'000, "#e0a33d", "fabric,neoforge,optimization"},
+    {"mock0002", "Sample Minimap", "A small map of what is round you, with waypoints. Made up for the demo mode.", "somebody", 2'750'000, "#3d8fe0", "fabric,forge,utility"},
+    {"mock0003", "Sample Zoom", "Hold a key to look far away, with a smooth field of view. Made up for the demo mode.", "someone", 1'900'000, "#9b59e0", "fabric,quilt"},
+    {"mock0004", "Sample Inventory Tweaks", "Sort the inventory with one click and keep tools stocked. Made up for the demo mode.", "tinker", 980'000, "#3dbd6a", "neoforge,forge,utility"},
+    {"mock0005", "Sample Sounds", "Quieter footsteps and a gentler rain. Made up for the demo mode.", "sound", 410'000, "#e0603d", "fabric,decoration"},
+    {"mock0006", "Sample Fog", "Fog that follows the biome you are in. Made up for the demo mode.", "someone", 233'000, "#4dc4c4", "fabric,neoforge,quilt"},
+    {"mock0007", "Sample Compass", "A compass that points at your spawn and your bed. Made up for the demo mode.", "somebody", 87'000, "#c4a14d", "forge,utility"},
+};
+
+std::string mockModIcon(const MockMod& mod) {
+    const std::string svg = std::string("<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 64 64\"><rect width=\"64\" height=\"64\" rx=\"14\" fill=\"") + mod.color +
+                            "\"/><text x=\"32\" y=\"44\" font-size=\"34\" font-weight=\"700\" font-family=\"sans-serif\" text-anchor=\"middle\" fill=\"#ffffff\">" + std::string(1, mod.title[7]) + "</text></svg>";
+    return "data:image/svg+xml;base64," + base64(svg);
+}
+
+json mockSearch(const std::string& text, const std::string& loader, int offset) {
+    const std::string needle = lowerCase(text);
+    json hits = json::array();
+    int total = 0;
+    for (const MockMod& mod : kMockMods) {
+        if (!needle.empty() && lowerCase(std::string(mod.title) + " " + mod.description).find(needle) == std::string::npos) continue;
+        if (!loader.empty() && (std::string(",") + mod.categories + ",").find("," + loader + ",") == std::string::npos) continue;
+        if (total++ < offset) continue;
+        json categories = json::array();
+        const std::string rest = mod.categories;
+        for (std::size_t from = 0; from < rest.size();) {
+            const std::size_t comma = rest.find(',', from);
+            categories.push_back(rest.substr(from, comma == std::string::npos ? std::string::npos : comma - from));
+            if (comma == std::string::npos) break;
+            from = comma + 1;
+        }
+        hits.push_back(json{{"projectId", mod.id}, {"slug", ""}, {"title", mod.title}, {"description", mod.description}, {"author", mod.author}, {"icon", mockModIcon(mod)}, {"downloads", mod.downloads}, {"categories", categories}});
+    }
+    return json{{"hits", hits}, {"offset", offset}, {"limit", kModsPageSize}, {"total", total}, {"query", text}};
+}
+
+double mockSpeed() {
+    static const double speed = [] {
+        const char* s = std::getenv("FALCON_LAUNCHER_MOCK_SPEED");
+        return s != nullptr ? std::max(std::atof(s), 0.001) : 1.0;
+    }();
+    return speed;
+}
+
+}  // namespace
+
+fs::path App::modsDir() const { return dataRoot() / "mods"; }
+
+fs::path App::modsIndexFile() const { return dataRoot() / "mods.json"; }
+
+// The mods this launcher installed, as it noted them (mods.json), those whose file is still in the mods folder.
+json App::loadInstalledMods() const {
+    json out = json::object();
+    if (options_.mock || !options_.mockState.empty()) return out;
+    std::string text;
+    if (!readFile(modsIndexFile(), text)) return out;
+    const json index = json::parse(text, nullptr, false);
+    if (!index.is_object()) return out;
+    std::error_code ec;
+    for (const auto& [projectId, entry] : index.items()) {
+        if (!entry.is_object() || !entry.contains("file") || !entry["file"].is_string()) continue;
+        if (fs::exists(modsDir() / fs::path(widen(entry["file"].get<std::string>())), ec)) out[projectId] = entry;
+    }
+    return out;
+}
+
+bool App::modsSleep(int milliseconds) {
+    const int scaled = std::max(1, static_cast<int>(milliseconds * mockSpeed()));
+    for (int waited = 0; waited < scaled; waited += 50) {
+        if (modsCancel_.load() || stopping_.load()) return false;
+        std::this_thread::sleep_for(std::chrono::milliseconds(std::min(50, scaled - waited)));
+    }
+    return !(modsCancel_.load() || stopping_.load());
+}
+
+void App::enqueueMods(std::function<void()> task) {
+    ++modsPending_;
+    {
+        std::lock_guard<std::mutex> lock(modsMutex_);
+        if (modsStop_) {
+            --modsPending_;
+            return;
+        }
+        modsQueue_.push_back(std::move(task));
+        if (!modsThread_.joinable()) modsThread_ = std::thread([this] { modsLoop(); });
+    }
+    modsWake_.notify_one();
+}
+
+void App::modsLoop() {
+    for (;;) {
+        std::function<void()> task;
+        {
+            std::unique_lock<std::mutex> lock(modsMutex_);
+            modsWake_.wait(lock, [this] { return modsStop_ || !modsQueue_.empty(); });
+            if (modsStop_) {  // (closing: what was still waiting is dropped)
+                modsPending_ -= static_cast<int>(modsQueue_.size());
+                modsQueue_.clear();
+                return;
+            }
+            task = std::move(modsQueue_.front());
+            modsQueue_.pop_front();
+        }
+        try {
+            task();
+        } catch (const std::exception& e) {
+            logLine(std::string("a mods task failed: ") + e.what());
+        }
+        --modsPending_;
+    }
+}
+
+void App::answerLater(const json& id, bool ok, const json& resultOrError) {
+    if (!hooks_.emit) return;
+    json message = {{"id", id}, {"ok", ok}};
+    message[ok ? "result" : "error"] = resultOrError;
+    hooks_.emit(dump(message));
+}
+
+void App::searchModsTask(const json& id, int generation, std::string text, std::string loader, int offset) {
+    // A search that a newer one has replaced (the player kept typing) is not made: the page drops its answer anyway.
+    const auto superseded = [&] { return generation != modsSearchGeneration_.load() || stopping_.load(); };
+    if (superseded()) return answerLater(id, true, json{{"superseded", true}});
+    if (options_.mock || !options_.mockState.empty()) {
+        if (!modsSleep(450)) return;
+        return answerLater(id, true, mockSearch(text, loader, offset));
+    }
+    ModQuery query;
+    query.text = text;
+    query.gameVersion = options_.gameVersion;
+    query.loader = loader;
+    query.offset = offset;
+    query.limit = kModsPageSize;
+    {  // (the mods folder is the truth about what is installed: a file deleted by hand stops showing, and a restarted launcher knows)
+        const json installed = loadInstalledMods();
+        mutate([&](json& s) { s["mods"]["installed"] = installed; });
+    }
+    const auto page = modrinth_.search(query);
+    if (!page) return answerLater(id, false, errorJson(page.error));
+    if (superseded()) return answerLater(id, true, json{{"superseded", true}});
+    std::vector<std::string> urls;
+    for (const ModHit& hit : page->hits) urls.push_back(hit.iconUrl);
+    const std::vector<std::string> icons = modrinth_.icons(urls);
+    json hits = json::array();
+    for (std::size_t i = 0; i < page->hits.size(); ++i) {
+        const ModHit& hit = page->hits[i];
+        hits.push_back(json{{"projectId", hit.projectId}, {"slug", hit.slug}, {"title", hit.title}, {"description", hit.description}, {"author", hit.author}, {"icon", icons[i]}, {"downloads", hit.downloads}, {"categories", hit.categories}});
+    }
+    answerLater(id, true, json{{"hits", hits}, {"offset", page->offset}, {"limit", page->limit}, {"total", page->total}, {"query", text}});
+}
+
+void App::installModTask(const json& id, std::string projectId, std::string title, std::string loader) {
+    const auto finish = [&](const json& installedEntry, const Error* error) {
+        mutate([&](json& s) {
+            s["mods"]["busy"].erase(projectId);
+            if (error == nullptr) s["mods"]["installed"][projectId] = installedEntry;
+        });
+        if (error != nullptr) {
+            logLine("the mod " + projectId + " was not installed: " + error->code + ": " + error->message);
+            answerLater(id, false, errorJson(*error));
+        } else {
+            answerLater(id, true, json{{"projectId", projectId}, {"file", installedEntry["file"]}, {"version", installedEntry["version"]}, {"loader", installedEntry["loader"]}});
+        }
+    };
+    if (options_.mock || !options_.mockState.empty()) {  // (pretend: no network and no disk)
+        if (!modsSleep(900)) {
+            const Error closing{"cancelled", "The launcher is closing."};
+            return finish(json::object(), &closing);
+        }
+        const json entry = {{"title", title}, {"version", "1.0.0"}, {"file", "sample-" + projectId + "-1.0.0.jar"}, {"loader", loader.empty() ? "fabric" : loader}};
+        return finish(entry, nullptr);
+    }
+    const auto file = modrinth_.chooseFile(projectId, options_.gameVersion, loader);
+    if (!file) {
+        const Error error = file.error;
+        return finish(json::object(), &error);
+    }
+    mutate([&](json& s) { s["mods"]["busy"][projectId] = "Downloading " + file->filename + "…"; });
+    const auto done = modrinth_.install(*file, title.empty() ? projectId : title, modsDir(), modsCancel_);
+    if (!done) {
+        const Error error = done.error;
+        return finish(json::object(), &error);
+    }
+    // Noted, so that the page can say "Installed" next time (the folder itself is the truth: a file that was deleted by hand stops showing).
+    std::string text;
+    json index = readFile(modsIndexFile(), text) ? json::parse(text, nullptr, false) : json::object();
+    if (!index.is_object()) index = json::object();
+    const json entry = {{"title", done->title}, {"version", done->versionNumber}, {"file", done->file}, {"loader", done->loader}};
+    if (index.contains(projectId) && index[projectId].is_object() && index[projectId].value("file", "") != done->file) {
+        std::error_code ec;
+        fs::remove(modsDir() / fs::path(widen(index[projectId].value("file", ""))), ec);  // (an older version of the same mod: replaced, not kept beside it)
+    }
+    index[projectId] = entry;
+    writeFileAtomic(modsIndexFile(), dump(index));
+    finish(entry, nullptr);
 }
 
 }  // namespace launcher
