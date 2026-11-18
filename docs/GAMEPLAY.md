@@ -44,8 +44,8 @@ What a singleplayer world does beyond its terrain, how it is built, and what was
   named noises and the surface rules' random factories come from it by the name's hash, the old blended noise draws from `LegacyRandomSource(seed)`, and the Nether's temperature and
   vegetation noises are made the old way (`LegacyFbmInitializer`: one Perlin per octave from the same source, 262 values skipped for an unused octave) from `LegacyRandomSource(seed)` and
   `(seed + 1)`. So the terrain, the surface and the biomes of both are meant to be the game's own for a seed. **That is not checked against the real game**: the Overworld's is (the chunk
-  tests), the Nether's and End's has no reference data yet, and the cave carver of the Nether (`nether_cave`) and the placed features are not ported, so a real Nether chunk has tunnels and
-  ores that Falcon's does not.
+  tests), the Nether's and End's has no reference data yet, and the placed features are not ported, so a real Nether chunk has ores that Falcon's does not. The Nether's caves are ported (`worldgen/nether_carver.*`: the 26.3 cave carver with
+  `nether_cave.json`: one chance in five per chunk of up to nine tunnels, five times as high as wide, lava below y 32), with the game's random numbers but not yet checked against its blocks.
 - `WorldRenderer::enterDimension` empties the loaded chunks and starts making another dimension's; the light engine has a no-sky mode for the Nether. Each dimension keeps its own edits, items,
   containers and mobs, in `falcon_save.dat` (Overworld) and `falcon_save_nether.dat` / `falcon_save_end.dat`; the player's dimension and position are saved.
 - Nether decoration (`world/nether_decoration.*`, Falcon's own, not the game's placed features): glowstone, quartz and gold ore, magma at the lava sea, fire, mushrooms, roots, fungi and vines,
