@@ -469,6 +469,7 @@ private:
         std::uint32_t cell;  // index into the grid
         std::int32_t x, z;   // chunk
         std::int8_t y;       // section
+        bool entry;          // the camera's own section: every face is open, and nothing led to it
     };
     std::vector<TraversalNode> traversal_;
     std::vector<const VisibleSection*> translucentOrder_;  // sections with see-through blocks, farthest first

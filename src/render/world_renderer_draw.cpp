@@ -11,6 +11,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <string>
+#include <utility>
+#include <vector>
 
 // WorldRenderer: drawing a frame (visibility, the sections, the sky, the selection and the cracks, held things).
 
@@ -398,11 +400,43 @@ void WorldRenderer::collectVisibleByTraversal(const Camera& camera, const Frustu
         gridTravelled_.assign(gridStamp_.size(), 0);
     }
     traversal_.clear();
-    const std::uint32_t startCell = static_cast<std::uint32_t>(gridIndex(cameraChunkX, cameraSection, cameraChunkZ));
-    gridStamp_[startCell] = traversalStamp_;
-    gridIncoming_[startCell] = 0;
-    gridTravelled_[startCell] = 0;
-    traversal_.push_back({startCell, cameraChunkX, cameraChunkZ, static_cast<std::int8_t>(cameraSection)});
+    const double cameraY = camera.y;
+    if (cameraY >= static_cast<double>(kMaxY) || cameraY < static_cast<double>(kMinY)) {
+        // A camera above the world (or below it) is in no section: the walk cannot start in the one it is nearest to, which may be nowhere near the view (from 600 blocks up and looking
+        // ahead, the section straight below is far outside it, and the walk died there: every chunk went, the LODs stayed). The game does the same as this: it starts from the top
+        // layer (the bottom one) wherever it is in view and in range, each entered from the open side.
+        const bool above = cameraY >= static_cast<double>(kMaxY);
+        const int layer = above ? kSectionCount - 1 : 0;
+        const int rangeChunks = static_cast<int>(std::ceil(reach / 16.0f)) + 1;
+        std::vector<std::pair<float, TraversalNode>> seeds;
+        for (int dz = -rangeChunks; dz <= rangeChunks; ++dz) {
+            for (int dx = -rangeChunks; dx <= rangeChunks; ++dx) {
+                const int nx = cameraChunkX + dx, nz = cameraChunkZ + dz;
+                const float cx = static_cast<float>(nx * 16 + 8) - static_cast<float>(camera.x);
+                const float cz = static_cast<float>(nz * 16 + 8) - static_cast<float>(camera.z);
+                if (cx * cx + cz * cz > reach2) continue;
+                const float ox = static_cast<float>(nx * 16 - camera.x);
+                const float oy = static_cast<float>(kMinY + layer * 16 - camera.y);
+                const float oz = static_cast<float>(nz * 16 - camera.z);
+                if (!frustum.mayContain({ox, oy, oz}, {ox + 16.0f, oy + 16.0f, oz + 16.0f})) continue;
+                const auto cell = static_cast<std::uint32_t>(gridIndex(nx, layer, nz));
+                seeds.push_back({cx * cx + cz * cz, {cell, nx, nz, static_cast<std::int8_t>(layer), false}});
+            }
+        }
+        std::sort(seeds.begin(), seeds.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+        for (const auto& [distance, node] : seeds) {
+            gridStamp_[node.cell] = traversalStamp_;
+            gridIncoming_[node.cell] = static_cast<std::uint8_t>(above ? 1u << 3 : 1u << 2);  // (it was entered through its top face, or its bottom one)
+            gridTravelled_[node.cell] = static_cast<std::uint8_t>(above ? 1u << 2 : 1u << 3);  // (moving down, or up)
+            traversal_.push_back(node);
+        }
+    } else {
+        const std::uint32_t startCell = static_cast<std::uint32_t>(gridIndex(cameraChunkX, cameraSection, cameraChunkZ));
+        gridStamp_[startCell] = traversalStamp_;
+        gridIncoming_[startCell] = 0;
+        gridTravelled_[startCell] = 0;
+        traversal_.push_back({startCell, cameraChunkX, cameraChunkZ, static_cast<std::int8_t>(cameraSection), true});
+    }
 
     for (std::size_t head = 0; head < traversal_.size(); ++head) {
         const TraversalNode node = traversal_[head];
@@ -411,7 +445,7 @@ void WorldRenderer::collectVisibleByTraversal(const Camera& camera, const Frustu
             const float ox = static_cast<float>(node.x * 16 - camera.x);
             const float oy = static_cast<float>(kMinY + node.y * 16 - camera.y);
             const float oz = static_cast<float>(node.z * 16 - camera.z);
-            if (head != 0 || frustum.mayContain({ox, oy, oz}, {ox + 16.0f, oy + 16.0f, oz + 16.0f})) {  // (the others passed when they were reached)
+            if (!node.entry || frustum.mayContain({ox, oy, oz}, {ox + 16.0f, oy + 16.0f, oz + 16.0f})) {  // (the others passed when they were reached)
                 const float cx = ox + 8.0f, cy = oy + 8.0f, cz = oz + 8.0f;
                 visible_.push_back({section, ox, oy, oz, cx * cx + cy * cy + cz * cz, node.x, node.z});
             }
@@ -419,7 +453,7 @@ void WorldRenderer::collectVisibleByTraversal(const Camera& camera, const Frustu
         // Which faces it can be left through.
         const unsigned travelled = gridTravelled_[node.cell];
         unsigned outgoing = 0x3F;
-        if (head != 0) {
+        if (!node.entry) {
             outgoing = 0;
             const std::uint64_t connections = gridVisibility_[node.cell];
             const unsigned incoming = gridIncoming_[node.cell];
@@ -458,7 +492,7 @@ void WorldRenderer::collectVisibleByTraversal(const Camera& camera, const Frustu
                 }
                 gridIncoming_[cell] = static_cast<std::uint8_t>(enteredThrough);
                 gridTravelled_[cell] = static_cast<std::uint8_t>(moved);
-                traversal_.push_back({cell, nx, nz, static_cast<std::int8_t>(ny)});
+                traversal_.push_back({cell, nx, nz, static_cast<std::int8_t>(ny), false});
             }
         }
     }
