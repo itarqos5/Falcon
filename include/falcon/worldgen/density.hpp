@@ -78,8 +78,17 @@ private:
     void bumpAll();
     void bumpXZ();
 
+    // The eight corner values of the last two cells an `interpolated` node was read in (per node; made on its first use). A search for the top of the ground probes one column a few
+    // blocks apart, nearly always inside the same cell, and the corners (each a whole noise evaluation) were worked out again for every probe.
+    struct CornerSet {
+        int x0 = 0, y0 = 0, z0 = 0;
+        bool valid = false;
+        float c[8] = {};
+    };
     const detail::GraphData* g_;
     std::uint64_t graphId_;
+    std::vector<CornerSet> corners_;      // two for each node
+    std::vector<std::uint8_t> cornerNext_;  // which of a node's two to overwrite next
     std::vector<float> val_;
     std::vector<std::uint32_t> stamp_;
     std::uint32_t stampAll_ = 1;

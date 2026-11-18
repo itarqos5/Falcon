@@ -296,15 +296,33 @@ float DensityEvaluator::compute(const Node& n) {
             const int sx = x_, sy = y_, sz = z_;
             const int x0 = sx - fx, y0 = sy - fy, z0 = sz - fz;
             float c[8];  // index dx + 2 dy + 4 dz
-            for (int dz = 0; dz < 2; ++dz) {
-                for (int dy = 0; dy < 2; ++dy) {
+            if (corners_.empty()) {
+                corners_.resize(g_->nodes.size() * 2);
+                cornerNext_.assign(g_->nodes.size(), 0);
+            }
+            const auto self = static_cast<std::size_t>(&n - g_->nodes.data());
+            CornerSet* sets = &corners_[self * 2];
+            const CornerSet* known = nullptr;
+            for (int k = 0; k < 2; ++k) {
+                if (sets[k].valid && sets[k].x0 == x0 && sets[k].y0 == y0 && sets[k].z0 == z0) known = &sets[k];
+            }
+            if (known != nullptr) {
+                for (int k = 0; k < 8; ++k) c[k] = known->c[k];
+            } else {
+                for (int dz = 0; dz < 2; ++dz) {
                     for (int dx = 0; dx < 2; ++dx) {
-                        setPosition(x0 + dx * cxz, y0 + dy * cy, z0 + dz * cxz);
-                        c[dx + 2 * dy + 4 * dz] = eval(n.a);
+                        for (int dy = 0; dy < 2; ++dy) {  // (the two heights of one column one after the other: what does not depend on y is worked out once for both)
+                            setPosition(x0 + dx * cxz, y0 + dy * cy, z0 + dz * cxz);
+                            c[dx + 2 * dy + 4 * dz] = eval(n.a);
+                        }
                     }
                 }
+                setPosition(sx, sy, sz);
+                CornerSet& slot = sets[cornerNext_[self]];
+                cornerNext_[self] = static_cast<std::uint8_t>(cornerNext_[self] ^ 1u);
+                slot.x0 = x0, slot.y0 = y0, slot.z0 = z0, slot.valid = true;
+                for (int k = 0; k < 8; ++k) slot.c[k] = c[k];
             }
-            setPosition(sx, sy, sz);
             const float tx = static_cast<float>(fx) / static_cast<float>(cxz);
             const float ty = static_cast<float>(fy) / static_cast<float>(cy);
             const float tz = static_cast<float>(fz) / static_cast<float>(cxz);
