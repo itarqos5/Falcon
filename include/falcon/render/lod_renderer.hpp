@@ -21,6 +21,7 @@
 
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <map>
 #include <memory>
@@ -192,6 +193,10 @@ private:
 
     std::unordered_map<TileKey, Tile, TileKeyHash> tiles_;
     std::vector<Wanted> wanted_;  // the leaves of the quadtree this frame
+    // Where the camera is going (blocks a second, smoothed): the tiles the quadtree will want a moment from now are made before they are, so that walking does not meet a coarse stand-in.
+    double lastCamX_ = 0.0, lastCamZ_ = 0.0, velocityX_ = 0.0, velocityZ_ = 0.0;
+    bool haveLastCam_ = false;
+    std::chrono::steady_clock::time_point lastCamTime_;
     LodStats stats_;
 };
 

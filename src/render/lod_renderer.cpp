@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <functional>
 #include <unordered_set>
 
 namespace falcon {
@@ -670,6 +671,36 @@ void LodRenderer::update(double camX, double camZ, int nearChunks, double upload
         request(w.key, 1.0e8 + w.distance);
     }
 
+    // Where the camera will be in two seconds (at most six chunks on): the tiles that place will want that are not there yet are asked for too, after everything the camera wants now.
+    {
+        const auto now = std::chrono::steady_clock::now();
+        const double dt = std::chrono::duration<double>(now - lastCamTime_).count();
+        if (haveLastCam_ && dt > 1.0e-3 && dt < 0.5) {
+            const double blend = std::min(1.0, dt * 4.0);  // (about a quarter of a second to follow a change)
+            velocityX_ += ((camX - lastCamX_) / dt - velocityX_) * blend;
+            velocityZ_ += ((camZ - lastCamZ_) / dt - velocityZ_) * blend;
+        } else if (!haveLastCam_ || dt >= 0.5) {
+            velocityX_ = velocityZ_ = 0.0;
+        }
+        haveLastCam_ = true;
+        lastCamX_ = camX;
+        lastCamZ_ = camZ;
+        lastCamTime_ = now;
+        double aheadX = velocityX_ * 2.0, aheadZ = velocityZ_ * 2.0;
+        const double length = std::hypot(aheadX, aheadZ);
+        if (length > 96.0) aheadX *= 96.0 / length, aheadZ *= 96.0 / length;
+        if (length > 6.0) {
+            std::vector<Wanted> current = std::move(wanted_);
+            select(camX + aheadX, camZ + aheadZ, nearBlocks, maxBlocks);
+            std::vector<Wanted> ahead = std::move(wanted_);
+            wanted_ = std::move(current);
+            for (const Wanted& w : ahead) {
+                if (shared_->building.load() >= kMaxBuilding) break;
+                if (tiles_.count(w.key) == 0) request(w.key, 1.5e8 + w.distance);
+            }
+        }
+    }
+
     // Finished tiles onto the GPU, for no longer than the budget.
     const auto started = std::chrono::steady_clock::now();
     for (;;) {
@@ -714,6 +745,28 @@ void LodRenderer::render(const Matrix4f& view, float fovDegrees, float aspect, d
     };
     std::vector<Draw> draws;
     std::vector<TileKey> asked;  // the tiles already chosen (a stand-in may serve several leaves)
+    // The tiles under `key` that are on the GPU, down to `depth` levels finer (the nearest ones: a tile that is there is not looked under). True if there was any.
+    const std::function<bool(const TileKey&, int)> addFinerTiles = [&](const TileKey& key, int depth) -> bool {
+        if (key.level == 0 || depth == 0) return false;
+        bool any = false;
+        for (int b = 0; b < 2; ++b) {
+            for (int a = 0; a < 2; ++a) {
+                const TileKey child{key.level - 1, key.tx * 2 + a, key.tz * 2 + b};
+                const auto it = tiles_.find(child);
+                if (it != tiles_.end() && it->second.state == State::Uploaded) {
+                    it->second.lastUsed = frame_;  // (kept: it is on the screen)
+                    any = true;
+                    if (std::find(asked.begin(), asked.end(), child) == asked.end()) {
+                        asked.push_back(child);
+                        draws.push_back({&it->second, child, 0.0f});
+                    }
+                } else if (addFinerTiles(child, depth - 1)) {
+                    any = true;
+                }
+            }
+        }
+        return any;
+    };
     for (const Wanted& w : wanted_) {
         TileKey key = w.key;
         float bias = 0.0f;
@@ -731,7 +784,12 @@ void LodRenderer::render(const Matrix4f& view, float fovDegrees, float aspect, d
             key.tz >>= 1;
             bias = 0.05f;
         }
-        if (tile == nullptr) continue;
+        // Nothing of this size or coarser is there yet: the finer tiles that are (the leaf was one tile when the camera was somewhere else, and its four were drawn: until the one
+        // that replaces them is made they stay, instead of a hole that shows the sky for the length of a build).
+        if (tile == nullptr) {
+            addFinerTiles(w.key, 3);
+            continue;
+        }
         if (std::find(asked.begin(), asked.end(), key) != asked.end()) continue;
         asked.push_back(key);
         draws.push_back({tile, key, bias});
