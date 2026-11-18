@@ -379,6 +379,10 @@ private:
     void attackMob(int id);  // the player hits a mob: the damage the held item and the attack cooldown give, the knockback, the sounds
     void mobHitsPlayer(float amount, double fromX, double fromZ, float knockback);
     void renderLocalMobs(const std::array<double, 3>& camPos);
+    // F3 + B and F3 + G: the lines the game's EntityHitboxDebugRenderer and ChunkBorderRenderer draw (game_session_debug.cpp).
+    [[nodiscard]] std::vector<WorldRenderer::DebugLine> debugGizmos();
+    bool debugChord(int key);  // the rest of the F3 chords (D, C, A, B, G, Q), with the chat feedback the game gives; true if the key was one (it is then not a key of the game as well)
+    void debugMessage(const std::string& text);
     void tickTime();  // the clock: a tick of the day, unless the game rule advance_time is off
     void pumpRemote();
     // What LocalPlayer.sendChanges says each tick. A rider (`riding`) sends how it looks round and nothing of its position; one who steers a boat also sends the boat's place.
@@ -515,6 +519,8 @@ private:
     SystemMemory systemMemory_;
     double systemMemoryAge_ = 1.0e9;
     bool advancedTooltips_ = false;
+    bool showHitboxes_ = false;      // F3 + B
+    bool showChunkBorders_ = false;  // F3 + G
     int droppedCount_ = 0;
     std::optional<BlockHit> target_;
     bool ready_ = false;

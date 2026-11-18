@@ -728,6 +728,7 @@ void GameSession::onKey(int key, int mods) {
                 addChatMessage("§e§l" + services_.language.get("debug.prefix") + "§r " + services_.language.get("debug.gamemodes.error"));
             }
         }
+        if (debugChord(key)) return;
         // F3 + N: spectator mode, and back to the mode before it.
         if (keyIs("key.debug.spectate", key)) {
             debugCombo_ = true;

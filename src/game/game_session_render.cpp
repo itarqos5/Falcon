@@ -210,6 +210,7 @@ void GameSession::renderWorld(int framebufferWidth, int framebufferHeight) {
             }
         }
     }
+    if (ready_ && (showHitboxes_ || showChunkBorders_)) renderer_.drawDebugLines(cam, framebufferWidth, framebufferHeight, debugGizmos());  // (after the entities: the lines are not drawn into the depth)
     if (ready_ && perspective_ == 0 && !hudHidden_ && info_.gameType != 3 && !usingSpyglass_) {  // the hand (F1 hides it, and spectators have none; spyglass view hides hand)
         HandFrame frame;
         frame.width = framebufferWidth;

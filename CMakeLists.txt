@@ -423,6 +423,7 @@ add_library(falcon_core
     src/game/game_session_containers.cpp
     src/game/game_session_use.cpp
     src/game/game_session_render.cpp
+    src/game/game_session_debug.cpp
     src/game/item_render.cpp
     src/game/container_screen.cpp
     src/game/inventory_screen.cpp

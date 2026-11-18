@@ -441,6 +441,11 @@ running next to it keeps the machine.
   world (Create New World: Allow Cheats; a Creative world has them); without them the chat says "Unable to open game mode switcher; no
   permission". A mode change really changes the game: Creative gives infinite materials and flight, Survival and Adventure end flight,
   Adventure and Spectator cannot break or place blocks, Spectator flies through blocks.
+- **More F3 chords** (`src/game/game_session_debug.cpp`, geometry and colours from the 26.3 classes `ChunkBorderRenderer` and `EntityHitboxDebugRenderer`): F3 + G chunk borders
+  (the corners of the chunks round yours in faint red, your chunk's four edges with a line every two blocks in yellow and teal, blue rings every 16 blocks, and your section as a box
+  that shows through the ground), F3 + B hitboxes (each entity's box in green, a red line at its eyes, a blue arrow where it looks, a yellow one where it is going; the player's own from
+  outside, F5), F3 + A builds every chunk mesh again, F3 + D clears the chat, F3 + C copies a `/execute in ... run tp @s` command for the place you stand, F3 + Q lists them. The
+  lines are drawn with the outline shader (now with a colour in every vertex, and its Vulkan twin); a width of 4 is a strip that keeps its width on the screen. Not done: F3 + P, T, S, V, L, I.
 - **The player in the inventory** (`PlayerPreview`): the survival screen and the creative Survival Inventory tab draw the real player model
   (`entity-models.json`, the models as the game baked them) in the default Steve skin, in the box and at the scale of
   `InventoryScreen.extractEntityInInventoryFollowsMouse` (box 26,8 to 75,78 at scale 30; 20 in the creative one): the body turns 20 degrees
