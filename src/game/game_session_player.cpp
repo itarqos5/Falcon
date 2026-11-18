@@ -336,6 +336,7 @@ bool GameSession::hurt(float amount, bool bypassCooldown, bool bypassArmor) {
         if (vitals_.health - applied > 0.0f) playWorldSound("entity.player.hurt", SoundSource::Players, 1.0f, 1.0f + (randomFloat() - randomFloat()) * 0.2f);
     }
     stats_["custom/damage_taken"] += static_cast<std::int64_t>(std::lround(applied * 10.0f));
+    if (!bypassArmor && !bypassCooldown) causeExhaustion(0.1f);  // (the generic damage type's exhaustion: falls, the void and starving have none)
     vitals_.health = std::max(0.0f, vitals_.health - applied);
     if (vitals_.health <= 0.0f) die();
     return true;
@@ -347,7 +348,10 @@ void GameSession::tickStatistics(bool jumped) {
     ++stats_["custom/play_time"];
     ++stats_["custom/total_world_time"];
     ++stats_["custom/time_since_death"];
-    if (jumped) ++stats_["custom/jump"];
+    if (jumped) {
+        ++stats_["custom/jump"];
+        causeExhaustion(player_.sprinting ? 0.2f : 0.05f);  // Player.jumpFromGround
+    }
     const std::array<double, 3> now = {player_.x, player_.y, player_.z};
     if (statPositionKnown_ && !riding()) {
         const double dx = now[0] - statPosition_[0], dy = now[1] - statPosition_[1], dz = now[2] - statPosition_[2];
@@ -357,11 +361,19 @@ void GameSession::tickStatistics(bool jumped) {
                 const auto cm = static_cast<std::int64_t>(std::lround(centimetres));
                 if (cm > 0) stats_[key] += cm;
             };
-            if (player_.isUnderWater()) add("custom/walk_under_water_one_cm", flat * 100.0);
-            else if (player_.inWater) add("custom/swim_one_cm", flat * 100.0);
-            else if (player_.flying) add("custom/fly_one_cm", flat * 100.0);
+            // (Player.checkMovementStatistics: 0.01 of exhaustion a block in the water, 0.1 a block sprinting on the ground, none for walking, flying or falling)
+            if (player_.isUnderWater()) {
+                add("custom/walk_under_water_one_cm", flat * 100.0);
+                causeExhaustion(0.01f * static_cast<float>(flat));
+            } else if (player_.inWater) {
+                add("custom/swim_one_cm", flat * 100.0);
+                causeExhaustion(0.01f * static_cast<float>(flat));
+            } else if (player_.flying) add("custom/fly_one_cm", flat * 100.0);
             else if (player_.onGround) {
-                if (player_.sprinting) add("custom/sprint_one_cm", flat * 100.0);
+                if (player_.sprinting) {
+                    add("custom/sprint_one_cm", flat * 100.0);
+                    causeExhaustion(0.1f * static_cast<float>(flat));
+                }
                 else if (player_.sneaking) add("custom/crouch_one_cm", flat * 100.0);
                 else add("custom/walk_one_cm", flat * 100.0);
             }
@@ -416,6 +428,7 @@ void GameSession::respawn() {
     vitals_.health = vitals_.maxHealth;
     vitals_.food = 20;
     vitals_.saturation = 5.0f;
+    exhaustion_ = 0.0f;
     invulnerableTime_ = hurtTime_ = regenTimer_ = 0;
     lastHurt_ = 0.0f;
     lastHealthShown_ = displayHealth_ = static_cast<int>(vitals_.maxHealth);
@@ -427,15 +440,41 @@ void GameSession::respawn() {
     if (dimension_ != 0) travelTo(0, spawn_[0], spawn_[1], spawn_[2], false);  // (home: the Overworld)
 }
 
-// The part of a game tick that is about health: the protection and the tilt run down, and a player who is fed (18 or more of food) heals half a
-// heart every four seconds (FoodData.tick's slow healing; the fast one needs food to burn, and none is used up yet).
+void GameSession::causeExhaustion(float amount) {
+    if (survivalBars() && !dead_ && !remote_) exhaustion_ += amount;
+}
+
+// The part of a game tick that is about health: the protection and the tilt run down, then FoodData.tick (read from 26.3's bytecode): what the player does tires them (exhaustion: jumping,
+// sprinting, swimming, mining, hitting, being hurt), and every 4 of it takes a point of saturation, then of food. A player with a full food bar and some saturation left heals fast (a sixth of
+// the saturation, up to a whole heart, every half second, which costs the saturation); one with 18 or more food heals a heart every four seconds; one with none starves, a heart every
+// four seconds, down to half a heart on easy and one heart on normal (hard kills).
 void GameSession::tickHealth() {
     if (invulnerableTime_ > 0) --invulnerableTime_;
     if (hurtTime_ > 0) --hurtTime_;
     if (!survivalBars() || dead_ || remote_) return;  // (on a server the health is what it says)
-    if (vitals_.health > 0.0f && vitals_.health < vitals_.maxHealth && vitals_.food >= 18 && gameRuleOn("natural_health_regeneration")) {
+    if (exhaustion_ > 4.0f) {
+        exhaustion_ -= 4.0f;
+        if (vitals_.saturation > 0.0f) vitals_.saturation = std::max(vitals_.saturation - 1.0f, 0.0f);
+        else if (difficulty_ != 0) vitals_.food = std::max(vitals_.food - 1, 0);
+    }
+    const bool regeneration = gameRuleOn("natural_health_regeneration");
+    const bool isHurt = vitals_.health > 0.0f && vitals_.health < vitals_.maxHealth;
+    if (regeneration && vitals_.saturation > 0.0f && isHurt && vitals_.food >= 20) {
+        if (++regenTimer_ >= 10) {
+            const float spent = std::min(vitals_.saturation, 6.0f);
+            vitals_.health = std::min(vitals_.maxHealth, vitals_.health + spent / 6.0f);
+            exhaustion_ += spent;
+            regenTimer_ = 0;
+        }
+    } else if (regeneration && vitals_.food >= 18 && isHurt) {
         if (++regenTimer_ >= 80) {
             vitals_.health = std::min(vitals_.maxHealth, vitals_.health + 1.0f);
+            exhaustion_ += 6.0f;
+            regenTimer_ = 0;
+        }
+    } else if (vitals_.food <= 0) {
+        if (++regenTimer_ >= 80) {
+            if (vitals_.health > 10.0f || difficulty_ == 3 || (vitals_.health > 1.0f && difficulty_ == 2)) hurt(1.0f, true, true);  // (starving ignores armor)
             regenTimer_ = 0;
         }
     } else {

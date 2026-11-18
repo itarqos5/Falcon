@@ -63,6 +63,7 @@ void GameSession::attackMob(int id) {
     const bool sprintHit = strong && player_.sprinting;
     const std::string sound = crit ? "entity.player.attack.crit" : strong ? (player_.sprinting ? "entity.player.attack.knockback" : "entity.player.attack.strong") : "entity.player.attack.weak";
     playWorldSound(sound, SoundSource::Players, 1.0f, 1.0f);
+    causeExhaustion(0.1f);  // (Player.attack)
     if (mobSim_) {
         std::string species;  // (what the blow killed, for the statistics)
         bool wasAlive = false;
@@ -106,6 +107,7 @@ void GameSession::breakBlockAt(int x, int y, int z, bool survival) {
     swingArm();
     if (registry_->isAir(broken)) return;
     ++stats_["mined/" + registry_->type(broken).name];
+    if (survival) causeExhaustion(0.005f);  // (Player.destroyBlock's food exhaustion)
     {  // the break sound of the block, heard where it was (a fire put out hisses instead)
         const std::array<double, 3> where = {x + 0.5, y + 0.5, z + 0.5};
         const BlockType& type = registry_->type(broken);

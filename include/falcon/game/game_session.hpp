@@ -286,6 +286,7 @@ private:
     void tickBody();
     void loadSave();
     void tickHealth();
+    void causeExhaustion(float amount);  // FoodData.addExhaustion (survival, singleplayer): the food bar goes down as the player does things
     void pickUpItems();
     void tickStatistics(bool jumped);     // the time, the distances and, every second, the advancements (game_session_player.cpp)
     void checkAdvancements();
@@ -461,7 +462,8 @@ private:
     int hurtTime_ = 0;           // ticks of the camera's tilt after a hit
     float lastHurt_ = 0.0f;      // the damage of the last hit
     float hurtDirection_ = 0.0f; // which way the view tilts, degrees (0 or 180)
-    int regenTimer_ = 0;
+    int regenTimer_ = 0;       // FoodData.tickTimer: the slow and the fast healing and the starving count in it
+    float exhaustion_ = 0.0f;  // FoodData.exhaustionLevel: at more than 4 the saturation (then the food) goes down by one
     bool dead_ = false;
     bool deathRequested_ = false;
     // The hearts blink after a hit (Hud.extractPlayerHealth's own bookkeeping).
