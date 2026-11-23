@@ -670,10 +670,33 @@ void test_bundled_client() {
     writeFileAtomic(*installed, "damaged");
     CHECK(!bundledClientInstalled(root, blob));
     CHECK(installBundledClient(root, blob).ok() && bundledClientInstalled(root, blob));
-    fs::create_directories(root / "client" / "oldversion");
-    writeFileAtomic(root / "client" / "oldversion" / kClientName, "old");
+    const std::string oldFolder = sha256Hex("an older client").substr(0, 16);
+    fs::create_directories(root / "client" / oldFolder);
+    writeFileAtomic(root / "client" / oldFolder / kClientName, "old");
+    fs::create_directories(root / "client" / "aebb7bb00fc1");  // a folder of a launcher that named them after the SHA-1
+    writeFileAtomic(root / "client" / "aebb7bb00fc1" / kClientName, "older");
+    fs::create_directories(root / "client" / "keep-me");
+    writeFileAtomic(root / "client" / "keep-me" / "notes.txt", "not a client folder");
     writeFileAtomic(*installed, "damaged again");
-    CHECK(installBundledClient(root, blob).ok() && !fs::exists(root / "client" / "oldversion"));
+    CHECK(installBundledClient(root, blob).ok() && !fs::exists(root / "client" / oldFolder) && !fs::exists(root / "client" / "aebb7bb00fc1"));
+    // only folders named like one of our client builds are cleaned up: nothing else a player keeps in there is touched
+    CHECK(fs::exists(root / "client" / "keep-me" / "notes.txt"));
+    // the folder is named after the start of the client's SHA-256 (it used to be its SHA-1)
+    const std::string id = installed->parent_path().filename().string();
+    CHECK(id.size() == 16 && id == sha256Hex(exe).substr(0, 16));
+}
+
+void test_signature_report() {
+#ifdef _WIN32
+    // An unsigned file is reported as unsigned (a development build), never as signed: nothing here can invent a signature.
+    const fs::path folder = freshFolder("signature");
+    const fs::path file = folder / "unsigned.exe";
+    writeFileAtomic(file, "MZ-not-really-an-exe");
+    const FileSignature plain = verifyFileSignature(file, "Falcon project");
+    CHECK(plain.state == FileSignature::State::Unsigned && plain.publisher.empty() && plain.error.empty());
+    // A file that is not there cannot be verified, and is not silently accepted.
+    CHECK(verifyFileSignature(folder / "missing.exe").state == FileSignature::State::Invalid);
+#endif
 }
 
 // ---- the controller ------------------------------------------------------------------------------------------------------------------
@@ -1443,6 +1466,7 @@ int main() {
     test_game_file_install();
     test_game_data_dir();
     test_bundled_client();
+    test_signature_report();
     test_messages();
     test_mock_states();
     test_mock_flow();

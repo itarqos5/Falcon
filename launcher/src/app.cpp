@@ -29,6 +29,11 @@ extern char** environ;
 #ifndef FALCON_LAUNCHER_VERSION
 #define FALCON_LAUNCHER_VERSION "0.0.0"
 #endif
+// The publisher named when the launcher is built (-DFALCON_LAUNCHER_PUBLISHER=...): the client's signature must then be from it. Empty (the default,
+// and every build made before a certificate exists) means any valid signature is accepted, and an unsigned client is reported and allowed.
+#ifndef FALCON_LAUNCHER_PUBLISHER
+#define FALCON_LAUNCHER_PUBLISHER ""
+#endif
 
 namespace launcher {
 
@@ -698,6 +703,14 @@ void App::launchJob() {
     command += L" --size 1280x720";  // (an ordinary window with its system title bar, of a good size)
     logLine("starting the client; game data: " + (exportedData ? narrow(exportedData->wstring()) : std::string("none found")));
     mutate([&](json& s) { s["game"]["data"] = exportedData.has_value(); });
+    // The client is checked once more immediately before it runs: a valid Authenticode signature, and when the launcher was built naming a publisher
+    // (FALCON_LAUNCHER_PUBLISHER) the signer must be that publisher. A development build has no certificate; that is reported and allowed. A signature
+    // that is present but does not verify, or one from somebody else, stops the launch: the file on disk is then not the client this launcher carries.
+    const FileSignature clientSignature = verifyFileSignature(*exe, FALCON_LAUNCHER_PUBLISHER);
+    if (clientSignature.state == FileSignature::State::Invalid) {
+        return setGameError({"untrusted", "The Falcon client could not be verified (" + clientSignature.error + "). Nothing was started."});
+    }
+    logLine(clientSignature.state == FileSignature::State::Signed ? "client signed by " + clientSignature.publisher : std::string("client is unsigned (a development build)"));
     STARTUPINFOW si{};
     si.cb = sizeof(si);
     PROCESS_INFORMATION pi{};
