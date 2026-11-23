@@ -27,6 +27,13 @@ Tests (no window, no network, a temporary folder): `build\launcher\falcon_launch
 
 `FalconLauncher.exe --selftest-signin` checks the real sign-in window without showing it and without any network: it opens it on the redirect address, checks that the window catches it and closes, then opens another and cancels it. Exit code 0 when both work.
 
+## Releases
+
+`tools\release_windows.ps1` builds, signs and packages a Windows release, in the only order that keeps the embedded client's signature
+valid; [docs/RELEASE.md](../docs/RELEASE.md) has the steps, the certificate notes, and the download layout (`FalconLauncher-Windows-x64.zip`
+with `SHA256SUMS.txt`). The launcher checks the client's SHA-256 and Authenticode signature before starting it, and checks that the
+WebView2 installer it downloads is signed by Microsoft before running it.
+
 ## How sign-in works, and what that means
 
 The player signs in on `login.live.com` in a private browsing window of the launcher (nothing of the login is kept in the launcher's profile). When Microsoft sends the page on to `https://login.live.com/oauth20_desktop.srf?code=…`, the launcher catches that navigation before anything loads, takes the one-time code from the address, and trades it for tokens. From there: Xbox Live → XSTS → Minecraft services → entitlements and profile.

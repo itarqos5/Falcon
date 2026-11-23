@@ -53,6 +53,13 @@ The one thing of the game's that is published is not in the repository but on th
 game's data by an exporter, and contain no textures, sounds or code. The launcher downloads them and refuses a zip whose SHA-256 is not the one it carries (`launcher/src/data_tables.hpp`;
 `tools/make_data_tables.ps1` makes the zip and writes the hash). Before 1.2.0 they had to come from another launcher's export on the same PC.
 
+## Downloading
+
+The launcher is on the [GitHub release](https://github.com/itarqos5/Falcon/releases): take `FalconLauncher-Windows-x64.zip`
+(windows) or `FalconLauncher-linux-x86_64` (linux), and check them against `SHA256SUMS.txt` (or the `.sha256` file next to the Linux
+one). A release page that offers a signature is signed with an ordinary code-signing certificate; the file's Properties show who
+signed it. `docs/RELEASE.md` describes how the packages are built, signed and verified.
+
 ## Game assets
 
 Falcon does **not** ship or modify any Minecraft files and never opens the client jar. It reads
