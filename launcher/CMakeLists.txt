@@ -2,7 +2,7 @@
 #
 #   cmake --build --preset launcher        builds dist-launcher/FalconLauncher(.exe) (and the client and the UI it embeds)
 #
-# Not part of the ordinary build: it needs Node (for the React UI) and builds the game first.
+# Not part of the ordinary build: it needs Node (for the React UI) and builds the game first. See launcher/README.md.
 if(NOT WIN32 AND NOT (UNIX AND NOT APPLE))
     return()
 endif()
@@ -10,6 +10,12 @@ endif()
 # The Microsoft account's Azure application (client) id. Without one the launcher builds and runs but cannot sign anyone in: see
 # launcher/README.md ("Registering the Azure app"). It can also be given at run time (FALCON_MS_CLIENT_ID, or launcher.json).
 set(FALCON_LAUNCHER_MS_CLIENT_ID "" CACHE STRING "Azure application (client) id used for the Microsoft sign-in")
+
+# The publisher the embedded client's Authenticode signature must be from, once releases are signed:
+#   cmake --preset release -DFALCON_LAUNCHER_PUBLISHER="Falcon project"
+# Left empty (the default, and every build made before a certificate exists) any valid signature is accepted, and an unsigned client is reported in
+# the log and allowed. It has to match the signer name the certificate shows, which is what verifyFileSignature() reads.
+set(FALCON_LAUNCHER_PUBLISHER "" CACHE STRING "Authenticode signer the Falcon client must be signed by (empty: any valid signature; unsigned allowed)")
 
 # ---------------------------------------------------------------------------
 # WebView2 SDK (Windows): the headers and the 190 KB loader DLL (which finds the runtime Windows already has).
@@ -49,12 +55,14 @@ add_library(falcon_launcher_core STATIC EXCLUDE_FROM_ALL
 target_include_directories(falcon_launcher_core PUBLIC src "${CMAKE_SOURCE_DIR}/include")
 target_compile_definitions(falcon_launcher_core PUBLIC
     FALCON_LAUNCHER_MS_CLIENT_ID="${FALCON_LAUNCHER_MS_CLIENT_ID}"
+    FALCON_LAUNCHER_PUBLISHER="${FALCON_LAUNCHER_PUBLISHER}"
     FALCON_LAUNCHER_VERSION="${PROJECT_VERSION}")
 target_link_libraries(falcon_launcher_core PUBLIC nlohmann_json::nlohmann_json falcon_stb falcon_warnings)
 if(WIN32)
     target_sources(falcon_launcher_core PRIVATE src/http.cpp)  # WinHTTP
     target_compile_definitions(falcon_launcher_core PUBLIC UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX _WIN32_WINNT=0x0A00)
-    target_link_libraries(falcon_launcher_core PUBLIC winhttp bcrypt crypt32 ole32 shell32 shlwapi uuid advapi32)
+    # (wintrust: the Authenticode check of the extracted client and of the WebView2 installer, src/setup.cpp)
+    target_link_libraries(falcon_launcher_core PUBLIC winhttp bcrypt crypt32 ole32 shell32 shlwapi uuid advapi32 wintrust)
 else()
     # HTTP/1.1 over OpenSSL (the part the game shares: src/platform/tls_http.cpp), SHA-1 and SHA-256 on OpenSSL, the folders by system.
     find_package(Threads REQUIRED)
@@ -124,6 +132,9 @@ PRODUCTVERSION ${PROJECT_VERSION_MAJOR},${PROJECT_VERSION_MINOR},${PROJECT_VERSI
             VALUE \"OriginalFilename\", \"FalconLauncher.exe\"
             VALUE \"FileVersion\", \"${PROJECT_VERSION}\"
             VALUE \"ProductVersion\", \"${PROJECT_VERSION}\"
+            VALUE \"CompanyName\", \"Falcon project\"
+            VALUE \"LegalCopyright\", \"Copyright (c) 2026 Falcon contributors. Apache License 2.0.\"
+            VALUE \"Comments\", \"https://github.com/itarqos5/Falcon\"
         }
     }
     BLOCK \"VarFileInfo\"
@@ -148,7 +159,11 @@ PRODUCTVERSION ${PROJECT_VERSION_MAJOR},${PROJECT_VERSION_MINOR},${PROJECT_VERSI
     if(MINGW)
         target_link_options(falcon_launcher PRIVATE -static)
     endif()
-    if(NOT MSVC)
+    if(COMMAND falcon_windows_link_options)
+        falcon_windows_link_options(falcon_launcher)  # (Windows header versions, fixed timestamp: see the root CMakeLists.txt)
+    endif()
+    if(NOT MSVC AND FALCON_STRIP)
+        # Same switch as the game's exe: -DFALCON_STRIP=OFF keeps a launcher whose symbols a debugger (and the release process) can read.
         target_link_options(falcon_launcher PRIVATE $<$<CONFIG:Release>:-s>)
     endif()
 

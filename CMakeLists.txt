@@ -102,6 +102,9 @@ FetchContent_MakeAvailable(glfw nlohmann_json stb_image stb_image_write stb_vorb
 # The Vulkan renderer (src/vulkan/): only the headers are needed to build it. The loader is looked for when the game starts, so a PC without Vulkan still runs the game on OpenGL.
 option(FALCON_VULKAN "Build the Vulkan renderer (the Graphics API setting's second choice)" ON)
 option(FALCON_STRIP "Strip the symbols from the Release exes (OFF for a build that tools/resolve_samples.mjs can read the profiler's samples of)" ON)
+# A fixed PE timestamp (and the header versions every Windows program normally carries), so the same sources and the same compiler give the same
+# bytes: a hash published with a release then means one file, not "another build of the same code".
+option(FALCON_REPRODUCIBLE "Give the Windows exes a fixed timestamp, so a build is reproducible byte for byte" ON)
 if(FALCON_VULKAN)
     FetchContent_Declare(vulkan_headers
         GIT_REPOSITORY https://github.com/KhronosGroup/Vulkan-Headers.git
@@ -169,6 +172,20 @@ if(NOT MSVC)
     target_compile_options(falcon_build_flags INTERFACE -pipe -ffunction-sections -fdata-sections)
     target_link_options(falcon_build_flags INTERFACE -Wl,--gc-sections)
 endif()
+
+# The PE header Windows programs normally carry: an OS and subsystem version of 6.1 instead of GNU ld's 4.0/5.2 (a value from before Windows XP), and a
+# timestamp taken from the content rather than the clock. Neither touches the code; both make the file look like (and be) an ordinary program that can be
+# built twice to the same bytes. MSVC sets the same fields from the SDK defaults.
+function(falcon_windows_link_options target)
+    if(NOT WIN32 OR MSVC)
+        return()
+    endif()
+    target_link_options(${target} PRIVATE -Wl,--major-os-version,6 -Wl,--minor-os-version,1)
+    target_link_options(${target} PRIVATE -Wl,--major-subsystem-version,6 -Wl,--minor-subsystem-version,1)
+    if(FALCON_REPRODUCIBLE)
+        target_link_options(${target} PRIVATE -Wl,--no-insert-timestamp)
+    endif()
+endfunction()
 
 # ---------------------------------------------------------------------------
 # Generated version header
@@ -518,6 +535,7 @@ if(NOT MSVC)
         target_link_options(falcon_client PRIVATE $<$<CONFIG:Release>:-s>)
     endif()
 endif()
+falcon_windows_link_options(falcon_client)
 
 # Every build ends by replacing dist/ with the fresh game, wherever the intermediates live.
 set(FALCON_DIST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/dist" CACHE PATH "Where the finished game is placed")
@@ -575,6 +593,9 @@ PRODUCTVERSION ${PROJECT_VERSION_MAJOR},${PROJECT_VERSION_MINOR},${PROJECT_VERSI
             VALUE \"OriginalFilename\", \"Falcon.exe\"
             VALUE \"FileVersion\", \"${PROJECT_VERSION}\"
             VALUE \"ProductVersion\", \"${PROJECT_VERSION}\"
+            VALUE \"CompanyName\", \"Falcon project\"
+            VALUE \"LegalCopyright\", \"Copyright (c) 2026 Falcon contributors. Apache License 2.0.\"
+            VALUE \"Comments\", \"https://github.com/itarqos5/Falcon\"
         }
     }
     BLOCK \"VarFileInfo\"
@@ -610,6 +631,7 @@ if(NOT MSVC)
         target_link_options(falcon_client_licensed PRIVATE $<$<CONFIG:Release>:-s>)
     endif()
 endif()
+falcon_windows_link_options(falcon_client_licensed)
 if(WIN32 AND NOT FALCON_CONSOLE)
     if(MSVC)
         target_link_options(falcon_client_licensed PRIVATE /SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup)
