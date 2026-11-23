@@ -342,7 +342,10 @@ void installHostNatives(Vm& vm) {
         if (!allowedPath(v, textOf(v, a[0].a), false, p)) return valueOfLong(0);
         const auto t = fs::last_write_time(p, ec);
         if (ec) return valueOfLong(0);
-        return valueOfLong(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::clock_cast<std::chrono::system_clock>(t).time_since_epoch()).count());
+        // By how long ago it was changed, as level_summary.cpp and log.cpp do it: std::chrono::clock_cast is C++20 but newer than GCC 12, which builds the Linux client.
+        const auto age = fs::file_time_type::clock::now() - t;
+        const auto system = std::chrono::system_clock::now() - std::chrono::duration_cast<std::chrono::system_clock::duration>(age);
+        return valueOfLong(std::chrono::duration_cast<std::chrono::milliseconds>(system.time_since_epoch()).count());
     });
     fsnat("absolute", "(Ljava/lang/String;)Ljava/lang/String;", [](Vm& v, Value* a) {
         fs::path p(textOf(v, a[0].a));
