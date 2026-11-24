@@ -3,6 +3,8 @@
 #include "falcon/game/game_options_screen.hpp"
 
 #include <memory>
+#include <optional>
+#include <string>
 
 namespace falcon {
 
@@ -19,6 +21,10 @@ public:
 
     // Sets the options a graphics preset controls (Fast, Fancy or Fabulous!), the LODs among them.
     static void applyPreset(GameOptions& options, GraphicsPreset preset);
+    // Every option at what draws the highest frame rate and holds the least memory: the render distance and the simulation at their least, no LODs (their tiles are
+    // the most memory the world holds), no clouds, no smooth lighting, no mipmaps, no frame rate cap and no vsync, and the small touches (shadows, the vignette,
+    // the chunk fade) off. What the Developer page's "Highest FPS Test" button applies.
+    static void applyHighestFps(GameOptions& options);
 
     void render(GuiGraphics& graphics, int mouseX, int mouseY, const FrameTime& time) override;
     bool mouseClicked(double x, double y, int button) override;
@@ -43,6 +49,11 @@ private:
     void undo();
     void selectPage(int page);
     void searchChanged(const std::string& query);
+    // The Developer page: how the last few hundred frames were spent (which task takes the most of an average frame, the average, the 1% and 0.1% lows, the LODs, the
+    // chunks and the memory), and the buttons of the "Highest FPS Test" (which strips every setting to its least and measures again).
+    void drawDeveloper(GuiGraphics& graphics);
+    std::optional<GameOptions> highestFpsBackup_;  // the options as they were before the test (empty: it has not been run)
+    std::string developerNote_;                    // the panel's last word (what was applied, what was restored)
 
     ScreenServices& services_;
     std::unique_ptr<VideoSettingsModel> model_;

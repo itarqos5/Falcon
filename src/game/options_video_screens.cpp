@@ -1,6 +1,8 @@
 #include "falcon/game/options_video_screens.hpp"
 
+#include "falcon/game/game_session.hpp"
 #include "falcon/game/key_binds_screen.hpp"
+#include "falcon/platform/memory.hpp"
 #include "falcon/render/lod_renderer.hpp"
 #include "falcon/util/text_util.hpp"
 
@@ -58,6 +60,14 @@ struct VideoSettingsModel {
         Option* option;
         int y;
     };
+    // A button of the Developer page's panel (drawn and hit-tested by the screen: it is not an option of the list).
+    struct DevButton {
+        std::string label;
+        int action = 0;  // 0: restart the counts, 1: the Highest FPS Test, 2: put the settings back
+        int x = 0, y = 0, w = 0, h = 0;
+        bool enabled = true;
+    };
+    std::vector<DevButton> devButtons;
 
     GameOptions pending;  // the options as the screen has them, until Apply
     std::vector<Page> pages;
@@ -206,11 +216,12 @@ struct Builder {
 void buildPages(VideoSettingsModel& m, ScreenServices& services, const std::function<std::string(const std::string&)>& tr) {
     using falcon::formatLanguageString;
     Builder b{m, services, tr};
-    m.pages.resize(4);
+    m.pages.resize(5);
     m.pages[0].name = "Video";
     m.pages[1].name = "Graphics";
     m.pages[2].name = "LODs";
     m.pages[3].name = "Other";
+    m.pages[4].name = "Developer";  // (no options: the screen draws a panel of what the frames cost, see drawDeveloper)
     const auto chunks = [tr](int n) { return formatLanguageString(tr("options.chunks"), {std::to_string(n)}); };
     const auto offOr = [tr](int n) { return n == 0 ? tr("options.off") : std::to_string(n); };
 
@@ -449,6 +460,9 @@ std::vector<std::string> wrap(const GuiGraphics& g, const std::string& text, int
     return lines;
 }
 
+// The page that is a panel rather than a list of options.
+constexpr int kDeveloperPage = 4;
+
 }  // namespace
 
 VideoSettingsScreen::VideoSettingsScreen(ScreenNavigator& navigator, ScreenServices& services)
@@ -506,6 +520,39 @@ void VideoSettingsScreen::applyPreset(GameOptions& o, GraphicsPreset preset) {
     o.lodChunkRadius = r.lodRadius;
     o.lodDetail = r.lodDetail;
     o.graphicsPreset = preset;
+}
+
+void VideoSettingsScreen::applyHighestFps(GameOptions& o) {
+    o.renderDistance = 2;  // (the least the world can be drawn at, and the least block data in memory)
+    o.simulationDistance = 5;
+    o.biomeBlendRadius = 0;
+    o.prioritizeChunkUpdates = ChunkUpdates::None;
+    o.ambientOcclusion = false;  // (the light is baked into the chunks' vertices: off is the cheap mesh)
+    o.cloudStatus = CloudStatus::Off;
+    o.cloudRange = 2;
+    o.particles = ParticleStatus::Minimal;
+    o.weatherRadius = 3;
+    o.entityShadows = false;
+    o.entityDistanceScaling = 0.5;
+    o.mipmapLevels = 0;
+    o.textureFiltering = TextureFiltering::None;
+    o.maxAnisotropyBit = 1;
+    o.cutoutLeaves = false;  // solid leaves: no cutout pass in their shader
+    o.improvedTransparency = false;
+    o.menuBackgroundBlurriness = 0;
+    o.lodsEnabled = false;  // (their tiles are given back: the most memory a world holds)
+    o.lodChunkRadius = kLodMinChunks;
+    o.lodDetail = kLodDetailLow;
+    o.enableVsync = false;  // (the frame is not held back for the display)
+    o.framerateLimit = 260;
+    o.vignette = false;
+    o.attackIndicator = AttackIndicator::Off;
+    o.chunkSectionFadeInTime = 0.0;
+    o.showAutosaveIndicator = false;
+    o.bobView = false;
+    o.screenEffectScale = 0.0;
+    o.fovEffectScale = 0.0;
+    o.graphicsPreset = GraphicsPreset::Custom;
 }
 
 // ---- layout and actions ----
@@ -592,7 +639,15 @@ void VideoSettingsScreen::apply() {
     });
 }
 
-void VideoSettingsScreen::undo() { model_->pending = services_.options; }
+void VideoSettingsScreen::undo() {
+    if (highestFpsBackup_) {  // the Highest FPS Test is taken back first: it is what the settings were before anything else
+        services_.options = *highestFpsBackup_;
+        highestFpsBackup_.reset();
+        developerNote_ = "Settings restored.";
+        if (services_.session != nullptr) services_.session->resetFrameStats();
+    }
+    model_->pending = services_.options;
+}
 
 void VideoSettingsScreen::onClose() {
     if (model_->searching()) {  // Escape clears the search first
@@ -605,6 +660,108 @@ void VideoSettingsScreen::onClose() {
 }
 
 // ---- drawing the screen ----
+
+void VideoSettingsScreen::drawDeveloper(GuiGraphics& g) {
+    VideoSettingsModel& m = *model_;
+    const Layout& l = layout_;
+    const int left = l.listX + 4, right = l.listX + l.listWidth - 8;
+    const int bottom = l.listY + l.listHeight;
+    const int buttonsY = bottom - kWidgetHeight - 4;
+    const int textBottom = buttonsY - 8;
+    int y = l.listY + 4;
+    const auto line = [&](const std::string& s, std::uint32_t colour) {
+        if (y + 10 <= textBottom) g.text(s, static_cast<float>(left), static_cast<float>(y), colour);
+        y += 10;
+    };
+    const auto heading = [&](const char* s) {
+        y += 5;
+        line(s, pack(1.0f, 0.62f, 0.5f, 1.0f));
+    };
+    const auto row = [&](const std::string& name, const std::string& value, std::uint32_t colour) {
+        if (y + 10 <= textBottom) {
+            g.text(name, static_cast<float>(left), static_cast<float>(y), colour);
+            g.text(value, static_cast<float>(right - g.textWidth(value)), static_cast<float>(y), colour);
+        }
+        y += 10;
+    };
+
+    g.enableScissor(l.listX, l.listY, l.listX + l.listWidth, bottom);
+    GameSession* session = services_.session;
+    const bool lodsOn = services_.options.lodsEnabled;
+    LodStats lod;
+    if (session == nullptr) {
+        line("No world is open: the counts begin when one is.", kGrey);
+    } else {
+        const FrameStats& frames = session->frameStats();
+        WorldRenderer& world = session->renderer();
+        lod = world.lodStats();
+        heading("Frame");
+        row("Average", fixed(frames.averageFps(), 1) + " fps (" + fixed(frames.averageMs(), 2) + " ms)", kWhite);
+        row("1% low", fixed(frames.percentileFps(0.01), 1) + " fps (" + fixed(frames.percentileMs(0.01), 2) + " ms)", kWhite);
+        row("0.1% low", fixed(frames.percentileFps(0.001), 1) + " fps (" + fixed(frames.percentileMs(0.001), 2) + " ms)", kWhite);
+        row("Cost", "cpu " + fixed(session->cpuMillis(), 2) + " ms, gpu " + fixed(world.gpuMillis(), 2) + " ms", kWhite);
+        row("Samples", std::to_string(frames.count()) + " frames", kGrey);
+        heading("What the average frame is spent on");
+        const FramePhaseTimes phases = frames.averagePhases();
+        const int heaviest = frames.count() > 0 ? frames.heaviestPhase() : -1;
+        const double total = std::max(frames.averageMs(), 1.0e-3);
+        for (int p = 0; p < kFramePhaseCount; ++p) {
+            const double ms = phases[static_cast<std::size_t>(p)];
+            const int share = static_cast<int>(std::lround(100.0 * ms / total));
+            row(kFramePhaseNames[p], fixed(ms, 2) + " ms  " + std::to_string(share) + "%" + (p == heaviest ? "  most" : ""), p == heaviest ? 0xFFFFD27Fu : kWhite);
+        }
+        heading("LODs");
+        if (!lodsOn) {
+            line("Off: no tile is made or drawn.", kGrey);
+        } else {
+            row("Tiles", std::to_string(lod.tilesDrawn) + " drawn of " + std::to_string(lod.tilesLoaded) + " loaded (" + std::to_string(lod.tilesBuilding) + " building)", kWhite);
+            row("Cost", std::to_string(lod.levels) + " levels, " + fixed(static_cast<double>(lod.trianglesDrawn) / 1.0e6, 2) + " M triangles, " + fixed(lod.megabytes, 1) + " MB", kWhite);
+            row("Main thread", fixed(lod.updateMs, 2) + " ms update, " + fixed(lod.drawMs, 2) + " ms draw", kWhite);
+            row("Workers", fixed(lod.jobMs, 2) + " ms a tile job, " + std::to_string(lod.workers) + " threads", kWhite);
+        }
+        heading("Chunks");
+        const RenderStats chunks = world.stats();
+        row("Loaded", std::to_string(chunks.chunksLoaded) + " chunks, " + std::to_string(chunks.sectionsDrawn) + " of " + std::to_string(chunks.sectionsLoaded) + " sections drawn", kWhite);
+        row("Jobs", std::to_string(chunks.jobsWaiting) + " waiting, " + std::to_string(chunks.jobsInFlight) + " in flight, " + std::to_string(chunks.drawCalls) + " draw calls", kWhite);
+        const auto mib = [](std::size_t bytes) { return fixed(static_cast<double>(bytes) / 1048576.0, 1); };
+        row("Memory", "process " + mib(processWorkingSetBytes()) + " MB, blocks " + mib(chunks.levelBytes) + " MB", kWhite);
+        row("", "meshes " + mib(chunks.meshBytes) + " MB, pictures " + mib(chunks.textureBytes) + " MB" + (lodsOn ? ", LODs " + fixed(lod.megabytes, 1) + " MB" : ""), kWhite);
+        heading("Settings");
+        const GameOptions& o = services_.options;
+        line(std::to_string(o.renderDistance) + " chunks, LODs " + (o.lodsEnabled ? std::to_string(o.lodChunkRadius) + " chunks" : std::string("off")) + ", clouds " +
+                 (o.cloudStatus == CloudStatus::Off ? "off" : o.cloudStatus == CloudStatus::Fast ? "fast" : "fancy") + ", lighting " + (o.ambientOcclusion ? "smooth" : "flat"),
+             kGrey);
+        line(std::string("vsync ") + (o.enableVsync ? "on" : "off") + ", cap " + (o.framerateLimit >= 260 ? std::string("off") : std::to_string(o.framerateLimit) + " fps") + ", leaves " +
+                 (o.cutoutLeaves ? "cutout" : "solid"),
+             kGrey);
+    }
+    heading("Highest FPS Test");
+    line("Every setting to its least (2 chunks, no LODs, no clouds, flat lighting) and a fresh count: what is above is then the highest the game can make.", kGrey);
+    g.disableScissor();
+
+    // The panel's own buttons: the test, what puts the settings back afterwards, and a fresh count.
+    m.devButtons.clear();
+    const auto addButton = [&](const char* label, int action, bool enabled) {
+        VideoSettingsModel::DevButton b;
+        b.label = label;
+        b.action = action;
+        b.enabled = enabled;
+        b.w = g.textWidth(label) + 16;
+        b.h = kWidgetHeight;
+        b.y = buttonsY;
+        m.devButtons.push_back(b);
+    };
+    addButton("Reset counts", 0, session != nullptr);
+    addButton("Test", 1, true);
+    addButton("Restore", 2, highestFpsBackup_.has_value());
+    int bx = left;
+    for (auto& b : m.devButtons) {
+        b.x = bx;
+        bx += b.w + 6;
+    }
+    for (const auto& b : m.devButtons) drawButton(g, b.x, b.y, b.w, b.h, b.label, b.enabled, false, true, 0.0f);
+    if (!developerNote_.empty()) g.text(developerNote_, static_cast<float>(left), static_cast<float>(buttonsY - 11), kGrey);
+}
 
 void VideoSettingsScreen::render(GuiGraphics& g, int mouseX, int mouseY, const FrameTime& time) {
     VideoSettingsModel& m = *model_;
@@ -627,7 +784,13 @@ void VideoSettingsScreen::render(GuiGraphics& g, int mouseX, int mouseY, const F
         drawButton(g, kMargin, y, kPageWidth, kWidgetHeight, m.pages[static_cast<std::size_t>(i)].name, true, !m.searching() && i == m.page, false, m.buttonHover[static_cast<std::size_t>(i)]);
     }
 
-    // ---- the list ----
+    // ---- the list (or the Developer page's own panel) ----
+    Option* hovered = nullptr;
+    const bool developer = !m.searching() && m.page == kDeveloperPage;
+    if (developer) {
+        m.rows.clear();  // (the panel's rows are not options: a click there is not a click on one)
+        drawDeveloper(g);
+    } else {
     const std::vector<VideoSettingsModel::Block> blocks = m.blocksOf();
     const int itemWidth = l.listWidth - 7;
     int length = 0;
@@ -642,7 +805,7 @@ void VideoSettingsScreen::render(GuiGraphics& g, int mouseX, int mouseY, const F
     g.enableScissor(l.listX, l.listY, l.listX + l.listWidth, l.listY + l.listHeight);
     int rowTop = l.listY - static_cast<int>(m.scroll);
     const bool listHot = mouseX >= l.listX && mouseX < l.listX + itemWidth && mouseY >= l.listY && mouseY < l.listY + l.listHeight;
-    Option* hovered = m.dragging;
+    hovered = m.dragging;
     for (const auto& block : blocks) {
         if (!block.title.empty()) {
             g.text(block.title, static_cast<float>(l.listX + 8), static_cast<float>(rowTop + 4), kWhite, true, false, true);
@@ -738,6 +901,8 @@ void VideoSettingsScreen::render(GuiGraphics& g, int mouseX, int mouseY, const F
         g.fill(x, barY, x + 3, barY + bar, pack(0.3f, 0.0f, 0.0f, 0.6f));
     }
 
+    }
+
     // ---- the search bar and the buttons ----
     {
         const bool focused = search_ != nullptr && search_->focused;
@@ -821,6 +986,31 @@ bool VideoSettingsScreen::mouseClicked(double x, double y, int button) {
             selectPage(i);
             return true;
         }
+    }
+    // The Developer page's panel: its own buttons, and nothing else in the list area.
+    if (!m.searching() && m.page == kDeveloperPage) {
+        for (const VideoSettingsModel::DevButton& b : m.devButtons) {
+            if (!b.enabled || x < b.x || x >= b.x + b.w || y < b.y || y >= b.y + b.h) continue;
+            navigator_.playButtonClick();
+            if (b.action == 0) {
+                if (services_.session != nullptr) services_.session->resetFrameStats();
+                developerNote_ = "Counts restarted.";
+            } else if (b.action == 1) {
+                if (!highestFpsBackup_) highestFpsBackup_ = services_.options;
+                applyHighestFps(services_.options);
+                m.pending = services_.options;
+                if (services_.session != nullptr) services_.session->resetFrameStats();
+                developerNote_ = "Lowest settings applied: Restore puts them back.";
+            } else if (highestFpsBackup_) {
+                services_.options = *highestFpsBackup_;
+                highestFpsBackup_.reset();
+                m.pending = services_.options;
+                if (services_.session != nullptr) services_.session->resetFrameStats();
+                developerNote_ = "Settings restored.";
+            }
+            return true;
+        }
+        if (x >= l.listX && x < l.listX + l.listWidth && y >= l.listY && y < l.listY + l.listHeight) return true;
     }
     bool modified = false;
     m.forEachOption([&](Option& o) { modified |= o.read(m.pending) != o.read(services_.options); });

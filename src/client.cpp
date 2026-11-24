@@ -866,6 +866,15 @@ int Client::run() {
         }
         const bool activeSteering = session != nullptr && dynamic_cast<InGameScreen*>(screens.back().get()) != nullptr;
         window.setCursorCaptured(activeSteering);
+        // How the frame is spent, for the Developer page of the video settings: the world's update, its drawing, the HUD and the menus; whatever is left of the frame
+        // is the display (vsync) or the frame rate cap.
+        FramePhaseTimes framePhases{};
+        auto phaseMark = Clock::now();
+        const auto markPhase = [&framePhases, &phaseMark](FramePhase phase) {
+            const auto at = Clock::now();
+            framePhases[static_cast<std::size_t>(phase)] += std::chrono::duration<double, std::milli>(at - phaseMark).count();
+            phaseMark = at;
+        };
         if (session != nullptr) {
             // The inventory leaves the world running behind it (singleplayer does not pause for it): only the player cannot steer.
             const bool keepTicking = !activeSteering && screens.back()->keepsWorldTicking();
@@ -883,6 +892,7 @@ int Client::run() {
                 quitWorldRequested = true;
             }
         }
+        markPhase(kFrameUpdate);
         if (session != nullptr && session->ready() && !pendingGives.empty()) {  // --give
             for (const std::string& spec : pendingGives) {
                 if (!session->giveItem(spec)) falcon::log::line("--give: no item called '%s'\n", spec.c_str());
@@ -921,6 +931,7 @@ int Client::run() {
         gl::ClearColor(0.0f, 0.0f, 0.0f, 1.0f);
         gl::Clear(gl::COLOR_BUFFER_BIT | gl::DEPTH_BUFFER_BIT);
         if (session != nullptr) session->renderWorld(fbW, fbH);
+        markPhase(kFrameDraw);
         guiRenderer.begin(fbW, fbH, guiScale);
         graphics.beginFrame(guiWidth, guiHeight, fbW, fbH);
         screens.back()->render(graphics, static_cast<int>(std::floor(mouseX)),
@@ -935,6 +946,7 @@ int Client::run() {
             graphics.text(overlayMessage, 2.0f, static_cast<float>(guiHeight - 47), (fade << 24) | 0xFFFFFFu);
         }
         guiRenderer.end();
+        markPhase(kFrameGui);
         if (screenshotRequested) {
             screenshotRequested = false;
             const std::filesystem::path folder = gameDir / "screenshots";
@@ -984,6 +996,8 @@ int Client::run() {
             session->noteCpuMillis(std::chrono::duration<double, std::milli>(Clock::now() - now).count());
         }
         window.swapBuffers();
+        markPhase(kFramePresent);
+        if (session != nullptr) session->noteFrame(frameMillis, framePhases);
         {   // Without vsync and without a frame cap the CPU would queue frames far ahead of the graphics card: allow two (see FrameQueue).
             static const char* forcedAhead = std::getenv("FALCON_FRAME_AHEAD");  // (for tests: a number of frames, 0 = no limit, even in a hidden window)
             const bool uncapped = !window.background() && window.focused() && !gameOptions.enableVsync && gameOptions.framerateLimit >= 260;

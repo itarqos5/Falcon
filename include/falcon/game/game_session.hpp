@@ -6,6 +6,7 @@
 #include "falcon/game/advancements.hpp"
 #include "falcon/game/chat.hpp"
 #include "falcon/game/command_tree.hpp"
+#include "falcon/game/frame_stats.hpp"
 #include "falcon/game/screen_services.hpp"
 #include "falcon/game/hotbar_hud.hpp"
 #include "falcon/game/mining.hpp"
@@ -138,6 +139,13 @@ public:
         cpuMillis_ = cpuMillis_ == 0.0 ? ms : cpuMillis_ * 0.95 + ms * 0.05;
         if (benchmark_.running) benchmark_.cpu.push_back(static_cast<float>(ms));
     }
+    // One frame, start to start: how long it took and how much of it went to each task (the Developer page of the video settings reads the last few hundred).
+    void noteFrame(double frameMs, const FramePhaseTimes& phases) { frameStats_.record(frameMs, phases); }
+    [[nodiscard]] const FrameStats& frameStats() const { return frameStats_; }
+    void resetFrameStats() { frameStats_.reset(); }
+    [[nodiscard]] double fps() const { return fps_; }
+    [[nodiscard]] double frameMillis() const { return frameMillis_; }
+    [[nodiscard]] double cpuMillis() const { return cpuMillis_; }
 
     [[nodiscard]] Player& player() { return player_; }
     [[nodiscard]] WorldRenderer& renderer() { return renderer_; }
@@ -622,6 +630,7 @@ private:
     double cpuMillis_ = 0.0;
     double fpsAccumulated_ = 0.0;
     int fpsFrames_ = 0;
+    FrameStats frameStats_;
     bool pinnedPose_ = false;  // teleported: the camera stays where it was put
     bool trimPending_ = false;  // a burst of loading happened: give the memory it used back once things are quiet
     double quietSeconds_ = 0.0;
