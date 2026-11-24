@@ -49,6 +49,23 @@ json errorJson(const Error& e) { return json{{"code", e.code}, {"message", e.mes
 
 json stepJson(const char* id, const char* label) { return json{{"id", id}, {"label", label}, {"status", "pending"}, {"detail", ""}}; }
 
+// How long a full check of the account is good for (the token refreshed, and the entitlements and the profile read from Microsoft): a start inside that window goes straight
+// on. The check used to be made on every start, which is what made starting the game slow; the client is still given a fresh token, which it needs for its own check.
+constexpr std::int64_t kAccountCheckSeconds = 24 * 60 * 60;
+
+std::int64_t nowSeconds() { return std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count(); }
+
+// The account the last full check found, while that check is still fresh: what the home screen shows and what a launch goes with.
+bool freshAccount(const json& config, json& account) {
+    if (!config.contains("accountCheck") || !config["accountCheck"].is_object()) return false;
+    const json& cached = config["accountCheck"];
+    if (!cached.value("owns", false) || !cached.value("hasProfile", false)) return false;
+    if (nowSeconds() - cached.value("at", static_cast<std::int64_t>(0)) > kAccountCheckSeconds) return false;
+    account = json{{"name", cached.value("name", std::string())}, {"uuid", cached.value("uuid", std::string())}, {"owns", true}, {"hasProfile", true},
+                   {"avatar", cached.value("avatar", std::string())}};
+    return !account["name"].get<std::string>().empty();
+}
+
 json accountJson(const MinecraftAccount& a, const std::string& avatar) {
     return json{{"name", a.name}, {"uuid", a.uuid}, {"owns", a.ownsGame}, {"hasProfile", a.hasProfile}, {"avatar", avatar}};
 }
@@ -425,8 +442,29 @@ void App::beginBoot() {
     }
     const json config = loadConfig();
     const bool setupDone = config.value("setupVersion", 0) >= kSetupVersion && bundledClientInstalled(dataRoot(), client_);
-    if (setupDone) startJob("signin", [this] { silentSignInJob(); });
-    else startJob("setup", [this] { setupJob(); });
+    if (setupDone) {
+        json account;
+        if (freshAccount(config, account) && unprotectFromFile(accountFile())) {  // (checked in the last day: no request to Microsoft at all before the home screen)
+            const std::string idle = gameIdleStatus();
+            const bool dataFound = files_.findGameData(options_.gameVersion).has_value();
+            logLine("the account was checked less than a day ago: going straight to the home screen");
+            avatar_ = account.value("avatar", std::string());
+            mutate([&](json& s) {
+                s["phase"] = "home";
+                s["auth"]["status"] = "signedIn";
+                s["auth"]["message"] = "";
+                s["auth"]["error"] = nullptr;
+                s["account"] = account;
+                s["game"]["status"] = idle;
+                s["game"]["data"] = dataFound;
+                s["game"]["error"] = nullptr;
+            });
+            return;
+        }
+        startJob("signin", [this] { silentSignInJob(); });
+    } else {
+        startJob("setup", [this] { setupJob(); });
+    }
 }
 
 // ---------------------------------------------------------------------------------------------------------------------------
@@ -620,6 +658,11 @@ void App::finishSignIn(const MicrosoftTokens& tokens) {
     if (!account) return setAuthError(account.error);
     logLine(std::string("signed in; owns Java Edition: ") + (account->ownsGame ? "yes" : "no") + "; profile: " + (account->hasProfile ? "yes" : "no"));
     const std::string avatar = account->hasProfile ? fetchAvatar(account->skinUrl) : std::string();
+    {   // what was just checked is good for kAccountCheckSeconds: the next starts skip the entitlements and the profile
+        json config = loadConfig();
+        config["accountCheck"] = json{{"at", nowSeconds()}, {"name", account->name}, {"uuid", account->uuid}, {"avatar", avatar}};
+        saveConfig(config);
+    }
     const bool dataFound = files_.findGameData(options_.gameVersion).has_value();
     const std::string idle = gameIdleStatus();
     mutate([&](json& s) {
@@ -668,10 +711,25 @@ void App::launchJob() {
         return setGameError(tokens.error);
     }
     protectToFile(accountFile(), tokens->refreshToken);
-    const auto account = auth_.minecraftAccount(tokens->accessToken);
-    if (!account) return setGameError(account.error);
-    mutate([&](json& s) { s["account"] = accountJson(*account, avatar_); });
-    if (!account->ownsGame || !account->hasProfile) {
+    // The account was checked in full less than kAccountCheckSeconds ago: the token is refreshed above (the client needs one), but the entitlements and the profile come from
+    // that check instead of being asked for again on every start.
+    MinecraftAccount account;
+    json cached;
+    if (freshAccount(loadConfig(), cached)) {
+        account.name = cached.value("name", std::string());
+        account.uuid = cached.value("uuid", std::string());
+        account.ownsGame = true;
+        account.hasProfile = true;
+    } else {
+        const auto checked = auth_.minecraftAccount(tokens->accessToken);
+        if (!checked) return setGameError(checked.error);
+        account = *checked;
+        json config = loadConfig();
+        config["accountCheck"] = json{{"at", nowSeconds()}, {"name", account.name}, {"uuid", account.uuid}, {"avatar", avatar_}};
+        saveConfig(config);
+    }
+    mutate([&](json& s) { s["account"] = accountJson(account, avatar_); });
+    if (!account.ownsGame || !account.hasProfile) {
         mutate([&](json& s) { s["game"]["status"] = gameIdleStatus(); });
         return;
     }
@@ -697,8 +755,8 @@ void App::launchJob() {
     // (Falcon's data tables were downloaded into the game folder with the game's files, which is where the client looks.)
     const std::optional<fs::path> exportedData = files_.findGameData(options_.gameVersion);
 #ifdef _WIN32
-    std::wstring command = quoteArg(exe->wstring()) + L" --assets " + quoteArg(files_.assetsDir(options_.gameVersion).wstring()) + L" --username " + quoteArg(widen(account->name)) + L" --uuid " +
-                           quoteArg(widen(account->uuid));
+    std::wstring command = quoteArg(exe->wstring()) + L" --assets " + quoteArg(files_.assetsDir(options_.gameVersion).wstring()) + L" --username " + quoteArg(widen(account.name)) + L" --uuid " +
+                           quoteArg(widen(account.uuid));
     if (exportedData && *exportedData != files_.versionDir(options_.gameVersion)) command += L" --data " + quoteArg(exportedData->wstring());
     command += L" --size 1280x720";  // (an ordinary window with its system title bar, of a good size)
     logLine("starting the client; game data: " + (exportedData ? narrow(exportedData->wstring()) : std::string("none found")));
@@ -717,7 +775,7 @@ void App::launchJob() {
     std::wstring mutableCommand = command;
     // The client asks Mojang itself whether this account owns the game, with the account's Minecraft access token: it gets the token in its environment, for this
     // one start only (the variable is gone from the launcher again at once).
-    SetEnvironmentVariableW(L"FALCON_MC_TOKEN", widen(account->accessToken).c_str());
+    SetEnvironmentVariableW(L"FALCON_MC_TOKEN", widen(tokens->accessToken).c_str());
     const BOOL started = CreateProcessW(nullptr, mutableCommand.data(), nullptr, nullptr, FALSE, 0, nullptr, exe->parent_path().c_str(), &si, &pi);
     const DWORD startError = GetLastError();
     SetEnvironmentVariableW(L"FALCON_MC_TOKEN", nullptr);
@@ -737,7 +795,7 @@ void App::launchJob() {
     }
     CloseHandle(pi.hProcess);
 #else
-    std::vector<std::string> arguments = {exe->string(), "--assets", files_.assetsDir(options_.gameVersion).string(), "--username", account->name, "--uuid", account->uuid};
+    std::vector<std::string> arguments = {exe->string(), "--assets", files_.assetsDir(options_.gameVersion).string(), "--username", account.name, "--uuid", account.uuid};
     if (exportedData && *exportedData != files_.versionDir(options_.gameVersion)) {
         arguments.push_back("--data");
         arguments.push_back(exportedData->string());
@@ -752,7 +810,7 @@ void App::launchJob() {
     for (char** entry = environ; entry != nullptr && *entry != nullptr; ++entry) {
         if (std::strncmp(*entry, "FALCON_MC_TOKEN=", 16) != 0) environment.emplace_back(*entry);
     }
-    environment.push_back("FALCON_MC_TOKEN=" + account->accessToken);
+    environment.push_back("FALCON_MC_TOKEN=" + tokens->accessToken);
     std::vector<char*> argv, envp;
     for (std::string& a : arguments) argv.push_back(a.data());
     argv.push_back(nullptr);
