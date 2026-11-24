@@ -55,6 +55,43 @@ constexpr std::int64_t kAccountCheckSeconds = 24 * 60 * 60;
 
 std::int64_t nowSeconds() { return std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count(); }
 
+// What the launcher keeps between starts (account.bin, encrypted): the refresh token that renews the sign-in, and the Minecraft access token the client is started with, so that
+// starting the game asks Microsoft for nothing at all while that token is still good. A file from an older launcher (the refresh token alone) is still read.
+struct SavedSignIn {
+    std::string refresh;
+    std::string access;            // for api.minecraftservices.com, what the client is given
+    std::int64_t accessAt = 0;     // when it was issued (seconds since the epoch)
+    std::int64_t accessLife = 0;   // how long it lasts
+};
+
+// The access token is renewed this long before it runs out, so the client is never handed one with seconds left.
+constexpr std::int64_t kAccessTokenMarginSeconds = 10 * 60;
+
+SavedSignIn readSignIn(const std::filesystem::path& file) {
+    SavedSignIn out;
+    const auto text = unprotectFromFile(file);
+    if (!text) return out;
+    const json j = json::parse(*text, nullptr, false);
+    if (j.is_object() && j.contains("refresh")) {
+        out.refresh = j.value("refresh", std::string());
+        out.access = j.value("access", std::string());
+        out.accessAt = j.value("accessAt", static_cast<std::int64_t>(0));
+        out.accessLife = j.value("accessLife", static_cast<std::int64_t>(0));
+        return out;
+    }
+    out.refresh = *text;  // (an older file: the refresh token alone)
+    return out;
+}
+
+void writeSignIn(const std::filesystem::path& file, const SavedSignIn& signIn) {
+    const json j{{"refresh", signIn.refresh}, {"access", signIn.access}, {"accessAt", signIn.accessAt}, {"accessLife", signIn.accessLife}};
+    protectToFile(file, j.dump());
+}
+
+bool accessStillGood(const SavedSignIn& signIn) {
+    return !signIn.access.empty() && signIn.accessLife > 0 && nowSeconds() < signIn.accessAt + signIn.accessLife - kAccessTokenMarginSeconds;
+}
+
 // The account the last full check found, while that check is still fresh: what the home screen shows and what a launch goes with.
 bool freshAccount(const json& config, json& account) {
     if (!config.contains("accountCheck") || !config["accountCheck"].is_object()) return false;
@@ -444,7 +481,7 @@ void App::beginBoot() {
     const bool setupDone = config.value("setupVersion", 0) >= kSetupVersion && bundledClientInstalled(dataRoot(), client_);
     if (setupDone) {
         json account;
-        if (freshAccount(config, account) && unprotectFromFile(accountFile())) {  // (checked in the last day: no request to Microsoft at all before the home screen)
+        if (freshAccount(config, account) && !readSignIn(accountFile()).refresh.empty()) {  // (checked in the last day: no request to Microsoft at all before the home screen)
             const std::string idle = gameIdleStatus();
             const bool dataFound = files_.findGameData(options_.gameVersion).has_value();
             logLine("the account was checked less than a day ago: going straight to the home screen");
@@ -528,8 +565,8 @@ void App::silentSignInJob() {
         s["phase"] = "signin";
         s["auth"]["error"] = nullptr;
     });
-    const auto saved = unprotectFromFile(accountFile());
-    if (!saved) {
+    const SavedSignIn saved = readSignIn(accountFile());
+    if (saved.refresh.empty()) {
         mutate([&](json& s) {
             s["auth"]["status"] = "signedOut";
             s["auth"]["message"] = "";
@@ -541,11 +578,8 @@ void App::silentSignInJob() {
         s["auth"]["status"] = "working";
         s["auth"]["message"] = "Signing you in…";
     });
-    const auto tokens = auth_.refresh(*saved);
-    if (tokens) {
-        protectToFile(accountFile(), tokens->refreshToken);
-        return finishSignIn(*tokens);
-    }
+    const auto tokens = auth_.refresh(saved.refresh);
+    if (tokens) return finishSignIn(*tokens);
     if (tokens.error.code == "invalid_grant") {
         std::error_code ec;
         fs::remove(accountFile(), ec);
@@ -565,16 +599,13 @@ void App::signInJob() {
         s["auth"]["message"] = "";
     });
     // An earlier sign-in that is still good makes the window unnecessary.
-    if (const auto saved = unprotectFromFile(accountFile())) {
+    if (const SavedSignIn saved = readSignIn(accountFile()); !saved.refresh.empty()) {
         mutate([&](json& s) {
             s["auth"]["status"] = "working";
             s["auth"]["message"] = "Signing you in…";
         });
-        const auto tokens = auth_.refresh(*saved);
-        if (tokens) {
-            protectToFile(accountFile(), tokens->refreshToken);
-            return finishSignIn(*tokens);
-        }
+        const auto tokens = auth_.refresh(saved.refresh);
+        if (tokens) return finishSignIn(*tokens);
         if (tokens.error.code != "invalid_grant") return setAuthError(tokens.error);
         std::error_code ec;
         fs::remove(accountFile(), ec);
@@ -656,6 +687,14 @@ void App::finishSignIn(const MicrosoftTokens& tokens) {
     });
     const auto account = auth_.minecraftAccount(tokens.accessToken);
     if (!account) return setAuthError(account.error);
+    {   // both tokens are kept: the refresh token renews the sign-in, the Minecraft one starts the game without asking again while it lasts
+        SavedSignIn signIn;
+        signIn.refresh = tokens.refreshToken;
+        signIn.access = account->accessToken;
+        signIn.accessAt = nowSeconds();
+        signIn.accessLife = account->expiresInSeconds;
+        writeSignIn(accountFile(), signIn);
+    }
     logLine(std::string("signed in; owns Java Edition: ") + (account->ownsGame ? "yes" : "no") + "; profile: " + (account->hasProfile ? "yes" : "no"));
     const std::string avatar = account->hasProfile ? fetchAvatar(account->skinUrl) : std::string();
     {   // what was just checked is good for kAccountCheckSeconds: the next starts skip the entitlements and the profile
@@ -686,8 +725,8 @@ void App::launchJob() {
 
     // 2. the account is checked again: the game is only started for an account that owns it
     setGameProgress("working", {"account", "Checking your account", 0, 0});
-    const auto saved = unprotectFromFile(accountFile());
-    if (!saved) {
+    SavedSignIn signIn = readSignIn(accountFile());
+    if (signIn.refresh.empty()) {
         mutate([&](json& s) {
             s["phase"] = "signin";
             s["account"] = nullptr;
@@ -695,35 +734,44 @@ void App::launchJob() {
         });
         return;
     }
-    const auto tokens = auth_.refresh(*saved);
-    if (!tokens) {
-        if (tokens.error.code == "invalid_grant") {
-            std::error_code ec;
-            fs::remove(accountFile(), ec);
-            mutate([&](json& s) {
-                s["phase"] = "signin";
-                s["account"] = nullptr;
-                s["auth"]["status"] = "signedOut";
-                s["auth"]["message"] = "Your sign-in has expired. Please sign in again.";
-            });
-            return;
-        }
-        return setGameError(tokens.error);
-    }
-    protectToFile(accountFile(), tokens->refreshToken);
-    // The account was checked in full less than kAccountCheckSeconds ago: the token is refreshed above (the client needs one), but the entitlements and the profile come from
-    // that check instead of being asked for again on every start.
+    // The sign-in is not renewed when it does not have to be. The Minecraft access token the client is started with is kept beside the refresh token and lasts about a day:
+    // while it is still good, starting the game asks Microsoft nothing at all. (Renewing here on every launch was what made a launch fail on a sign-in that was perfectly good:
+    // Microsoft rotates the refresh token on every use, so a renewal that races another one, or one that follows a rotated-away token, comes back as an expired sign-in.)
     MinecraftAccount account;
     json cached;
-    if (freshAccount(loadConfig(), cached)) {
+    const bool accountFresh = freshAccount(loadConfig(), cached);
+    if (accountFresh && accessStillGood(signIn)) {
         account.name = cached.value("name", std::string());
         account.uuid = cached.value("uuid", std::string());
         account.ownsGame = true;
         account.hasProfile = true;
+        account.accessToken = signIn.access;
+        logLine("the sign-in is still good: starting the game without asking Microsoft again");
     } else {
+        auto tokens = auth_.refresh(signIn.refresh);
+        if (!tokens && tokens.error.code == "invalid_grant") tokens = auth_.refresh(signIn.refresh);  // (a renewal can be refused once when two of them race: one more try)
+        if (!tokens) {
+            if (tokens.error.code == "invalid_grant") {
+                std::error_code ec;
+                fs::remove(accountFile(), ec);
+                mutate([&](json& s) {
+                    s["phase"] = "signin";
+                    s["account"] = nullptr;
+                    s["auth"]["status"] = "signedOut";
+                    s["auth"]["message"] = "Your sign-in has expired. Please sign in again.";
+                });
+                return;
+            }
+            return setGameError(tokens.error);
+        }
         const auto checked = auth_.minecraftAccount(tokens->accessToken);
         if (!checked) return setGameError(checked.error);
         account = *checked;
+        signIn.refresh = tokens->refreshToken.empty() ? signIn.refresh : tokens->refreshToken;  // (Microsoft rotates it on every use)
+        signIn.access = account.accessToken;
+        signIn.accessAt = nowSeconds();
+        signIn.accessLife = account.expiresInSeconds;
+        writeSignIn(accountFile(), signIn);
         json config = loadConfig();
         config["accountCheck"] = json{{"at", nowSeconds()}, {"name", account.name}, {"uuid", account.uuid}, {"avatar", avatar_}};
         saveConfig(config);
@@ -775,7 +823,7 @@ void App::launchJob() {
     std::wstring mutableCommand = command;
     // The client asks Mojang itself whether this account owns the game, with the account's Minecraft access token: it gets the token in its environment, for this
     // one start only (the variable is gone from the launcher again at once).
-    SetEnvironmentVariableW(L"FALCON_MC_TOKEN", widen(tokens->accessToken).c_str());
+    SetEnvironmentVariableW(L"FALCON_MC_TOKEN", widen(account.accessToken).c_str());
     const BOOL started = CreateProcessW(nullptr, mutableCommand.data(), nullptr, nullptr, FALSE, 0, nullptr, exe->parent_path().c_str(), &si, &pi);
     const DWORD startError = GetLastError();
     SetEnvironmentVariableW(L"FALCON_MC_TOKEN", nullptr);
@@ -810,7 +858,7 @@ void App::launchJob() {
     for (char** entry = environ; entry != nullptr && *entry != nullptr; ++entry) {
         if (std::strncmp(*entry, "FALCON_MC_TOKEN=", 16) != 0) environment.emplace_back(*entry);
     }
-    environment.push_back("FALCON_MC_TOKEN=" + tokens->accessToken);
+    environment.push_back("FALCON_MC_TOKEN=" + account.accessToken);
     std::vector<char*> argv, envp;
     for (std::string& a : arguments) argv.push_back(a.data());
     argv.push_back(nullptr);
