@@ -107,6 +107,14 @@ try {
     & cmake --build build --target falcon_launcher -j $Jobs
     if ($LASTEXITCODE -ne 0) { throw 'the launcher build failed' }
 
+    # Building the launcher can decide the client is out of date and relink it, which replaces the signed file with an unsigned one and embeds that
+    # instead (seen while trying the signed path with a throwaway certificate: a changed compile definition was enough). The client is therefore
+    # checked again now that the launcher exists, so a package is never written whose embedded client lost its signature after step 3 said it was good.
+    if ($Sign) {
+        Write-Host '== verify the client again (the launcher build may have relinked it)'
+        Invoke-Verify $client
+    }
+
     $launcher = Join-Path $root 'dist-launcher\FalconLauncher.exe'
     if (-not (Test-Path $launcher)) { throw "the launcher was not built: $launcher" }
 

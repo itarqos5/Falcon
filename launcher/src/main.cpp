@@ -8,6 +8,7 @@
 //                                  --selftest-install <dir>  download the game's files and Falcon's data tables into <dir>/26.3 like the installation does (real network, a few hundred MB), write <dir>/selftest-install.txt, exit code 0 when it worked
 //                                  --selftest-mods <dir>     search Modrinth for mods of 26.3, fetch their icons and install the first one that has a .jar into <dir>/mods (real network), write <dir>/selftest-mods.txt, exit code 0 when it worked
 //                                  --devtools             F12 and the page's context menu
+//                                  --verify-signature <file>  make the check the launch path makes of the client (verifyFileSignature, with the publisher this launcher was built naming): the answer goes to the log, exit 0 signed and accepted, 2 unsigned, 1 refused
 //
 // One program for Windows (WebView2) and Linux (WebKitGTK): the few places where they differ are marked.
 #include "app.hpp"
@@ -32,6 +33,11 @@
 #include <fstream>
 #include <memory>
 
+// (the publisher a launcher may require of its client: app.cpp reads it the same way, and an empty one accepts any valid signature)
+#ifndef FALCON_LAUNCHER_PUBLISHER
+#define FALCON_LAUNCHER_PUBLISHER ""
+#endif
+
 namespace {
 
 using namespace launcher;
@@ -44,6 +50,7 @@ struct Args {
     int waitMs = 1500;
     bool devtools = false;
     bool selfTestSignIn = false;
+    std::wstring verifySignature;  // --verify-signature <file>
     std::wstring selfTestTables;   // --selftest-tables <dir>
     std::wstring selfTestInstall;  // --selftest-install <dir>
     std::wstring selfTestMods;     // --selftest-mods <dir>
@@ -74,6 +81,8 @@ Args parseArgs(int, char**) {
             args.selfTestMods = argv[++i];
         } else if (a == L"--selftest-signin") {
             args.selfTestSignIn = true;
+        } else if (a == L"--verify-signature" && i + 1 < argc) {
+            args.verifySignature = argv[++i];
         } else if (a == L"--devtools") {
             args.devtools = true;
         }
@@ -103,6 +112,8 @@ Args parseArgs(int argc, char** argv) {
             args.selfTestMods = widen(argv[++i]);
         } else if (a == "--selftest-signin") {
             args.selfTestSignIn = true;
+        } else if (a == "--verify-signature" && i + 1 < argc) {
+            args.verifySignature = widen(argv[++i]);
         } else if (a == "--devtools") {
             args.devtools = true;
         }
@@ -218,6 +229,23 @@ int selfTestInstall(const std::wstring& dir) {
     return good ? 0 : 1;
 }
 
+// --verify-signature: the check the launch path makes of the client, once, without a window and without starting anything. The answer goes to the
+// launcher's log (it may be a read-only file that is being asked about) and to the exit code: 0 signed and accepted, 2 unsigned, 1 refused.
+int verifySignature(const std::wstring& file) {
+    const fs::path path(file);
+    const FileSignature signature = verifyFileSignature(path, FALCON_LAUNCHER_PUBLISHER);
+    if (signature.state == FileSignature::State::Signed) {
+        logLine("signature of " + path.string() + ": signed by " + signature.publisher);
+        return 0;
+    }
+    if (signature.state == FileSignature::State::Unsigned) {
+        logLine("signature of " + path.string() + ": unsigned (accepted only while this launcher expects no publisher)");
+        return 2;
+    }
+    logLine("signature of " + path.string() + ": refused, " + signature.error);
+    return 1;
+}
+
 #ifdef _WIN32
 using Instance = HINSTANCE;
 #else
@@ -228,6 +256,7 @@ int launcherMain(Instance instance, const Args& args) {
     [[maybe_unused]] const Instance unusedOnLinux = instance;
     const bool testRun = args.mock || args.selfTestSignIn || !args.screenshot.empty();
     logLine(std::string("Falcon Launcher ") + FALCON_LAUNCHER_VERSION + " starting");
+    if (!args.verifySignature.empty()) return verifySignature(args.verifySignature);
     if (!args.selfTestTables.empty()) return selfTestTables(args.selfTestTables);
     if (!args.selfTestInstall.empty()) return selfTestInstall(args.selfTestInstall);
     if (!args.selfTestMods.empty()) return selfTestMods(args.selfTestMods);
