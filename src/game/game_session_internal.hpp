@@ -37,8 +37,13 @@ inline std::string format(const char* pattern, ...) {
 inline unsigned workerCount() { return std::clamp(std::thread::hardware_concurrency() / 2, 3u, 8u); }
 // ... and while the world loads (the loading screen: nothing else is going on) all but two of them, at below-normal priority.
 inline unsigned loadWorkerCount() { return std::clamp(std::thread::hardware_concurrency() > 2 ? std::thread::hardware_concurrency() - 2 : 1u, workerCount(), 16u); }
-// ... and while LOD tiles are being made (just arrived, or flying fast): three quarters of the cores (at most 12), until the tiles are there. The threads run at below-normal priority.
-inline unsigned lodWorkerCount() { return std::clamp(std::thread::hardware_concurrency() * 3 / 4, workerCount(), 12u); }
+// ... and while LOD tiles are being made (just arrived, or flying fast): every core but one (at most 32), until the tiles are there. One tile is shared out over those
+// threads (render/lod_renderer.cpp hands each a band of its rows), so the horizon fills in at the rate of the slowest band rather than of one tile. The threads run at
+// below-normal priority.
+inline unsigned lodWorkerCount() {
+    const unsigned cores = std::max(2u, std::thread::hardware_concurrency());
+    return std::clamp(cores - 1, workerCount(), 32u);
+}
 
 // A body that glides with elytra (AvatarRenderer.setupRotations, HumanoidModel.setupAnim): the body leans over as it picks up speed (in the first 10 ticks), turns toward where it
 // is going when that is not where it looks, and the limbs hardly swing at speed. `flown` is how long it has glided (ticks, with the part of this one), the look is in degrees, the

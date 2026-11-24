@@ -193,10 +193,21 @@ LodColumn LodSurface::paint(int x, int z, int floor, bool varied) const {
 
 LodGrid LodSurface::grid(int originX, int originZ, int cell, int cells, LodMode mode) const {
     LodGrid out;
+    gridRows(originX, originZ, cell, cells, mode, out, 0, cells + 3);
+    return out;
+}
+
+void LodSurface::gridRows(int originX, int originZ, int cell, int cells, LodMode mode, LodGrid& out, int firstRow, int rows) const {
     const int side = cells + 3;
-    out.side = side;
     const auto count = static_cast<std::size_t>(side) * static_cast<std::size_t>(side);
-    out.columns.resize(count);
+    if (out.side != side || out.columns.size() != count) {  // (a tile made by several threads at once is given one grid, already this size)
+        out.side = side;
+        out.columns.assign(count, LodColumn{});
+    }
+    firstRow = std::clamp(firstRow, 0, side);
+    rows = std::min(rows, side - firstRow);
+    if (rows <= 0) return;
+    const int g0 = firstRow, g1 = firstRow + rows - 1;
     std::vector<int> floors(count);
     // A column is read in the middle of its cell (g = i + 1).
     const auto xOf = [&](int g) { return originX + (g - 1) * cell + cell / 2; };
@@ -206,7 +217,7 @@ LodGrid LodSurface::grid(int originX, int originZ, int cell, int cells, LodMode 
     if (mode == LodMode::Chunk) {
         // The ground of whole chunks, made once each however many of their columns the cells use.
         std::unordered_map<std::uint64_t, std::array<std::int16_t, 256>> chunks;
-        for (int gj = 0; gj < side; ++gj) {
+        for (int gj = g0; gj <= g1; ++gj) {
             for (int gi = 0; gi < side; ++gi) {
                 const int x = xOf(gi), z = zOf(gj);
                 const std::uint64_t key = (static_cast<std::uint64_t>(static_cast<std::uint32_t>(x >> 4)) << 32) | static_cast<std::uint32_t>(z >> 4);
@@ -221,18 +232,12 @@ LodGrid LodSurface::grid(int originX, int originZ, int cell, int cells, LodMode 
         }
     } else if (mode == LodMode::Direct) {
         // The real height of every column, found fast: the full search on a sparse grid (every 4th column and the last), and every other column searched from a guess, the
-        // interpolation of the nodes corrected by how wrong it was at the two columns just made (terrain errors run in patches), which the search usually confirms in two or three probes.
+        // interpolation of the nodes corrected by how wrong it was at the columns just made (terrain errors run in patches), which the search usually confirms in two or three
+        // probes. A band probes only the node rows it interpolates between: probing them all for every band would be most of what a band saves.
         std::vector<int> nodes;
         for (int g = 0; g < side; g += 4) nodes.push_back(g);
         if (nodes.back() != side - 1) nodes.push_back(side - 1);
         const auto n = static_cast<int>(nodes.size());
-        std::vector<float> nodeHeight(static_cast<std::size_t>(n) * static_cast<std::size_t>(n));
-        for (int b = 0; b < n; ++b) {
-            for (int a = 0; a < n; ++a) {
-                nodeHeight[static_cast<std::size_t>(b * n + a)] =
-                    static_cast<float>(generator_->surfaceHeightQuickAt(xOf(nodes[static_cast<std::size_t>(a)]), zOf(nodes[static_cast<std::size_t>(b)])));
-            }
-        }
         std::vector<int> segment(static_cast<std::size_t>(side));
         std::vector<float> along(static_cast<std::size_t>(side));
         std::vector<bool> isNode(static_cast<std::size_t>(side), false);
@@ -240,33 +245,46 @@ LodGrid LodSurface::grid(int originX, int originZ, int cell, int cells, LodMode 
         for (int g = 0, s = 0; g < side; ++g) {
             while (s + 2 < n && nodes[static_cast<std::size_t>(s + 1)] <= g) ++s;
             segment[static_cast<std::size_t>(g)] = s;
-            along[static_cast<std::size_t>(g)] = static_cast<float>(g - nodes[static_cast<std::size_t>(s)]) / static_cast<float>(nodes[static_cast<std::size_t>(s + 1)] - nodes[static_cast<std::size_t>(s)]);
+            along[static_cast<std::size_t>(g)] = static_cast<float>(g - nodes[static_cast<std::size_t>(s)]) /
+                                                 static_cast<float>(nodes[static_cast<std::size_t>(s + 1)] - nodes[static_cast<std::size_t>(s)]);
         }
+        std::vector<std::vector<float>> nodeRow(static_cast<std::size_t>(n));
+        const auto nodesAt = [&](int b) -> const std::vector<float>& {  // the heights of node row b, probed once
+            std::vector<float>& row = nodeRow[static_cast<std::size_t>(b)];
+            if (row.empty()) {
+                row.resize(static_cast<std::size_t>(n));
+                for (int a = 0; a < n; ++a) {
+                    row[static_cast<std::size_t>(a)] = static_cast<float>(
+                        generator_->surfaceHeightQuickAt(xOf(nodes[static_cast<std::size_t>(a)]), zOf(nodes[static_cast<std::size_t>(b)])));
+                }
+            }
+            return row;
+        };
         std::vector<float> smooth(count);  // the interpolation of the nodes, at every column
-        const auto h = [&](int a, int b) { return nodeHeight[static_cast<std::size_t>(b * n + a)]; };
-        for (int gj = 0; gj < side; ++gj) {
+        for (int gj = g0; gj <= g1; ++gj) {
             const int sj = segment[static_cast<std::size_t>(gj)];
             const float fj = along[static_cast<std::size_t>(gj)];
+            const std::vector<float>& lowRow = nodesAt(sj);
+            const std::vector<float>& highRow = nodesAt(sj + 1);
             for (int gi = 0; gi < side; ++gi) {
                 const int si = segment[static_cast<std::size_t>(gi)];
                 const float fi = along[static_cast<std::size_t>(gi)];
-                const float low = h(si, sj) * (1.0f - fi) + h(si + 1, sj) * fi;
-                const float high = h(si, sj + 1) * (1.0f - fi) + h(si + 1, sj + 1) * fi;
+                const float low = lowRow[static_cast<std::size_t>(si)] * (1.0f - fi) + lowRow[static_cast<std::size_t>(si + 1)] * fi;
+                const float high = highRow[static_cast<std::size_t>(si)] * (1.0f - fi) + highRow[static_cast<std::size_t>(si + 1)] * fi;
                 smooth[at(gi, gj)] = low * (1.0f - fj) + high * fj;
                 if (isNode[static_cast<std::size_t>(gi)] && isNode[static_cast<std::size_t>(gj)]) {
                     floors[at(gi, gj)] = static_cast<int>(smooth[at(gi, gj)]);  // (exact: the node's own height)
                     continue;
                 }
-                float correction = 0.0f;
-                int known = 0;
-                if (gi > 0) correction += static_cast<float>(floors[at(gi - 1, gj)]) - smooth[at(gi - 1, gj)], ++known;
-                if (gj > 0) correction += static_cast<float>(floors[at(gi, gj - 1)]) - smooth[at(gi, gj - 1)], ++known;
-                const float guess = smooth[at(gi, gj)] + (known > 0 ? correction / static_cast<float>(known) : 0.0f);
+                // The correction made by the column already made before this one, in the same row (the terrain's errors run in patches). The column below is not
+                // used: a row then depends on nothing but itself, so the rows can be made in any order, by any number of threads, and the tile is the same tile
+                // every time it is made (a tile remade after the settings change, with a different band count, does not move).
+                const float guess = gi > 0 ? smooth[at(gi, gj)] + (static_cast<float>(floors[at(gi - 1, gj)]) - smooth[at(gi - 1, gj)]) : smooth[at(gi, gj)];
                 floors[at(gi, gj)] = generator_->surfaceHeightNear(xOf(gi), zOf(gj), static_cast<int>(std::lround(guess)));
             }
         }
     } else {
-        for (int gj = 0; gj < side; ++gj) {
+        for (int gj = g0; gj <= g1; ++gj) {
             for (int gi = 0; gi < side; ++gi) floors[at(gi, gj)] = generator_->preliminarySurfaceAt(xOf(gi), zOf(gj));
         }
     }
@@ -276,13 +294,19 @@ LodGrid LodSurface::grid(int originX, int originZ, int cell, int cells, LodMode 
         for (int g = 0; g < side; g += 4) nodes.push_back(g);
         if (nodes.back() != side - 1) nodes.push_back(side - 1);
         const auto n = static_cast<int>(nodes.size());
-        std::vector<float> residual(static_cast<std::size_t>(n) * static_cast<std::size_t>(n));
-        for (int b = 0; b < n; ++b) {
-            for (int a = 0; a < n; ++a) {
-                const int gi = nodes[static_cast<std::size_t>(a)], gj = nodes[static_cast<std::size_t>(b)];
-                residual[static_cast<std::size_t>(b * n + a)] = static_cast<float>(generator_->surfaceHeightQuickAt(xOf(gi), zOf(gj)) - floors[at(gi, gj)]);
+        std::vector<std::vector<float>> residualRow(static_cast<std::size_t>(n));
+        const auto residualAt = [&](int b) -> const std::vector<float>& {  // (a band holds only its own heights: the node's preliminary surface is read again)
+            std::vector<float>& row = residualRow[static_cast<std::size_t>(b)];
+            if (row.empty()) {
+                row.resize(static_cast<std::size_t>(n));
+                for (int a = 0; a < n; ++a) {
+                    const int gi = nodes[static_cast<std::size_t>(a)], gj = nodes[static_cast<std::size_t>(b)];
+                    const int x = xOf(gi), z = zOf(gj);
+                    row[static_cast<std::size_t>(a)] = static_cast<float>(generator_->surfaceHeightQuickAt(x, z) - generator_->preliminarySurfaceAt(x, z));
+                }
             }
-        }
+            return row;
+        };
         // Which pair of nodes holds column g, and how far along it is.
         std::vector<int> segment(static_cast<std::size_t>(side));
         std::vector<float> along(static_cast<std::size_t>(side));
@@ -292,23 +316,23 @@ LodGrid LodSurface::grid(int originX, int originZ, int cell, int cells, LodMode 
             const float span = static_cast<float>(nodes[static_cast<std::size_t>(s + 1)] - nodes[static_cast<std::size_t>(s)]);
             along[static_cast<std::size_t>(g)] = static_cast<float>(g - nodes[static_cast<std::size_t>(s)]) / span;
         }
-        for (int gj = 0; gj < side; ++gj) {
+        for (int gj = g0; gj <= g1; ++gj) {
             const int sj = segment[static_cast<std::size_t>(gj)];
             const float fj = along[static_cast<std::size_t>(gj)];
+            const std::vector<float>& lowRow = residualAt(sj);
+            const std::vector<float>& highRow = residualAt(sj + 1);
             for (int gi = 0; gi < side; ++gi) {
                 const int si = segment[static_cast<std::size_t>(gi)];
                 const float fi = along[static_cast<std::size_t>(gi)];
-                const auto r = [&](int a, int b) { return residual[static_cast<std::size_t>(b * n + a)]; };
-                const float low = r(si, sj) * (1.0f - fi) + r(si + 1, sj) * fi;
-                const float high = r(si, sj + 1) * (1.0f - fi) + r(si + 1, sj + 1) * fi;
+                const float low = lowRow[static_cast<std::size_t>(si)] * (1.0f - fi) + lowRow[static_cast<std::size_t>(si + 1)] * fi;
+                const float high = highRow[static_cast<std::size_t>(si)] * (1.0f - fi) + highRow[static_cast<std::size_t>(si + 1)] * fi;
                 floors[at(gi, gj)] += static_cast<int>(std::lround(low * (1.0f - fj) + high * fj));
             }
         }
     }
-    for (int gj = 0; gj < side; ++gj) {
+    for (int gj = g0; gj <= g1; ++gj) {
         for (int gi = 0; gi < side; ++gi) out.columns[at(gi, gj)] = paint(xOf(gi), zOf(gj), floors[at(gi, gj)], true);
     }
-    return out;
 }
 
 }  // namespace falcon::worldgen

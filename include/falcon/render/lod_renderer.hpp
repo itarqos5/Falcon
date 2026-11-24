@@ -27,6 +27,7 @@
 #include <memory>
 #include <mutex>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -51,6 +52,11 @@ struct LodStats {
     long trianglesDrawn = 0;
     int levels = 0;         // how many levels of detail the view uses
     double megabytes = 0.0; // video memory the tiles take
+    // What the LODs cost: the main thread's own time in update() (which tiles to ask for, and the uploads) and in render() (the draw calls) last frame, and the
+    // average time one worker spent on one job (a job is a band of a tile's rows: several make one tile at once).
+    double updateMs = 0.0, drawMs = 0.0, jobMs = 0.0;
+    long jobCount = 0;
+    int workers = 0;  // how many threads the pool gives the LODs just now
 };
 
 // The layers of the block texture array (BlockModels) that LODs are drawn with.
@@ -130,6 +136,12 @@ private:
         std::uint32_t first = 0, count = 0;
         float minY = 0.0f, maxY = 0.0f; // the height range, skirt included
         std::uint64_t lastUsed = 0;     // the frame that last wanted it
+        std::uint64_t drawnFrame = 0;   // the frame it was last put in the draw list (a coarse tile may stand in for several leaves: draw it once)
+    };
+    struct Draw {
+        Tile* tile;
+        TileKey key;
+        float bias;
     };
     struct Result {
         TileKey key;
@@ -145,6 +157,8 @@ private:
         std::atomic<int> epoch{0};
         std::atomic<int> building{0};
         std::atomic<double> camX{0.0}, camZ{0.0};  // where the camera is now (the jobs look: a tile that has fallen far behind is not worth making)
+        std::atomic<double> jobMs{0.0};               // what the jobs have cost so far, and how many there were (the Developer page shows the average)
+        std::atomic<long> jobCount{0};
     };
     struct Detail {
         int cellMin;        // the finest cell, in blocks
@@ -190,9 +204,12 @@ private:
     };
     std::vector<Buffer> buffers_;
     std::size_t uploadedVertices_ = 0;
+    int uploadedTiles_ = 0;  // (kept as it changes: counting them every frame was a walk of every tile made)
 
     std::unordered_map<TileKey, Tile, TileKeyHash> tiles_;
     std::vector<Wanted> wanted_;  // the leaves of the quadtree this frame
+    std::vector<Draw> draws_;     // the tiles drawn last frame, kept to be filled again (the frame makes no allocations of its own)
+    std::unordered_set<TileKey, TileKeyHash> chosen_;
     // Where the camera is going (blocks a second, smoothed): the tiles the quadtree will want a moment from now are made before they are, so that walking does not meet a coarse stand-in.
     double lastCamX_ = 0.0, lastCamZ_ = 0.0, velocityX_ = 0.0, velocityZ_ = 0.0;
     bool haveLastCam_ = false;

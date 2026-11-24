@@ -74,6 +74,14 @@ public:
     [[nodiscard]] LodColumn column(int x, int z, LodPredictor how) const;
     // The columns of the square of cells x cells cells of `cell` blocks that starts at (originX, originZ), each read in the middle of its cell, plus the ring of columns round them.
     [[nodiscard]] LodGrid grid(int originX, int originZ, int cell, int cells, LodMode mode) const;
+    // A band of those columns: rows `firstRow` .. `firstRow + rows - 1` of the grid (row 0 is the first row of the ring, so the rows of the square itself are 1 ..
+    // cells), written into `grid`. This is what makes a tile the work of several threads: a tile of the finest cells takes about a tenth of a second to make and the
+    // player is looking at the horizon while it is made, so render/lod_renderer.cpp gives each row band to a different worker and meshes the tile when the last one is
+    // done. Every column is read exactly as grid() reads it (the same heights, the same picture), and bands may be filled at the same time because each writes only its
+    // own rows. `grid` must already be sized for this square (grid()'s result for the same cells), as the renderer leaves it.
+    // (A row's guesses come from the interpolation of the sparse height nodes and the column made before it in its own row, so no row depends on another and the
+    // bands may be filled in any order: a tile is the same tile whichever way, and however many ways, it is split.)
+    void gridRows(int originX, int originZ, int cell, int cells, LodMode mode, LodGrid& grid, int firstRow, int rows) const;
 
 private:
     using Kind = LodGround;

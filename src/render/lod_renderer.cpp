@@ -119,6 +119,19 @@ void main() {
 
 constexpr int kCells = LodRenderer::kCells;
 constexpr int kSea = worldgen::LodSurface::kSeaLevel;
+
+// A tile being made: its grid, filled a band of rows at a time by as many jobs as there are threads (LodRenderer::request). The last band to finish meshes it, so a
+// tile of the finest cells - about a tenth of a second of noise and density - is made in a tenth of that time on eight cores, which is what makes the horizon fill in
+// almost at once. The bands share nothing but the grid (each writes its own rows) and the counter, so there is no lock in the work.
+struct TileBuild {
+    int level = 0, tx = 0, tz = 0;
+    int epoch = 0;
+    int cell = 0;
+    int originX = 0, originZ = 0;
+    double size = 0.0, askedFrom = 0.0, centreX = 0.0, centreZ = 0.0;
+    worldgen::LodGrid grid;
+    std::atomic<int> bandsLeft{0};
+};
 // The most quads a tile can hold: a top for every cell and, on each of its four sides, a wall of as many bands as the ground has layers (see wallBands).
 constexpr std::uint32_t kMaxQuads = kCells * kCells * LodRenderer::kMaxQuadsPerCell;
 
@@ -307,8 +320,11 @@ void LodRenderer::releaseAll() {
     tiles_.clear();
     wanted_.clear();
     uploadedVertices_ = 0;
+    uploadedTiles_ = 0;
     std::lock_guard<std::mutex> lock(shared_->mutex);
     shared_->done.clear();
+    shared_->jobMs.store(0.0);
+    shared_->jobCount.store(0);
 }
 
 void LodRenderer::setSettings(const LodSettings& requested) {
@@ -528,27 +544,51 @@ void LodRenderer::request(const TileKey& key, double priority) {
     // Every cell reads the real height (never the preliminary surface, which is only good to eight blocks and loses low land to the sea): whole chunks for the finest cells, a probe
     // for each column of the others.
     const worldgen::LodMode mode = cell <= detail_.chunkMax ? worldgen::LodMode::Chunk : worldgen::LodMode::Direct;
-    const int epoch = shared_->epoch.load();
-    const double centreX = static_cast<double>(originX) + size * 0.5, centreZ = static_cast<double>(originZ) + size * 0.5;
-    const double askedFrom = std::hypot(centreX - shared_->camX.load(), centreZ - shared_->camZ.load());
-    pool_.submit(static_cast<float>(priority), [surface = surface_, shared = shared_, textures = textures_, key, epoch, cell, mode, originX, originZ, centreX, centreZ, askedFrom, size] {
-        if (shared->epoch.load() == epoch) {
+    auto build = std::make_shared<TileBuild>();
+    build->level = key.level;
+    build->tx = key.tx;
+    build->tz = key.tz;
+    build->epoch = shared_->epoch.load();
+    build->cell = cell;
+    build->originX = originX;
+    build->originZ = originZ;
+    build->size = size;
+    build->centreX = static_cast<double>(originX) + size * 0.5;
+    build->centreZ = static_cast<double>(originZ) + size * 0.5;
+    build->askedFrom = std::hypot(build->centreX - shared_->camX.load(), build->centreZ - shared_->camZ.load());
+    const int side = kCells + 3;
+    build->grid.side = side;
+    build->grid.columns.resize(static_cast<std::size_t>(side) * static_cast<std::size_t>(side));
+    // How many jobs share the tile: one for every thread the pool is running, up to eight. A tile of the finest cells reads whole chunks, and two bands would read the
+    // same ones again, so those are made by one job (they are also the cheap ones: about 16 microseconds a column against a hundred for a probed one).
+    const int bands = mode == worldgen::LodMode::Chunk ? 1 : std::clamp(static_cast<int>(pool_.activeCount()), 1, 8);
+    build->bandsLeft.store(bands);
+    for (int b = 0; b < bands; ++b) {
+        const int first = side * b / bands, last = side * (b + 1) / bands;
+        pool_.submit(static_cast<float>(priority), [surface = surface_, shared = shared_, textures = textures_, build, mode, first, last] {
+            const bool live = shared->epoch.load() == build->epoch;
+            if (live) {
+                const auto started = std::chrono::steady_clock::now();
+                surface->gridRows(build->originX, build->originZ, build->cell, kCells, mode, build->grid, first, last - first);
+                shared->jobMs.fetch_add(std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count());
+                shared->jobCount.fetch_add(1);
+            }
+            if (build->bandsLeft.fetch_sub(1) != 1) return;  // (not the last band: the tile is meshed when they all are)
             Result r;
-            r.key = key;
-            r.epoch = epoch;
+            r.key = TileKey{build->level, build->tx, build->tz};
+            r.epoch = build->epoch;
             // The queue holds tiles that were wanted when the player was somewhere else (flying fast, or turning): one that is now a good way further off than it was is left out, so the tiles
             // that are wanted now do not wait behind it. It is asked for again if the player comes back.
-            if (std::hypot(centreX - shared->camX.load(), centreZ - shared->camZ.load()) > askedFrom + 160.0 + size) {
+            if (live && std::hypot(build->centreX - shared->camX.load(), build->centreZ - shared->camZ.load()) > build->askedFrom + 160.0 + build->size) {
                 r.dropped = true;
-            } else {
-                const worldgen::LodGrid grid = surface->grid(originX, originZ, cell, kCells, mode);
-                r.vertices = buildColumns(grid, cell, textures, r.minY, r.maxY);
+            } else if (live) {
+                r.vertices = buildColumns(build->grid, build->cell, textures, r.minY, r.maxY);
             }
             std::lock_guard<std::mutex> lock(shared->mutex);
             shared->done.push_back(std::move(r));
-        }
-        shared->building.fetch_sub(1);
-    });
+            shared->building.fetch_sub(1);
+        });
+    }
 }
 
 // ---- the GPU's side -----------------------------------------------------------------------------------------------------------------------------------------------
@@ -617,6 +657,7 @@ void LodRenderer::upload(Result&& result) {
     tile.maxY = result.maxY;
     tile.state = State::Uploaded;
     uploadedVertices_ += count;
+    ++uploadedTiles_;
 }
 
 void LodRenderer::evict() {
@@ -634,14 +675,19 @@ void LodRenderer::evict() {
         const Tile& tile = tiles_.at(key);
         release(tile.buffer, tile.first, tile.count);
         uploadedVertices_ -= tile.count;
+        --uploadedTiles_;
         tiles_.erase(key);
     }
 }
 
 void LodRenderer::update(double camX, double camZ, int nearChunks, double uploadBudgetMs) {
+    const auto updateStarted = std::chrono::steady_clock::now();
     ++frame_;
     stats_.tilesBuilding = shared_->building.load();
-    if (!settings_.enabled) return;
+    if (!settings_.enabled) {
+        stats_.updateMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - updateStarted).count();
+        return;
+    }
     const double nearBlocks = static_cast<double>(nearChunks) * 16.0;
     const double maxBlocks = static_cast<double>(settings_.radiusChunks) * 16.0;
     shared_->camX = camX;
@@ -716,19 +762,26 @@ void LodRenderer::update(double camX, double camZ, int nearChunks, double upload
     }
     if ((frame_ & 31) == 0) evict();
     stats_.tilesBuilding = shared_->building.load();
+    stats_.updateMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - updateStarted).count();
+    stats_.jobCount = shared_->jobCount.load();
+    stats_.jobMs = stats_.jobCount > 0 ? shared_->jobMs.load() / static_cast<double>(stats_.jobCount) : 0.0;
+    stats_.workers = static_cast<int>(pool_.activeCount());
 }
 
 // ---- drawing ------------------------------------------------------------------------------------------------------------------------------------------------------
 
 void LodRenderer::render(const Matrix4f& view, float fovDegrees, float aspect, double camX, double camY, double camZ, int nearChunks, const std::array<float, 3>& fogColor,
                          const std::array<float, 2>& envFog, gl::GLuint lightmapTexture, int fogNearChunks, int holeChunkX, int holeChunkZ, int holeRadius2) {
+    const auto drawStarted = std::chrono::steady_clock::now();
     stats_.tilesDrawn = 0;
     stats_.trianglesDrawn = 0;
     stats_.levels = 0;
-    stats_.tilesLoaded = 0;
-    for (const auto& [key, tile] : tiles_) stats_.tilesLoaded += tile.state == State::Uploaded ? 1 : 0;
+    stats_.tilesLoaded = uploadedTiles_;
     stats_.megabytes = static_cast<double>(uploadedVertices_) * sizeof(Vertex) / 1048576.0;
-    if (!settings_.enabled || wanted_.empty()) return;
+    if (!settings_.enabled || wanted_.empty()) {
+        stats_.drawMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - drawStarted).count();
+        return;
+    }
 
     const double nearBlocks = static_cast<double>(nearChunks) * 16.0;
     const double maxBlocks = static_cast<double>(settings_.radiusChunks) * 16.0;
@@ -738,13 +791,8 @@ void LodRenderer::render(const Matrix4f& view, float fovDegrees, float aspect, d
     const Matrix4f viewProj = perspective(fovDegrees, aspect, nearPlane, farPlane) * view;
     const Frustum frustum = extractFrustum(viewProj);
 
-    struct Draw {
-        const Tile* tile;
-        TileKey key;
-        float bias;
-    };
-    std::vector<Draw> draws;
-    std::vector<TileKey> asked;  // the tiles already chosen (a stand-in may serve several leaves)
+    std::vector<Draw>& draws = draws_;  // (kept between frames: the draw list is filled without allocating)
+    draws.clear();
     // The tiles under `key` that are on the GPU, down to `depth` levels finer (the nearest ones: a tile that is there is not looked under). True if there was any.
     const std::function<bool(const TileKey&, int)> addFinerTiles = [&](const TileKey& key, int depth) -> bool {
         if (key.level == 0 || depth == 0) return false;
@@ -756,8 +804,8 @@ void LodRenderer::render(const Matrix4f& view, float fovDegrees, float aspect, d
                 if (it != tiles_.end() && it->second.state == State::Uploaded) {
                     it->second.lastUsed = frame_;  // (kept: it is on the screen)
                     any = true;
-                    if (std::find(asked.begin(), asked.end(), child) == asked.end()) {
-                        asked.push_back(child);
+                    if (it->second.drawnFrame != frame_) {  // (a stand-in may serve several leaves: each tile is drawn once)
+                        it->second.drawnFrame = frame_;
                         draws.push_back({&it->second, child, 0.0f});
                     }
                 } else if (addFinerTiles(child, depth - 1)) {
@@ -770,7 +818,7 @@ void LodRenderer::render(const Matrix4f& view, float fovDegrees, float aspect, d
     for (const Wanted& w : wanted_) {
         TileKey key = w.key;
         float bias = 0.0f;
-        const Tile* tile = nullptr;
+        Tile* tile = nullptr;
         for (;;) {
             const auto it = tiles_.find(key);
             if (it != tiles_.end() && it->second.state == State::Uploaded) {
@@ -790,26 +838,27 @@ void LodRenderer::render(const Matrix4f& view, float fovDegrees, float aspect, d
             addFinerTiles(w.key, 3);
             continue;
         }
-        if (std::find(asked.begin(), asked.end(), key) != asked.end()) continue;
-        asked.push_back(key);
+        if (tile->drawnFrame == frame_) continue;
+        tile->drawnFrame = frame_;
         draws.push_back({tile, key, bias});
     }
     // A coarser tile that stands in for a leaf whose own tile is not there yet covers the leaf's brothers too, and they may have their tiles: both were drawn, nearly in the same plane (the
     // coarse one 0.05 lower), and the two fought over every pixel (flicker, and the coarse hills showing through the fine ground). A tile with a tile above it is not drawn: the area changes
     // from the coarse tile to the fine ones when all of them are there.
     {
-        std::unordered_set<TileKey, TileKeyHash> chosen;
-        for (const Draw& d : draws) chosen.insert(d.key);
+        chosen_.clear();
+        for (const Draw& d : draws) chosen_.insert(d.key);
         std::erase_if(draws, [&](const Draw& d) {
             TileKey up = d.key;
             while (up.level < topLevel_) {
                 ++up.level;
                 up.tx >>= 1;
                 up.tz >>= 1;
-                if (chosen.count(up) != 0) return true;
+                if (chosen_.count(up) != 0) return true;
             }
             return false;
         });
+        chosen_.clear();
     }
     std::sort(draws.begin(), draws.end(), [](const Draw& a, const Draw& b) { return a.tile->buffer < b.tile->buffer; });
 
@@ -857,6 +906,7 @@ void LodRenderer::render(const Matrix4f& view, float fovDegrees, float aspect, d
     }
     for (int l = 0; l < 31; ++l) stats_.levels += (levelsSeen >> l) & 1;
     gl::BindVertexArray(0);
+    stats_.drawMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - drawStarted).count();
 }
 
 }  // namespace falcon
