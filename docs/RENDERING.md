@@ -133,7 +133,14 @@ Medium or Full Detail). The three are saved as lodsEnabled, lodChunkRadius and l
   nine levels of detail and a few hundred tiles (23 MB at Low).
 * **Making them.** The world's worker pool makes the tiles after the chunks (a coarse stand-in first so that the horizon fills in at once, then the tile itself, nearest first), a finished
   tile is meshed there (a run of cells with the same top and colour is one quad: a calm sea is a few quads) and put on the GPU by the main thread within a time budget. Tiles are kept
-  while they might be wanted again, within a budget of vertices.
+  while they might be wanted again, within a budget of vertices. While tiles are missing, every core but one of them makes tiles (lodWorkerCount).
+* **A tile is made by all the cores at once.** A tile of 32 x 32 probed columns costs about 40 ms: a tenth of a second of the horizon, per tile, on one thread, and the player is looking at
+  the horizon while it is made. So a tile is cut into up to eight bands of rows, each given to a different worker (LodSurface::gridRows writes one band into the tile's grid), and the last
+  band to finish meshes it (LodRenderer::request). The bands share nothing but the grid they write their own rows into (no lock in the work), and no row's height depends on another row
+  (a column's guess is the height nodes' interpolation plus the correction made by the column before it in the same row), so a tile is the same tile whichever way it is split, whichever
+  worker makes which band, and however many bands there are: a tile remade after the settings change does not move. Measured on 12 logical processors, one Direct tile, four tiles of the
+  same kind: 41 ms on one thread, 15 ms on four (2.8 x), 9.5 ms on twelve (4.3 x), with every column identical to the one-thread build (0 of 9800 columns differed). A tile of the finest
+  cells reads whole chunks, which two bands would read twice, so those are made by one job.
 * **Drawing.** A pass of its own between the sky and the chunks, with its own near and far plane (so the depth buffer stays precise to 130 000 blocks); then the depth is cleared and the chunks
   are drawn over it. The haze (fog) is stretched to the far end of the LODs while they are on. 12 bytes a vertex, all the tiles in a few big buffers (a buffer a tile would be thousands of
   allocations), one draw a tile, tiles outside the view skipped. Shaders: the lod program (src/vulkan/shaders/lod.vert and lod.frag are its Vulkan twins). Only worlds this client generates
@@ -142,6 +149,18 @@ Medium or Full Detail). The three are saved as lodsEnabled, lodChunkRadius and l
 Measured (hidden window, a 20 second flight at render distance 12, LODs 256 chunks, 12 logical processors): the GPU time of the frame does not change; the frame thread takes 0.25 ms more at Low
 Detail, 0.4 more at Medium, 0.8 at Full (897 tiles, 72 MB at Medium). OpenGL and Vulkan draw the same picture (RMS 0.23 of 255). The tests: falcon_lod_tests (the mesher),
 falcon_worldgen_chunk_tests (the heights against real chunks); falcon_bench_chunks --lod-bench prints the cost and the error of each way of getting a height.
+
+## Video Settings > Developer
+
+The Developer page is a panel rather than a list of options (the fifth page of Video Settings). GameSession keeps the last 600 frames (falcon/game/frame_stats.hpp): how long each
+one took, start to start, and how much of it the main loop (client.cpp) saw go to the world's update (chunks, LODs, ticks), the world's drawing, and the HUD and the menus — whatever is
+left of the frame is the display (vsync) or the frame rate cap. The page shows the average frame rate and its time, the 1% and 0.1% lows (the slow frames that are felt as stutter, not the
+average), which of those tasks takes the most of an average frame, the LOD numbers (tiles drawn, loaded and building, levels, triangles, video memory, the main thread's own cost in
+update and draw, the time one tile job takes and how many threads make them), the chunks (loaded, sections drawn, draw calls, jobs waiting), and the memory (the process, block data,
+meshes, pictures, LOD tiles). **Highest FPS Test** applies `applyHighestFps` — every option at its least: render distance 2 and simulation 5 chunks, no LODs (their tiles go back to the
+driver, the most memory a world holds), no clouds, no particles, flat lighting, no mipmaps, solid leaves, no shadows, no vignette, no view bobbing, no vsync and no frame rate cap — and
+restarts the counts, so the numbers shown next are the highest frame rate that world can make. **Restore** (and Undo) put the options back as they were before the test. **Reset counts**
+clears the averages without touching a setting.
 
 ## What an interface would have to cover (measured on the code, not guessed)
 
