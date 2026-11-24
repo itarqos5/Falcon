@@ -279,7 +279,7 @@ namespace {
 
 // The sun and the eight faces of the moon (the game's own pictures, environment/celestial/sun.png and moon/*.png), one under another in a texture: slot 0 the sun, slot 1 + the phase
 // the moon (0 full, then waning gibbous, third quarter, waning crescent, new, waxing crescent, first quarter, waxing gibbous). A picture that is missing leaves its slot clear.
-Texture2D makeCelestialAtlas(const ResourceManager& resources) {
+Image makeCelestialAtlas(const ResourceManager& resources) {
     static constexpr const char* kMoonFaces[8] = {"full_moon", "waning_gibbous", "third_quarter", "waning_crescent", "new_moon", "waxing_crescent", "first_quarter", "waxing_gibbous"};
     const auto load = [&](const std::string& path) -> std::optional<Image> {
         const auto bytes = resources.readBytes(ResourceLocation("minecraft", path));
@@ -297,7 +297,7 @@ Texture2D makeCelestialAtlas(const ResourceManager& resources) {
         if (!pictures[slot] || pictures[slot]->width != size || pictures[slot]->height != size) continue;
         std::copy(pictures[slot]->rgba.begin(), pictures[slot]->rgba.end(), atlas.rgba.begin() + static_cast<std::ptrdiff_t>(slot * static_cast<std::size_t>(size) * static_cast<std::size_t>(size) * 4u));
     }
-    return Texture2D(atlas, FilterMode::Nearest);
+    return atlas;
 }
 
 }  // namespace
@@ -338,7 +338,8 @@ WorldRenderer::WorldRenderer(BlockModels& models, std::int64_t seed, TerrainStyl
     skyGlow_ = sky_.uniform("uGlow");
     skyMoon_ = sky_.uniform("uMoon");
     skyCelestial_ = sky_.uniform("uCelestial");
-    celestial_ = makeCelestialAtlas(models.resources());
+    celestialImage_ = makeCelestialAtlas(models.resources());
+    celestial_ = Texture2D(celestialImage_, FilterMode::Nearest);
     lineViewProj_ = lines_.uniform("uViewProj");
     crackViewProj_ = cracks_.uniform("uViewProj");
     crackTex_ = cracks_.uniform("uTex");
@@ -458,6 +459,27 @@ WorldRenderer::~WorldRenderer() {
 }
 
 // The attribute layout of a MeshVertex, pointing at whatever arena buffer is bound. Re-run after the arena grows.
+void WorldRenderer::setSkyElements(bool sky, bool sun, bool moon, bool stars) {
+    skyVisible_ = sky;
+    skyStarsOn_ = stars;
+    if (sun == celestialSun_ && moon == celestialMoon_) return;
+    celestialSun_ = sun;
+    celestialMoon_ = moon;
+    // The sun is slot 0 of the atlas and the moon's eight faces are the slots after it: a part that is off leaves its slots clear, and a clear picture is drawn as nothing.
+    Image atlas = celestialImage_;
+    const int size = atlas.width;
+    const auto clearSlot = [&](int slot) {
+        if (size <= 0) return;
+        const std::size_t from = static_cast<std::size_t>(slot) * static_cast<std::size_t>(size) * static_cast<std::size_t>(size) * 4u;
+        std::fill(atlas.rgba.begin() + static_cast<std::ptrdiff_t>(from),
+                  atlas.rgba.begin() + static_cast<std::ptrdiff_t>(from + static_cast<std::size_t>(size) * static_cast<std::size_t>(size) * 4u), 0);
+    };
+    if (!celestialSun_) clearSlot(0);
+    if (!celestialMoon_)
+        for (int slot = 1; slot <= 8; ++slot) clearSlot(slot);
+    celestial_ = Texture2D(atlas, FilterMode::Nearest);
+}
+
 void WorldRenderer::setupArenaVao() {
     const auto layout = [&](gl::GLuint vao, bool instanced) {
         gl::BindVertexArray(vao);

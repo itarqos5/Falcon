@@ -21,7 +21,6 @@ enum class MusicToast { Never, Pause, PauseAndToast };
 enum class GraphicsPreset { Fast, Fancy, Fabulous, Custom };
 // (GraphicsApi, the Graphics API setting, is in falcon/gfx/graphics_api.hpp: OpenGL or Vulkan, there is no "Default".)
 enum class InactivityFpsLimit { Minimized, Afk };
-enum class ChunkUpdates { None, PlayerAffected, Nearby };  // "Chunk Builder": Threaded, Semi Blocking, Fully Blocking
 enum class CloudStatus { Off, Fast, Fancy };
 enum class ParticleStatus { All, Decreased, Minimal };
 enum class TextureFiltering { None, Rgss, Anisotropic };
@@ -123,7 +122,6 @@ struct GameOptions {
     GraphicsPreset graphicsPreset = GraphicsPreset::Fancy;
     int biomeBlendRadius = 2;
     int renderDistance = 12;
-    ChunkUpdates prioritizeChunkUpdates = ChunkUpdates::None;
     int simulationDistance = 12;
     bool ambientOcclusion = true;         // "Smooth Lighting"
     CloudStatus cloudStatus = CloudStatus::Fancy;
@@ -141,6 +139,12 @@ struct GameOptions {
     bool lodsEnabled = true;              // (the Fancy preset, which is the default, has them)
     int lodChunkRadius = 128;             // 64..8192 chunks
     int lodDetail = 1;
+
+    // ---- video: the sky (the Sky page) ----
+    bool skyEnabled = true;               // the sky itself: its colours, and the fog at the horizon is the sky's colour
+    bool sunEnabled = true;
+    bool moonEnabled = true;
+    bool starsEnabled = true;
 
     // ---- video: preferences ----
     bool showAutosaveIndicator = true;

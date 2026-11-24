@@ -23,6 +23,7 @@
 #include "falcon/game/game_options.hpp"
 #include "falcon/ui/gui_scale.hpp"
 #include "falcon/game/now_playing_toast.hpp"
+#include "falcon/game/fps_test.hpp"
 #include "falcon/game/game_session.hpp"
 #include "falcon/game/game_ui.hpp"
 #include "falcon/game/death_screen.hpp"
@@ -535,6 +536,11 @@ int Client::run() {
         double x = 0.0;
         double y = 0.0;
         guiMouse(x, y);
+        // The Highest FPS Test's label is the corner of the screen it draws itself in: a click there stops the test and puts every option back (nothing in the world is pressed).
+        if (action == kPress && button == 0 && falcon::fps_test::running() && x >= 2.0 && x < 192.0 && y >= 2.0 && y < 34.0) {
+            falcon::fps_test::stop(gameOptions);
+            return;
+        }
         if (action == kPress) {
             if (button == 0) leftDown = true;
             screens.back()->mouseClicked(x, y, button);
@@ -938,6 +944,13 @@ int Client::run() {
                                static_cast<int>(std::floor(mouseY)),
                                FrameTime{millis, deltaTicks});
         nowPlayingToast.render(graphics, millis);  // toasts draw above every screen
+        if (falcon::fps_test::running()) {  // the Highest FPS Test's frame rate, in the corner (it stands in for the F3 screen, which costs frames)
+            char rate[96];
+            std::snprintf(rate, sizeof(rate), "Highest FPS Test  %.0f fps (%.2f ms)", falcon::fps_test::fps(), falcon::fps_test::millis());
+            graphics.fill(2, 2, 192, 34, 0xB4000000u);
+            graphics.text(rate, 6.0f, 6.0f, 0xFFFFFFFFu);
+            graphics.text("click here to stop and restore", 6.0f, 19.0f, 0xFFA8A8A8u);
+        }
         if (!overlayMessage.empty() && millis < overlayUntilMillis) {  // the screenshot message (a stand-in for the chat line)
             const int w = graphics.textWidth(overlayMessage);
             const double left = overlayUntilMillis - millis;
@@ -997,7 +1010,10 @@ int Client::run() {
         }
         window.swapBuffers();
         markPhase(kFramePresent);
-        if (session != nullptr) session->noteFrame(frameMillis, framePhases);
+        if (session != nullptr) {
+            session->noteFrame(frameMillis, framePhases);
+            falcon::fps_test::setFrame(session->fps(), session->frameMillis());
+        }
         {   // Without vsync and without a frame cap the CPU would queue frames far ahead of the graphics card: allow two (see FrameQueue).
             static const char* forcedAhead = std::getenv("FALCON_FRAME_AHEAD");  // (for tests: a number of frames, 0 = no limit, even in a hidden window)
             const bool uncapped = !window.background() && window.focused() && !gameOptions.enableVsync && gameOptions.framerateLimit >= 260;

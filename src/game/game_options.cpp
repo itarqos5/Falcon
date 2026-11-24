@@ -96,7 +96,6 @@ void GameOptions::save(OptionsFile& f) const {
     f.set("graphicsPreset", static_cast<int>(graphicsPreset));
     f.set("biomeBlendRadius", biomeBlendRadius);
     f.set("renderDistance", renderDistance);
-    f.set("prioritizeChunkUpdates", static_cast<int>(prioritizeChunkUpdates));
     f.set("simulationDistance", simulationDistance);
     f.set("ao", ambientOcclusion);
     f.set("renderClouds", static_cast<int>(cloudStatus));
@@ -113,6 +112,10 @@ void GameOptions::save(OptionsFile& f) const {
     f.set("lodsEnabled", lodsEnabled);
     f.set("lodChunkRadius", lodChunkRadius);
     f.set("lodDetail", lodDetail);
+    f.set("sky", skyEnabled);
+    f.set("sun", sunEnabled);
+    f.set("moon", moonEnabled);
+    f.set("stars", starsEnabled);
     f.set("showAutosaveIndicator", showAutosaveIndicator);
     f.set("vignette", vignette);
     f.set("attackIndicator", static_cast<int>(attackIndicator));
@@ -226,7 +229,6 @@ void GameOptions::load(const OptionsFile& f) {
     graphicsPreset = readEnum(f, "graphicsPreset", graphicsPreset, 4);
     biomeBlendRadius = std::clamp(f.getInt("biomeBlendRadius", biomeBlendRadius), 0, 7);
     renderDistance = std::clamp(f.getInt("renderDistance", renderDistance), 2, 32);
-    prioritizeChunkUpdates = readEnum(f, "prioritizeChunkUpdates", prioritizeChunkUpdates, 3);
     simulationDistance = std::clamp(f.getInt("simulationDistance", simulationDistance), 5, 32);
     ambientOcclusion = f.getBool("ao", ambientOcclusion);
     cloudStatus = readEnum(f, "renderClouds", cloudStatus, 3);
@@ -243,6 +245,10 @@ void GameOptions::load(const OptionsFile& f) {
     lodsEnabled = f.getBool("lodsEnabled", lodsEnabled);
     lodChunkRadius = std::clamp(f.getInt("lodChunkRadius", lodChunkRadius), 64, 8192);
     lodDetail = std::clamp(f.getInt("lodDetail", lodDetail), 0, 2);
+    skyEnabled = f.getBool("sky", skyEnabled);
+    sunEnabled = f.getBool("sun", sunEnabled);
+    moonEnabled = f.getBool("moon", moonEnabled);
+    starsEnabled = f.getBool("stars", starsEnabled);
     showAutosaveIndicator = f.getBool("showAutosaveIndicator", showAutosaveIndicator);
     vignette = f.getBool("vignette", vignette);
     attackIndicator = readEnum(f, "attackIndicator", attackIndicator, 3);

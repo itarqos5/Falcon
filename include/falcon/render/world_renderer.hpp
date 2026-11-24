@@ -140,6 +140,10 @@ public:
     void setBrightness(float brightness) { brightness_ = brightness; }
     // The sky of this moment (world/day_cycle.hpp): its colours, the sun, the moon, the stars, and how much of the sky's light the night takes away. Call every frame.
     void setSky(const daycycle::Sky& sky) { skyState_ = sky; }
+    // Which parts of the sky are drawn (the Sky page of Video Settings). With the sky off nothing above the horizon is drawn at all, and the world is drawn over the clear
+    // colour. The sun and the moon are two pictures in one texture that the sky samples: turning one off rebuilds that texture without it, so the sky's shader (and its Vulkan
+    // twin) is the same either way. Call whenever an option changes; a call with the same values does nothing.
+    void setSkyElements(bool sky, bool sun, bool moon, bool stars);
     // How many levels of sky light the night takes away just now (0 by day): what the rules of the game (spawning, sleeping) subtract from the sky light they read.
     [[nodiscard]] float skyDarkSteps() const { return skyState_.darkSteps; }
     // The light the player carries (a torch in the hand): `level` (0..15; 0 is none) shines from the block (x, y, z), spreading and
@@ -342,7 +346,10 @@ private:
     ShaderProgram lines_;
     ShaderProgram cracks_;
     std::vector<Texture2D> breakTextures_;
-    Texture2D celestial_;  // the sun and the eight faces of the moon, one under another (each 32 x 32): the sky draws them from it
+    Texture2D celestial_;     // the sun and the eight faces of the moon, one under another (each 32 x 32): the sky draws them from it
+    Image celestialImage_;    // the atlas the texture above was made from: setSkyElements puts the sun or the moon back into it
+    bool celestialSun_ = true, celestialMoon_ = true;
+    bool skyVisible_ = true, skyStarsOn_ = true;
     gl::GLint crackViewProj_ = -1, crackTex_ = -1;
     gl::GLuint crackVao_ = 0, crackVbo_ = 0;
     gl::GLint uViewProj_ = -1, uOffset_ = -1, uFogColor_ = -1, uFogRange_ = -1, uAlphaCut_ = -1, uTex_ = -1, uGamma_ = -1;

@@ -1,6 +1,7 @@
 #pragma once
 
 // The small things the parts of GameSession share (game_session*.cpp): the length of a tick, a printf into a string, a little statistics, the light a held item gives.
+#include "falcon/game/fps_test.hpp"
 #include "falcon/game/game_session.hpp"
 
 #include <algorithm>
@@ -32,15 +33,24 @@ inline std::string format(const char* pattern, ...) {
     return buffer;
 }
 
+// The Highest FPS Test (falcon/game/fps_test.hpp) makes every job the game hands out use every core of the PC, where it otherwise leaves one or two free.
+inline unsigned everyCore() { return std::max(2u, std::thread::hardware_concurrency()); }
 // Chunks are made and meshed on this many threads: about half the logical cores (min 3, max 8), so loading and
 // terrain fill-in are quick while the main and render threads - and anything else running - still keep cores.
-inline unsigned workerCount() { return std::clamp(std::thread::hardware_concurrency() / 2, 3u, 8u); }
+inline unsigned workerCount() {
+    if (fps_test::useAllCores()) return std::clamp(everyCore(), 3u, 32u);
+    return std::clamp(std::thread::hardware_concurrency() / 2, 3u, 8u);
+}
 // ... and while the world loads (the loading screen: nothing else is going on) all but two of them, at below-normal priority.
-inline unsigned loadWorkerCount() { return std::clamp(std::thread::hardware_concurrency() > 2 ? std::thread::hardware_concurrency() - 2 : 1u, workerCount(), 16u); }
+inline unsigned loadWorkerCount() {
+    if (fps_test::useAllCores()) return std::clamp(everyCore(), 3u, 32u);
+    return std::clamp(std::thread::hardware_concurrency() > 2 ? std::thread::hardware_concurrency() - 2 : 1u, workerCount(), 16u);
+}
 // ... and while LOD tiles are being made (just arrived, or flying fast): every core but one (at most 32), until the tiles are there. One tile is shared out over those
 // threads (render/lod_renderer.cpp hands each a band of its rows), so the horizon fills in at the rate of the slowest band rather than of one tile. The threads run at
 // below-normal priority.
 inline unsigned lodWorkerCount() {
+    if (fps_test::useAllCores()) return std::clamp(everyCore(), 3u, 32u);
     const unsigned cores = std::max(2u, std::thread::hardware_concurrency());
     return std::clamp(cores - 1, workerCount(), 32u);
 }

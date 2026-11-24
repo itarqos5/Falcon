@@ -1,5 +1,6 @@
 #include "falcon/game/options_video_screens.hpp"
 
+#include "falcon/game/fps_test.hpp"
 #include "falcon/game/game_session.hpp"
 #include "falcon/game/key_binds_screen.hpp"
 #include "falcon/platform/memory.hpp"
@@ -63,11 +64,12 @@ struct VideoSettingsModel {
     // A button of the Developer page's panel (drawn and hit-tested by the screen: it is not an option of the list).
     struct DevButton {
         std::string label;
-        int action = 0;  // 0: restart the counts, 1: the Highest FPS Test, 2: put the settings back
+        int action = 0;  // 0: restart the counts, 1: the Highest FPS Test (its confirmation panel), 2: put the settings back, 3: OK and 4: Cancel in that panel
         int x = 0, y = 0, w = 0, h = 0;
         bool enabled = true;
     };
     std::vector<DevButton> devButtons;
+    std::vector<DevButton> confirmButtons;  // (the "Are you sure?" panel's own, while it is up)
 
     GameOptions pending;  // the options as the screen has them, until Apply
     std::vector<Page> pages;
@@ -216,12 +218,13 @@ struct Builder {
 void buildPages(VideoSettingsModel& m, ScreenServices& services, const std::function<std::string(const std::string&)>& tr) {
     using falcon::formatLanguageString;
     Builder b{m, services, tr};
-    m.pages.resize(5);
+    m.pages.resize(6);
     m.pages[0].name = "Video";
     m.pages[1].name = "Graphics";
     m.pages[2].name = "LODs";
-    m.pages[3].name = "Other";
-    m.pages[4].name = "Developer";  // (no options: the screen draws a panel of what the frames cost, see drawDeveloper)
+    m.pages[3].name = "Sky";
+    m.pages[4].name = "Other";
+    m.pages[5].name = "Developer";  // (no options: the screen draws a panel of what the frames cost, see drawDeveloper)
     const auto chunks = [tr](int n) { return formatLanguageString(tr("options.chunks"), {std::to_string(n)}); };
     const auto offOr = [tr](int n) { return n == 0 ? tr("options.off") : std::to_string(n); };
 
@@ -295,13 +298,6 @@ void buildPages(VideoSettingsModel& m, ScreenServices& services, const std::func
                &GameOptions::simulationDistance, chunks, true);
     b.intRange(1, 1, tr("options.biomeBlendRadius"), "How softly the colours of grass, leaves and water change from biome to biome.", Impact::Low, 0, 7, &GameOptions::biomeBlendRadius,
                [tr](int n) { return tr("options.biomeBlendRadius." + std::to_string(2 * n + 1)); }, true);
-    b.cycle(1, 1, tr("options.prioritizeChunkUpdates"),
-            "Threaded: nearby chunks are compiled in parallel threads. This may result in brief visual holes when blocks are destroyed.\nSemi Blocking: some actions within a chunk "
-            "will recompile the chunk immediately. This includes block placing and destroying.\nFully Blocking: nearby chunks are always compiled immediately. This may impact game "
-            "performance when blocks are placed or destroyed.",
-            Impact::Medium, {tr("options.prioritizeChunkUpdates.none"), tr("options.prioritizeChunkUpdates.byPlayer"), tr("options.prioritizeChunkUpdates.nearby")},
-            &GameOptions::prioritizeChunkUpdates, true);
-
     b.toggle(1, 2, tr("options.ao"), "Smooth lighting: the soft shade in corners and under overhangs.", Impact::Medium, &GameOptions::ambientOcclusion, true);
     b.cycle(1, 2, tr("options.renderClouds"), "Fast clouds are flat, fancy ones have a thickness.", Impact::Medium, {tr("options.off"), tr("options.clouds.fast"), tr("options.clouds.fancy")},
             &GameOptions::cloudStatus, true);
@@ -356,13 +352,28 @@ void buildPages(VideoSettingsModel& m, ScreenServices& services, const std::func
         strength.enabled = lodsOn;
     }
 
+    // ---- Sky: what is drawn above the horizon ----
+    b.toggle(3, 0, "Sky",
+             "The sky itself: the gradient from the horizon to overhead, and the fog takes its colour. Off draws the world over the clear colour instead: nothing above the horizon, "
+             "which is the least the game can draw.",
+             Impact::Low, &GameOptions::skyEnabled, true);
+    {
+        const auto skyOn = [](const GameOptions& g) { return g.skyEnabled; };
+        Option& sun = b.toggle(3, 0, "Sun", "The sun, and the glow it throws along the horizon at sunrise and sunset.", Impact::Low, &GameOptions::sunEnabled, true);
+        Option& moon = b.toggle(3, 0, "Moon", "The moon, in the phase of the day it is.", Impact::Low, &GameOptions::moonEnabled, true);
+        Option& stars = b.toggle(3, 0, "Stars", "The stars of the night sky.", Impact::Low, &GameOptions::starsEnabled, true);
+        sun.enabled = skyOn;
+        moon.enabled = skyOn;
+        stars.enabled = skyOn;
+    }
+
     // ---- Other ----
-    b.toggle(3, 0, tr("options.autosaveIndicator"), {}, Impact::None, &GameOptions::showAutosaveIndicator, false);
-    b.toggle(3, 0, tr("options.vignette"),
+    b.toggle(4, 0, tr("options.autosaveIndicator"), {}, Impact::None, &GameOptions::showAutosaveIndicator, false);
+    b.toggle(4, 0, tr("options.vignette"),
              "This is a subtle texture over the game screen used for reducing brightness towards the edges of the screen and warning about the world border.", Impact::None,
              &GameOptions::vignette, false);
-    b.cycle(3, 0, tr("options.attackIndicator"), {}, Impact::None, {tr("options.off"), tr("options.attack.crosshair"), tr("options.attack.hotbar")}, &GameOptions::attackIndicator, false);
-    b.range(3, 0, tr("options.chunkFade"), "How long in seconds chunks should fade in when they're first rendered, if at all.", Impact::None, 0, 40,
+    b.cycle(4, 0, tr("options.attackIndicator"), {}, Impact::None, {tr("options.off"), tr("options.attack.crosshair"), tr("options.attack.hotbar")}, &GameOptions::attackIndicator, false);
+    b.range(4, 0, tr("options.chunkFade"), "How long in seconds chunks should fade in when they're first rendered, if at all.", Impact::None, 0, 40,
             [](const GameOptions& g) { return static_cast<int>(std::lround(g.chunkSectionFadeInTime * 20.0)); }, [](GameOptions& g, int i) { g.chunkSectionFadeInTime = i / 20.0; },
             [](int i) { return i <= 0 ? std::string("None") : fixed(i / 20.0, 2) + " s"; }, false);
 }
@@ -461,7 +472,7 @@ std::vector<std::string> wrap(const GuiGraphics& g, const std::string& text, int
 }
 
 // The page that is a panel rather than a list of options.
-constexpr int kDeveloperPage = 4;
+constexpr int kDeveloperPage = 5;
 
 }  // namespace
 
@@ -477,7 +488,6 @@ void VideoSettingsScreen::applyPreset(GameOptions& o, GraphicsPreset preset) {
     if (preset == GraphicsPreset::Custom) return;
     struct Row {
         int biome, render;
-        ChunkUpdates chunks;
         int simulation;
         bool ao;
         CloudStatus clouds;
@@ -492,16 +502,15 @@ void VideoSettingsScreen::applyPreset(GameOptions& o, GraphicsPreset preset) {
         bool lods;
         int lodRadius, lodDetail;
     };
-    static constexpr Row kFast = {1, 8, ChunkUpdates::None, 6, false, CloudStatus::Fast, ParticleStatus::Decreased, 2,
+    static constexpr Row kFast = {1, 8, 6, false, CloudStatus::Fast, ParticleStatus::Decreased, 2,
                                   false, 0.75, 2, 32, false, false, 5, 1, TextureFiltering::None, false, 64, kLodDetailLow};
-    static constexpr Row kFancy = {2, 16, ChunkUpdates::PlayerAffected, 12, true, CloudStatus::Fancy, ParticleStatus::All, 4,
+    static constexpr Row kFancy = {2, 16, 12, true, CloudStatus::Fancy, ParticleStatus::All, 4,
                                    true, 1.0, 5, 64, true, false, 10, 1, TextureFiltering::Rgss, true, 128, kLodDetailMedium};
-    static constexpr Row kFabulous = {2, 32, ChunkUpdates::PlayerAffected, 12, true, CloudStatus::Fancy, ParticleStatus::All, 4,
+    static constexpr Row kFabulous = {2, 32, 12, true, CloudStatus::Fancy, ParticleStatus::All, 4,
                                       true, 1.25, 5, 128, true, true, 10, 2, TextureFiltering::Anisotropic, true, 256, kLodDetailFull};
     const Row& r = preset == GraphicsPreset::Fast ? kFast : preset == GraphicsPreset::Fancy ? kFancy : kFabulous;
     o.biomeBlendRadius = r.biome;
     o.renderDistance = r.render;
-    o.prioritizeChunkUpdates = r.chunks;
     o.simulationDistance = r.simulation;
     o.ambientOcclusion = r.ao;
     o.cloudStatus = r.clouds;
@@ -522,38 +531,7 @@ void VideoSettingsScreen::applyPreset(GameOptions& o, GraphicsPreset preset) {
     o.graphicsPreset = preset;
 }
 
-void VideoSettingsScreen::applyHighestFps(GameOptions& o) {
-    o.renderDistance = 2;  // (the least the world can be drawn at, and the least block data in memory)
-    o.simulationDistance = 5;
-    o.biomeBlendRadius = 0;
-    o.prioritizeChunkUpdates = ChunkUpdates::None;
-    o.ambientOcclusion = false;  // (the light is baked into the chunks' vertices: off is the cheap mesh)
-    o.cloudStatus = CloudStatus::Off;
-    o.cloudRange = 2;
-    o.particles = ParticleStatus::Minimal;
-    o.weatherRadius = 3;
-    o.entityShadows = false;
-    o.entityDistanceScaling = 0.5;
-    o.mipmapLevels = 0;
-    o.textureFiltering = TextureFiltering::None;
-    o.maxAnisotropyBit = 1;
-    o.cutoutLeaves = false;  // solid leaves: no cutout pass in their shader
-    o.improvedTransparency = false;
-    o.menuBackgroundBlurriness = 0;
-    o.lodsEnabled = false;  // (their tiles are given back: the most memory a world holds)
-    o.lodChunkRadius = kLodMinChunks;
-    o.lodDetail = kLodDetailLow;
-    o.enableVsync = false;  // (the frame is not held back for the display)
-    o.framerateLimit = 260;
-    o.vignette = false;
-    o.attackIndicator = AttackIndicator::Off;
-    o.chunkSectionFadeInTime = 0.0;
-    o.showAutosaveIndicator = false;
-    o.bobView = false;
-    o.screenEffectScale = 0.0;
-    o.fovEffectScale = 0.0;
-    o.graphicsPreset = GraphicsPreset::Custom;
-}
+void VideoSettingsScreen::applyHighestFps(GameOptions& o) { fps_test::applyLowest(o); }
 
 // ---- layout and actions ----
 
@@ -640,9 +618,7 @@ void VideoSettingsScreen::apply() {
 }
 
 void VideoSettingsScreen::undo() {
-    if (highestFpsBackup_) {  // the Highest FPS Test is taken back first: it is what the settings were before anything else
-        services_.options = *highestFpsBackup_;
-        highestFpsBackup_.reset();
+    if (fps_test::stop(services_.options)) {  // the Highest FPS Test is taken back first: it is what the settings were before anything else
         developerNote_ = "Settings restored.";
         if (services_.session != nullptr) services_.session->resetFrameStats();
     }
@@ -735,13 +711,19 @@ void VideoSettingsScreen::drawDeveloper(GuiGraphics& g) {
                  (o.cutoutLeaves ? "cutout" : "solid"),
              kGrey);
     }
-    heading("Highest FPS Test");
-    line("Every setting to its least (2 chunks, no LODs, no clouds, flat lighting) and a fresh count: what is above is then the highest the game can make.", kGrey);
+    // The Highest FPS Test: its name and the button that starts it on one line (the button sits beside what it is named after), then what it does.
+    y += 5;
+    const int titleTop = y;
+    if (titleTop + 10 <= textBottom) g.text("Highest FPS Test", static_cast<float>(left), static_cast<float>(titleTop), pack(1.0f, 0.62f, 0.5f, 1.0f));
+    y = titleTop + kWidgetHeight;
+    line("Every setting to its least (2 chunks, no LODs, no clouds, no sky, sun, moon or stars, flat lighting), every core on every job, and the frame rate in the corner instead of "
+         "the F3 screen. Clicking that label, or Restore, puts every setting back exactly as it was.",
+         kGrey);
     g.disableScissor();
 
-    // The panel's own buttons: the test, what puts the settings back afterwards, and a fresh count.
+    // The panel's own buttons: a fresh count, and what puts the settings back afterwards (the test's own sits on the title).
     m.devButtons.clear();
-    const auto addButton = [&](const char* label, int action, bool enabled) {
+    const auto addButton = [&](const std::string& label, int action, bool enabled) {
         VideoSettingsModel::DevButton b;
         b.label = label;
         b.action = action;
@@ -752,15 +734,52 @@ void VideoSettingsScreen::drawDeveloper(GuiGraphics& g) {
         m.devButtons.push_back(b);
     };
     addButton("Reset counts", 0, session != nullptr);
-    addButton("Test", 1, true);
-    addButton("Restore", 2, highestFpsBackup_.has_value());
+    addButton("Restore", 2, fps_test::running());
+    {
+        VideoSettingsModel::DevButton test;
+        test.label = "Test";
+        test.action = 1;
+        test.w = g.textWidth(test.label) + 16;
+        test.h = kWidgetHeight;
+        test.x = left + g.textWidth("Highest FPS Test") + 8;
+        test.y = titleTop - (kWidgetHeight - 10) / 2;
+        m.devButtons.push_back(test);
+    }
     int bx = left;
     for (auto& b : m.devButtons) {
+        if (b.action == 1) continue;  // (it is placed already)
         b.x = bx;
         bx += b.w + 6;
     }
     for (const auto& b : m.devButtons) drawButton(g, b.x, b.y, b.w, b.h, b.label, b.enabled, false, true, 0.0f);
     if (!developerNote_.empty()) g.text(developerNote_, static_cast<float>(left), static_cast<float>(buttonsY - 11), kGrey);
+
+    // The "Are you sure?" panel of the test, in VulkanMod's style: the screen dimmed, a black panel with a red frame, the question, and OK and Cancel under it.
+    m.confirmButtons.clear();
+    if (!confirmHighestFps_) return;
+    const int panelWidth = std::min(width_ - 40, 340), panelHeight = 128;
+    const int px = (width_ - panelWidth) / 2, py = (height_ - panelHeight) / 2;
+    g.fill(0, 0, width_, height_, withAlpha(kBlack, 0.55f));
+    g.fill(px, py, px + panelWidth, py + panelHeight, withAlpha(kBlack, 0.9f));
+    border(g, px, py, px + panelWidth, py + panelHeight, 1, kRed);
+    g.fill(px, py, px + panelWidth, py + 20, withAlpha(kRed, 0.25f));
+    g.text("Highest FPS Test", static_cast<float>(px + 10), static_cast<float>(py + 6), kWhite, false, false, true);
+    int ty = py + 30;
+    for (const std::string& row : wrap(g, "Are you sure? This will overwrite all your current settings.\nThey are put back, exactly as they are now, when the test is stopped.", panelWidth - 20)) {
+        g.text(row, static_cast<float>(px + 10), static_cast<float>(ty), kWhite);
+        ty += 10;
+    }
+    for (int i = 0; i < 2; ++i) {
+        VideoSettingsModel::DevButton b;
+        b.label = i == 0 ? "OK" : "Cancel";
+        b.action = 3 + i;
+        b.w = 64;
+        b.h = kWidgetHeight;
+        b.x = px + panelWidth / 2 - 68 + i * 72;
+        b.y = py + panelHeight - kWidgetHeight - 10;
+        m.confirmButtons.push_back(b);
+    }
+    for (const auto& b : m.confirmButtons) drawButton(g, b.x, b.y, b.w, b.h, b.label, true, false, true, 0.0f);
 }
 
 void VideoSettingsScreen::render(GuiGraphics& g, int mouseX, int mouseY, const FrameTime& time) {
@@ -979,6 +998,23 @@ bool VideoSettingsScreen::mouseClicked(double x, double y, int button) {
     }
     setFocus(nullptr);
 
+    // The Highest FPS Test's confirmation panel takes every click while it is up (Cancel, or the panel's glass, closes it and changes nothing).
+    if (confirmHighestFps_) {
+        for (const VideoSettingsModel::DevButton& b : m.confirmButtons) {
+            if (x < b.x || x >= b.x + b.w || y < b.y || y >= b.y + b.h) continue;
+            navigator_.playButtonClick();
+            confirmHighestFps_ = false;
+            if (b.action == 3) {  // OK: every option is overwritten now, and the label in the corner shows the frame rate until it is stopped
+                fps_test::start(services_.options, services_.options);
+                m.pending = services_.options;
+                if (services_.session != nullptr) services_.session->resetFrameStats();
+                developerNote_ = "Test running: click the frame rate in the corner, or Restore, to put the settings back.";
+            }
+            return true;
+        }
+        return true;
+    }
+
     for (int i = 0; i < static_cast<int>(m.pages.size()); ++i) {
         const int py = 4 + kIconHeight + i * kWidgetHeight;
         if (x >= kMargin && x < kMargin + kPageWidth && y >= py && y < py + kWidgetHeight) {
@@ -996,14 +1032,9 @@ bool VideoSettingsScreen::mouseClicked(double x, double y, int button) {
                 if (services_.session != nullptr) services_.session->resetFrameStats();
                 developerNote_ = "Counts restarted.";
             } else if (b.action == 1) {
-                if (!highestFpsBackup_) highestFpsBackup_ = services_.options;
-                applyHighestFps(services_.options);
-                m.pending = services_.options;
-                if (services_.session != nullptr) services_.session->resetFrameStats();
-                developerNote_ = "Lowest settings applied: Restore puts them back.";
-            } else if (highestFpsBackup_) {
-                services_.options = *highestFpsBackup_;
-                highestFpsBackup_.reset();
+                confirmHighestFps_ = true;
+                developerNote_.clear();
+            } else if (fps_test::stop(services_.options)) {
                 m.pending = services_.options;
                 if (services_.session != nullptr) services_.session->resetFrameStats();
                 developerNote_ = "Settings restored.";

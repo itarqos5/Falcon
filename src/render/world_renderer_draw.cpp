@@ -66,10 +66,12 @@ void WorldRenderer::render(const Camera& camera, int framebufferWidth, int frame
     const Matrix4f viewProj = perspective(camera.fov, aspect, 0.05f, farPlane) * view;
     lastViewProj_ = viewProj;
 
-    // The sky: a gradient from the horizon haze to the blue overhead, drawn behind everything.
+    // The sky: a gradient from the horizon haze to the blue overhead, drawn behind everything. With the sky off (the Sky page, and the Highest FPS Test) nothing above the
+    // horizon is drawn at all: the world is drawn over the clear colour.
     gl::Disable(gl::DEPTH_TEST);
     gl::Disable(gl::CULL_FACE);
     gl::Disable(gl::BLEND);
+    if (skyVisible_) {
     sky_.use();
     const float tanHalf = std::tan(camera.fov * 0.5f * 0.017453292f);
     gl::Uniform3f(skyRight_, view.m[0], view.m[4], view.m[8]);
@@ -89,7 +91,7 @@ void WorldRenderer::render(const Camera& camera, int framebufferWidth, int frame
         gl::Uniform3f(skyZenith_, skyState_.zenith[0], skyState_.zenith[1], skyState_.zenith[2]);
         gl::Uniform3f(skySunDir_, skyState_.sunDir[0], skyState_.sunDir[1], skyState_.sunDir[2]);
         gl::Uniform2f(skyAngle_, skyState_.sinAngle, skyState_.cosAngle);
-        gl::Uniform1f(skyStars_, skyState_.stars);
+        gl::Uniform1f(skyStars_, skyStarsOn_ ? skyState_.stars : 0.0f);
         gl::Uniform4f(skyGlow_, skyState_.glow[0], skyState_.glow[1], skyState_.glow[2], skyState_.glow[3]);
         gl::Uniform1f(skyMoon_, skyState_.moonPhase);
     }
@@ -97,6 +99,7 @@ void WorldRenderer::render(const Camera& camera, int framebufferWidth, int frame
     gl::Uniform1i(skyCelestial_, 0);
     gl::BindVertexArray(emptyVao_);
     gl::DrawArrays(gl::TRIANGLES, 0, 3);
+    }
 
     // The levels of detail beyond the loaded chunks, in a pass of their own; then the depth is cleared, so the chunks are drawn over them whatever the LODs predicted.
     const bool lodsOn = lod_ != nullptr && lodSettings_.enabled;
