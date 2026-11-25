@@ -130,6 +130,9 @@ void GameSession::renderWorld(int framebufferWidth, int framebufferHeight) {
     renderer_.setEnvironmentFog(dimension_ == 1 ? 10.0f : 1.0e9f, dimension_ == 1 ? 96.0f : 2.0e9f);
     renderer_.setSky(skyNow);
     renderer_.setSkyElements(services_.options.skyEnabled, services_.options.sunEnabled, services_.options.moonEnabled, services_.options.starsEnabled);
+    renderer_.setClouds(services_.options.cloudStatus != CloudStatus::Off, services_.options.cloudStatus == CloudStatus::Fancy, services_.options.cloudRange);
+    renderer_.setWeather(raining_, services_.options.weatherRadius);
+    renderer_.setBlockTextureMipmaps(services_.options.mipmapLevels);
     setEntitySkyLight(skyNow.skyLightFactor, skyNow.skyLightColor, skyNow.ambient);
     renderer_.render(cam, framebufferWidth, framebufferHeight, renderDistance());
     if (ready_ && target_) renderer_.drawSelection(cam, framebufferWidth, framebufferHeight, target_->x, target_->y, target_->z);

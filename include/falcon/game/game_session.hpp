@@ -587,6 +587,7 @@ private:
     long long dayTime_ = 0;   // a new world starts at sunrise, as the game's do
     long long gameTime_ = 0;
     bool timeFrozen_ = false;  // --time
+    bool raining_ = false;     // /weather rain: the drops are drawn around the player out to the Weather Radius
     bool timePaused_ = false;  // /time pause
     double timeRate_ = 1.0;    // /time rate: how fast the day goes (1: normal)
     double timeFraction_ = 0.0;  // the part of a tick a rate other than 1 has gathered

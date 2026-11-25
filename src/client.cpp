@@ -940,6 +940,20 @@ int Client::run() {
         markPhase(kFrameDraw);
         guiRenderer.begin(fbW, fbH, guiScale);
         graphics.beginFrame(guiWidth, guiHeight, fbW, fbH);
+        if (gameOptions.vignette) {  // the game's vignette: the edges of the screen darkened a little more than the middle (Video Settings > Other)
+            constexpr int steps = 20;
+            for (int i = 0; i < steps; ++i) {
+                const double fade = 1.0 - static_cast<double>(i) / steps;
+                const auto alpha = static_cast<std::uint32_t>(std::lround(70.0 * fade * fade));
+                if (alpha == 0) continue;
+                const std::uint32_t colour = alpha << 24;
+                const int up = i * guiHeight / (2 * steps), side = i * guiWidth / (2 * steps);
+                graphics.fill(0, up, guiWidth, up + 1, colour);
+                graphics.fill(0, guiHeight - up - 1, guiWidth, guiHeight - up, colour);
+                graphics.fill(side, 0, side + 1, guiHeight, colour);
+                graphics.fill(guiWidth - side - 1, 0, guiWidth - side, guiHeight, colour);
+            }
+        }
         screens.back()->render(graphics, static_cast<int>(std::floor(mouseX)),
                                static_cast<int>(std::floor(mouseY)),
                                FrameTime{millis, deltaTicks});
@@ -1038,9 +1052,11 @@ int Client::run() {
         // than spinning a core while someone is busy doing something else. A window that is not the one being
         // used (another program has the focus) is held to 20 fps, so a game running next to it keeps the machine.
         static const bool noPacing = std::getenv("FALCON_NO_PACING") != nullptr;  // (to measure a hidden window running flat out, as an uncapped one does)
+        // Inactivity FPS Limit: a window nobody is looking at is not drawn at full speed. Minimized means only a minimized window is held back (to 10 frames a second);
+        // AFK also holds one that is merely not focused (to 20), the way the game does when nothing has been touched for a while.
         if (window.background()) {
-            if (!noPacing) std::this_thread::sleep_for(std::chrono::milliseconds(16));
-        } else if (!window.focused()) {
+            if (!noPacing) std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        } else if (!window.focused() && gameOptions.inactivityFpsLimit == InactivityFpsLimit::Afk) {
             const auto spent = Clock::now() - now;
             const auto budget = std::chrono::milliseconds(50);
             if (spent < budget) std::this_thread::sleep_for(budget - spent);

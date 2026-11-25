@@ -322,7 +322,18 @@ void CommandRunner::run() {
         return;
     }
     if (command == "time") return timeCommand();
-    if (command == "weather") return unsupported("/" + command);
+    if (command == "weather") {  // /weather clear | rain | thunder: the drops the world draws round the player (the Weather Radius decides how far)
+        const std::string what = literals.size() > 1 ? literals[1] : std::string();
+        if (what == "rain" || what == "thunder") {
+            s.raining_ = true;
+            return say("It is raining.");
+        }
+        if (what == "clear") {
+            s.raining_ = false;
+            return say("The weather is clear.");
+        }
+        return say(std::string("The weather is ") + (s.raining_ ? "rain" : "clear") + ".");
+    }
     unsupported("/" + command);
 }
 

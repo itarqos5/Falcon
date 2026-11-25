@@ -117,6 +117,9 @@ void GameSession::breakBlockAt(int x, int y, int z, bool survival) {
             playBlockSound(broken, "break", breakOrPlaceMix(type.soundVolume, type.soundPitch), SoundSource::Blocks, &where);
         }
     }
+    // Video Settings' Particles: the game's eight bits of the block's own picture, four (Decreased) or none (Minimal). They fly, fall and fade (render/world_renderer.cpp).
+    const int bits = services_.options.particles == ParticleStatus::All ? 8 : services_.options.particles == ParticleStatus::Decreased ? 4 : 0;
+    renderer_.spawnBlockBits(x, y, z, registry_->type(broken).name, bits);
     if (!survival || remote_ || !gameRuleOn("block_drops")) return;  // (on a server the loot is the server's)
     const ItemStack tool = inventory_.selectedItem();
     collectDrop(broken, x, y, z, tool, !mining_ || mining_->correctForDrops(tool, broken));
