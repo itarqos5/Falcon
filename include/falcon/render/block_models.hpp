@@ -75,6 +75,8 @@ public:
     void animate(double ticks);
     void bindTextures(unsigned unit) const;
     [[nodiscard]] std::size_t gpuBytes() const { return array_.gpuBytes(); }
+    // The pictures themselves (the block texture array): what draws a particle's bits of a block, and anything else that samples a block picture outside the chunks.
+    [[nodiscard]] const TextureArray2D& pictures() const { return array_; }
 
     // ---- tints ----
     // The colour (0xRRGGBB) a tint source gives at a position. For now one fixed plains-like colour per source;

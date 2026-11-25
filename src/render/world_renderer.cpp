@@ -340,6 +340,14 @@ WorldRenderer::WorldRenderer(BlockModels& models, std::int64_t seed, TerrainStyl
     skyCelestial_ = sky_.uniform("uCelestial");
     celestialImage_ = makeCelestialAtlas(models.resources());
     celestial_ = Texture2D(celestialImage_, FilterMode::Nearest);
+    sprites_.init();
+    // The game's own cloud picture: 256 by 256 texels, 12 blocks to a texel, so the layer repeats every 3072 blocks.
+    if (const auto bytes = models.resources().readBytes(ResourceLocation("minecraft", "textures/environment/clouds.png"))) {
+        if (auto image = decodePng(*bytes); image && !image->empty()) cloudTexture_ = Texture2D(*image, FilterMode::Nearest);
+    }
+    if (const auto bytes = models.resources().readBytes(ResourceLocation("minecraft", "textures/environment/rain.png"))) {
+        if (auto image = decodePng(*bytes); image && !image->empty()) rainTexture_ = Texture2D(*image, FilterMode::Nearest);
+    }
     lineViewProj_ = lines_.uniform("uViewProj");
     crackViewProj_ = cracks_.uniform("uViewProj");
     crackTex_ = cracks_.uniform("uTex");
@@ -459,6 +467,42 @@ WorldRenderer::~WorldRenderer() {
 }
 
 // The attribute layout of a MeshVertex, pointing at whatever arena buffer is bound. Re-run after the arena grows.
+float WorldRenderer::bitRandom() {  // (a small generator of its own, so a bit's flight does not touch the world's randomness)
+    bitSeed_ = bitSeed_ * 1664525u + 1013904223u;
+    return static_cast<float>((bitSeed_ >> 8) & 0xFFFFu) / 65535.0f;
+}
+
+void WorldRenderer::setBlockTextureMipmaps(int levels) {
+    const int wanted = std::clamp(levels, 0, 4);
+    if (wanted == blockMipLevels_) return;
+    blockMipLevels_ = wanted;
+    const gl::GLuint id = models_.pictures().id();
+    if (id == 0) return;
+    gl::ActiveTexture(gl::TEXTURE0);
+    gl::BindTexture(gl::TEXTURE_2D_ARRAY, id);
+    gl::TexParameteri(gl::TEXTURE_2D_ARRAY, gl::TEXTURE_MAX_LEVEL, wanted);
+    gl::TexParameteri(gl::TEXTURE_2D_ARRAY, gl::TEXTURE_MIN_FILTER, wanted > 0 ? gl::NEAREST_MIPMAP_LINEAR : gl::NEAREST);
+}
+
+void WorldRenderer::spawnBlockBits(int x, int y, int z, const std::string& blockName, int count) {
+    if (count <= 0) return;
+    const float layer = static_cast<float>(models_.layerFor("block/" + blockName));
+    for (int i = 0; i < count; ++i) {
+        BlockBit bit;
+        // The game's BreakingItemParticle: the bit starts anywhere in the block, thrown out slowly and a little up, and the picture is a small square of the block's.
+        bit.pos = {static_cast<float>(x) + bitRandom(), static_cast<float>(y) + bitRandom(), static_cast<float>(z) + bitRandom()};
+        bit.velocity = {(bitRandom() - 0.5f) * 1.6f, bitRandom() * 1.2f + 0.4f, (bitRandom() - 0.5f) * 1.6f};
+        bit.maxLife = 0.6f + bitRandom() * 0.6f;
+        bit.life = bit.maxLife;
+        bit.size = 0.07f + bitRandom() * 0.05f;
+        bit.u0 = std::floor(bitRandom() * 4.0f) * 0.25f;
+        bit.v0 = std::floor(bitRandom() * 4.0f) * 0.25f;
+        bit.layer = layer;
+        bit.tint = {1.0f, 1.0f, 1.0f};
+        bits_.push_back(bit);
+    }
+}
+
 void WorldRenderer::setSkyElements(bool sky, bool sun, bool moon, bool stars) {
     skyVisible_ = sky;
     skyStarsOn_ = stars;

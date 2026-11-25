@@ -5,6 +5,7 @@
 #include "falcon/render/block_models.hpp"
 #include "falcon/render/camera.hpp"
 #include "falcon/render/lod_renderer.hpp"
+#include "falcon/render/sprite_renderer.hpp"
 #include "falcon/world/day_cycle.hpp"
 #include "falcon/util/priority_pool.hpp"
 #include "falcon/world/chunk.hpp"
@@ -144,6 +145,24 @@ public:
     // colour. The sun and the moon are two pictures in one texture that the sky samples: turning one off rebuilds that texture without it, so the sky's shader (and its Vulkan
     // twin) is the same either way. Call whenever an option changes; a call with the same values does nothing.
     void setSkyElements(bool sky, bool sun, bool moon, bool stars);
+    // The clouds (the Clouds option): off, a flat layer (fast) or that layer with a second one under it (fancy), out to `distanceChunks` chunks. Call every frame with the options.
+    // The bits a broken block throws (Video Settings' Particles: 0 for none, 4 for Decreased, 8 for All), out of the block's own picture at (x, y, z). They fly, fall and are
+    // gone in about a second, drawn with the world's fog and light like the world.
+    void spawnBlockBits(int x, int y, int z, const std::string& blockName, int count);
+    // Mipmap Levels (0: the block pictures are drawn at their own size, the sharpest and the cheapest; 1 to 4: the smaller copies of themselves the game makes, which far away
+    // blocks are drawn from). Call with the option; it costs nothing when the level has not changed.
+    void setBlockTextureMipmaps(int levels);
+    // Rain (or snow, but that is the picture's business): drops drawn round the player out to `radius` blocks, over the world. Off: none are drawn and the ones that were are gone.
+    void setWeather(bool rain, int radius) {
+        rain_ = rain;
+        rainRadius_ = radius;
+        if (!rain_) rainQuads_.clear();
+    }
+    void setClouds(bool on, bool thick, int distanceChunks) {
+        cloudsOn_ = on;
+        cloudsThick_ = thick;
+        cloudDistance_ = distanceChunks;
+    }
     // How many levels of sky light the night takes away just now (0 by day): what the rules of the game (spawning, sleeping) subtract from the sky light they read.
     [[nodiscard]] float skyDarkSteps() const { return skyState_.darkSteps; }
     // The light the player carries (a torch in the hand): `level` (0..15; 0 is none) shines from the block (x, y, z), spreading and
@@ -369,6 +388,26 @@ private:
     gl::GLint skyForward_ = -1, skyRight_ = -1, skyUp_ = -1, skyTan_ = -1, skyHorizon_ = -1, skyZenith_ = -1;
     gl::GLint skySunDir_ = -1, skyAngle_ = -1, skyStars_ = -1, skyGlow_ = -1, skyMoon_ = -1, skyCelestial_ = -1;
     daycycle::Sky skyState_;
+    // The clouds and the world's little quads (a broken block's bits): the game's own cloud picture, laid over the world 192 blocks up.
+    SpriteRenderer sprites_;
+    Texture2D cloudTexture_;
+    Texture2D rainTexture_;
+    // A bit of a block thrown by breaking one: where it is, how it moves, how long it has left and which part of the picture it shows.
+    struct BlockBit {
+        std::array<float, 3> pos, velocity;
+        float life = 0.0f, maxLife = 1.0f, size = 0.1f, u0 = 0.0f, v0 = 0.0f, layer = 0.0f;
+        std::array<float, 3> tint{1.0f, 1.0f, 1.0f};
+    };
+    std::vector<BlockBit> bits_;
+    std::vector<std::array<float, 3>> rainQuads_;  // (where each drop is this frame: x, y, z of its top)
+    bool rain_ = false;
+    int rainRadius_ = 10;
+    double lastFrameSeconds_ = 0.0;  // (the frame before this one: what the bits fall by)
+    unsigned bitSeed_ = 12345u;
+    int blockMipLevels_ = -1;  // (the Mipmap Levels the block pictures were set to: -1, not set yet)
+    [[nodiscard]] float bitRandom();
+    bool cloudsOn_ = false, cloudsThick_ = false;
+    int cloudDistance_ = 128;
     [[nodiscard]] bool lightmapSkyChanged() const;
     std::array<float, 7> lightmapSky_{};  // the sky factor and colour and the ambient light the light map picture was made for
     gl::GLint lineViewProj_ = -1;

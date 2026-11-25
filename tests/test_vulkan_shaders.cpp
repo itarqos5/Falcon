@@ -63,6 +63,10 @@ const std::vector<Expected>& programs() {
         {"arm", {"uProj", "uLight"}, {{"uSkin", 0, 0}}, {{0, 3}, {1, 2}, {2, 1}}},
         {"panorama", {"uProjection", "uView"}, {{"uSky", 3, 0}}, {{0, 3}}},
         {"blur", {"uInSize", "uBlurDir", "uRadius"}, {{"uInput", 0, 0}}, {}},
+        {"sprite",
+         {"uViewProj", "uFogColor", "uFogRange", "uFullbright"},
+         {{"uPicture", 0, 0}, {"uPictures", 1, 1}, {"uLightmap", 0, 2}},
+         {{0, 3}, {1, 2}, {2, 4}, {3, 2}}},
     };
     return list;
 }

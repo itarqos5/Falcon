@@ -29,6 +29,7 @@ public:
     void finish();
 
     void bind(unsigned unit = 0) const;
+    [[nodiscard]] gl::GLuint id() const { return id_; }
     [[nodiscard]] int size() const { return size_; }
     [[nodiscard]] int layers() const { return layers_; }
     [[nodiscard]] std::size_t gpuBytes() const;  // with the mips

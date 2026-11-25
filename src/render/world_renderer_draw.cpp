@@ -101,6 +101,33 @@ void WorldRenderer::render(const Camera& camera, int framebufferWidth, int frame
     gl::DrawArrays(gl::TRIANGLES, 0, 3);
     }
 
+    // The clouds: the game's own cloud picture laid over the world 192 blocks up, out to the cloud distance, crumbling into the fog at its edge. "Fancy" adds the layer the
+    // game draws under the top of its clouds, so they have a thickness; "Fast" is the one layer. They are drawn over the sky and under the terrain and the LODs, which are
+    // drawn over them wherever they are nearer, so a mountain cuts them off.
+    if (cloudsOn_ && cloudTexture_.id() != 0) {
+        const float reach = std::max(256.0f, static_cast<float>(cloudDistance_) * 16.0f);
+        const float y = 192.0f;  // (the game's cloud level)
+        const float period = 3072.0f;
+        const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+        const float shift = std::fmod(static_cast<float>(seconds) * 0.6f, period);  // (the clouds drift, a little slower than the game's walk)
+        const auto fog = underwater_ ? std::array<float, 3>{waterFogColor_[0], waterFogColor_[1], waterFogColor_[2]}
+                                     : std::array<float, 3>{skyState_.horizon[0], skyState_.horizon[1], skyState_.horizon[2]};
+        const std::array<float, 2> cloudFog = {reach * 0.55f, reach};
+        sprites_.begin(viewProj, fog, cloudFog, cloudTexture_, nullptr, lightmapTex_);
+        const float x0 = camera.x - reach, x1 = camera.x + reach, z0 = camera.z - reach, z1 = camera.z + reach;
+        for (float x = std::floor((x0 - shift) / period) * period + shift; x < x1; x += period) {
+            for (float z = std::floor(z0 / period) * period; z < z1; z += period) {
+                const float xa = std::max(x, x0), xb = std::min(x + period, x1);
+                const float za = std::max(z, z0), zb = std::min(z + period, z1);
+                const float ua = (xa - x) / period, ub = (xb - x) / period;
+                const float va = (za - z) / period, vb = (zb - z) / period;
+                sprites_.quad({xa, y, za}, {xa, y, zb}, {xb, y, zb}, {xb, y, za}, ua, va, ub, vb, {1.0f, 1.0f, 1.0f}, 0.85f);
+                if (cloudsThick_) sprites_.quad({xa, y - 4.0f, za}, {xb, y - 4.0f, za}, {xb, y - 4.0f, zb}, {xa, y - 4.0f, zb}, ua, va, ub, vb, {0.82f, 0.82f, 0.86f}, 0.85f);
+            }
+        }
+        sprites_.end();
+    }
+
     // The levels of detail beyond the loaded chunks, in a pass of their own; then the depth is cleared, so the chunks are drawn over them whatever the LODs predicted.
     const bool lodsOn = lod_ != nullptr && lodSettings_.enabled;
     if (lodsOn) {
@@ -324,6 +351,75 @@ void WorldRenderer::render(const Camera& camera, int framebufferWidth, int frame
     gl::DepthMask(gl::TRUE_);
     gl::Disable(gl::BLEND);
     gl::BindVertexArray(0);
+
+    // The bits a broken block threw, and the rain: quads over the world, tested against it (a bit behind a wall is hidden) and blended into it. Drawn after the terrain, so
+    // they never appear through it.
+    {
+        const double now = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+        const float dt = lastFrameSeconds_ > 0.0 ? static_cast<float>(std::min(0.1, now - lastFrameSeconds_)) : 0.0f;
+        lastFrameSeconds_ = now;
+        const std::array<float, 3> fogColor = underwater_ ? waterFogColor_ : skyState_.horizon;
+        const std::array<float, 2> fogRange = underwater_ ? std::array<float, 2>{waterFogStart_, waterFogEnd_} : std::array<float, 2>{envFogStart_, envFogEnd_};
+        const bool rainOn = rain_ && rainTexture_.id() != 0 && !underwater_;
+        if (!bits_.empty() || rainOn) {
+            const std::array<float, 3> right = {view.m[0], view.m[4], view.m[8]};
+            const std::array<float, 3> up = {view.m[1], view.m[5], view.m[9]};
+            sprites_.begin(viewProj, fogColor, fogRange, rainOn ? rainTexture_ : cloudTexture_, &models_.pictures(), lightmapTex_);
+            for (const BlockBit& b : bits_) {
+                const float s = b.size * (0.6f + 0.4f * std::min(1.0f, b.life / std::max(0.001f, b.maxLife) * 2.0f));
+                const std::array<float, 3> c = {b.pos[0] - static_cast<float>(camera.x), b.pos[1] - static_cast<float>(camera.y), b.pos[2] - static_cast<float>(camera.z)};
+                const auto corner = [&](float sr, float su) {
+                    return std::array<float, 3>{c[0] + right[0] * sr * s + up[0] * su * s, c[1] + right[1] * sr * s + up[1] * su * s, c[2] + right[2] * sr * s + up[2] * su * s};
+                };
+                const float alpha = std::clamp(b.life / std::max(0.001f, b.maxLife) * 2.0f, 0.0f, 1.0f);
+                sprites_.quad(corner(-1.0f, -1.0f), corner(1.0f, -1.0f), corner(1.0f, 1.0f), corner(-1.0f, 1.0f), b.u0, b.v0, b.u0 + 0.25f, b.v0 + 0.25f, b.tint, alpha, b.layer, true);
+            }
+            if (rainOn) {  // the drops round the player, out to the Weather Radius: thin streaks that fall, each in its own place
+                const auto hash = [](unsigned n) {
+                    n = (n ^ 61u) ^ (n >> 16);
+                    n *= 9u;
+                    n = n ^ (n >> 4);
+                    n *= 0x27d4eb2du;
+                    n = n ^ (n >> 15);
+                    return static_cast<float>(n & 0xFFFFu) / 65535.0f;
+                };
+                const float reach = static_cast<float>(std::max(3, rainRadius_));
+                const int drops = static_cast<int>(reach * reach * 2.2f) + 40;
+                for (int i = 0; i < drops; ++i) {
+                    const float angle = hash(static_cast<unsigned>(i) * 3u + 1u) * 6.2831853f;
+                    const float radius = std::sqrt(hash(static_cast<unsigned>(i) * 3u + 2u)) * reach;
+                    const float x = static_cast<float>(camera.x) + std::cos(angle) * radius;
+                    const float z = static_cast<float>(camera.z) + std::sin(angle) * radius;
+                    const float fall = std::fmod(hash(static_cast<unsigned>(i) * 3u + 3u) * 24.0f + static_cast<float>(now) * 16.0f, 24.0f);
+                    const float y = static_cast<float>(camera.y) + 12.0f - fall;
+                    const float cx = x - static_cast<float>(camera.x), cz = z - static_cast<float>(camera.z);
+                    const float w = 0.055f, h = 0.9f;
+                    const std::array<float, 3> a = {cx - right[0] * w, y - static_cast<float>(camera.y), cz - right[2] * w};
+                    const std::array<float, 3> bq = {cx - right[0] * w, y - static_cast<float>(camera.y) - h, cz - right[2] * w};
+                    const std::array<float, 3> c = {cx + right[0] * w, y - static_cast<float>(camera.y) - h, cz + right[2] * w};
+                    const std::array<float, 3> d = {cx + right[0] * w, y - static_cast<float>(camera.y), cz + right[2] * w};
+                    const float u0 = static_cast<float>(i % 8) * 0.125f;
+                    sprites_.quad(a, bq, c, d, u0, 0.0f, u0 + 0.125f, 1.0f, {0.75f, 0.8f, 0.95f}, 0.4f);
+                }
+            }
+            sprites_.end();
+        }
+        // (the bits fall whatever was drawn: gravity, then the height they landed at, and their life runs out)
+        for (BlockBit& bit : bits_) {
+            bit.life -= dt;
+            bit.velocity[1] -= 9.0f * dt;
+            bit.pos[0] += bit.velocity[0] * dt;
+            bit.pos[1] += bit.velocity[1] * dt;
+            bit.pos[2] += bit.velocity[2] * dt;
+            const int groundX = static_cast<int>(std::floor(bit.pos[0])), groundZ = static_cast<int>(std::floor(bit.pos[2]));
+            const int groundY = static_cast<int>(std::floor(bit.pos[1]));
+            if (level_.block(groundX, groundY, groundZ) != Block::Air || level_.block(groundX, groundY - 1, groundZ) != Block::Air) {
+                bit.pos[1] = std::floor(bit.pos[1]) + 1.02f;
+                bit.velocity = {bit.velocity[0] * 0.4f, 0.0f, bit.velocity[2] * 0.4f};
+            }
+        }
+        bits_.erase(std::remove_if(bits_.begin(), bits_.end(), [](const BlockBit& b) { return b.life <= 0.0f; }), bits_.end());
+    }
 
     static const bool checkErrors = std::getenv("FALCON_GL_CHECK") != nullptr;  // (a debugging aid: reports the first OpenGL error the world drawing causes)
     if (checkErrors) {
