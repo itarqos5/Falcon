@@ -1,6 +1,6 @@
 # Falcon Launcher
 
-A small native launcher for Falcon (Windows and Linux), written in C++20 with a React interface. This page describes the Windows one; what differs on Linux is in the section "Linux" below.
+A small native launcher for Falcon (Windows, Linux and macOS), written in C++20 with a React interface. This page describes the Windows one; what differs on Linux is in the section "Linux" below, and on a Mac in "macOS".
 
 - **No browser is bundled.** The interface is a React + TypeScript page, built into one HTML file, embedded in the exe and shown by the **WebView2 runtime that Windows already has** (it ships with Windows 11 and with Microsoft Edge on Windows 10). If it is missing, the first-run setup offers to install it.
 - **Falcon is bundled.** `FalconLauncher.exe` carries `Falcon.exe` inside it and puts it in `%LOCALAPPDATA%\Falcon\client\` during setup. Nothing else to download for the client.
@@ -109,6 +109,21 @@ The same launcher, with the same page, runs on Linux (x86-64). What is different
 If the window comes up blank or the launcher crashes at once with some graphics drivers (NVIDIA on Wayland in particular), WebKitGTK's own switches help: `WEBKIT_DISABLE_DMABUF_RENDERER=1` or
 `WEBKIT_DISABLE_COMPOSITING_MODE=1` in the environment, before starting it.
 
+## macOS
+
+The same launcher and the same page, as a `FalconLauncher.app` bundle:
+
+- **The web view is WKWebView**, a framework of the system (AppKit/WebKit): nothing to install. The page is answered from memory to `falcon://app/index.html` by a `WKURLSchemeHandler`, and the same small
+  script puts `window.chrome.webview` in front of it as on Linux. A private `WKWebsiteDataStore` is used, so no profile is kept on disk and the Microsoft window keeps nothing either.
+- **One bundle.** The page, the client (with the ownership check) and the icon are inside `Contents/MacOS/FalconLauncher`; setup puts the client at `~/Library/Application Support/Falcon/client/<id>/Falcon`.
+- **The window is borderless** like the other systems (the page draws its own title bar). WKWebView has no window-drag of its own, so the page's drag starts a mouse-tracking loop that moves the window.
+  It is fixed-size; the sign-in is a normal titled window, as there.
+- **Tokens:** `account.bin` is a file only the user can read (mode 0600 in a 0700 folder), as on Linux; signing out deletes it.
+- **Folders:** `~/Library/Application Support/Falcon` (`FALCON_LAUNCHER_HOME` overrides it). The game's files go there and are passed to the client with `--assets`.
+- **Build:** `brew install openssl@3 ninja` and Node.js, then `cmake --preset release -DCMAKE_PREFIX_PATH="$(brew --prefix openssl@3)" -DFALCON_BUILD_LAUNCHER=ON` and
+  `cmake --build --preset launcher`. The result is `dist-launcher/FalconLauncher.app`. The macOS CI (`.github/workflows/macos.yml`) builds it and draws the UI off-screen with `--mock --screenshot`.
+  A release needs the bundle signed and notarised as a whole (Developer ID + `notarytool`); the Windows Authenticode step has no Mac equivalent here.
+
 ## What it costs
 
 Measured on a Ryzen 5 5600G, on Windows:
@@ -119,4 +134,6 @@ Measured on a Ryzen 5 5600G, on Windows:
 ## Known gaps
 
 - The sign-in against the real Microsoft, Xbox and Mojang services is exercised here only against fakes: the first real sign-in on a machine is the real test. If Xbox rejects the way the Microsoft token is presented, the launcher tries the two usual ticket formats before it gives up.
-- Falcon reads `--username` and `--uuid` for the chat name. There is no online play, so the access token is not passed to it.
+- Falcon is given the account's name, UUID and access token (`FALCON_MC_TOKEN`), and the licensed client asks Mojang about
+  ownership with it before it starts, so online servers see the account. The plain `dist/Falcon.exe` used for development has no
+  such check.

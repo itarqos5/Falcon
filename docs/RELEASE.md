@@ -1,8 +1,8 @@
 # Releasing Falcon
 
 Two things are published, and this page is about both: the **game** (`Falcon.exe`, built by `cmake --build --preset release`)
-and the **launcher** (`FalconLauncher.exe`, which carries the client inside it). Linux has its own workflow
-(`.github/workflows/release-linux.yml`) and is unchanged by anything here.
+and the **launcher** (`FalconLauncher.exe`, which carries the client inside it). Linux and macOS have their own workflows
+(`.github/workflows/release-linux.yml`, `.github/workflows/macos.yml`) and are unchanged by anything here.
 
 ## What a release contains
 
@@ -12,6 +12,8 @@ and the **launcher** (`FalconLauncher.exe`, which carries the client inside it).
 | `FalconLauncher.exe` | the same binary, unzipped, for anyone who prefers it (the link older releases used) |
 | `SHA256SUMS.txt` | SHA-256 of both files above |
 | `FalconLauncher-linux-x86_64`, `….sha256` | built by the Linux workflow, as before |
+| `FalconLauncher-macos-x86_64.zip`, `….sha256` | `FalconLauncher.app`, built by the macOS workflow on a tag (unsigned: see below) |
+| `Falcon-macos-x86_64`, `….sha256` | the client alone, from the same workflow |
 
 The zip holds one file on purpose: nothing else is needed to start Falcon, and a short "what should be in here" list is easy to
 check.
@@ -62,6 +64,11 @@ project can obtain (organisation or individual validation). Notes:
 
 Once a certificate exists, the recommended flow is: `git tag vX.Y.Z` → `tools\release_windows.ps1 -Sign -CertThumbprint … -Publisher "…"`
 → `gh release upload`.
+
+The macOS bundle is **not signed or notarised** by `macos.yml`, so Gatekeeper stops it: the player has to right-click → Open the
+first time (or `xattr -dr com.apple.quarantine FalconLauncher.app`). Signing it means a Developer ID certificate and
+`codesign --deep --options runtime` followed by `xcrun notarytool submit` and `xcrun stapler staple`, with the App Sandbox off
+(the client writes its own worlds and reads the player's `.minecraft`). There is no equivalent of `verifyFileSignature` on macOS.
 
 ## What the launcher verifies at run time
 
