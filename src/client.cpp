@@ -761,8 +761,8 @@ int Client::run() {
                 NewWorldSettings settings;
                 settings.name = folder;
                 std::string error;
-                const std::int64_t nowMillis = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
-                if (!createWorldFolder(gameDir / "saves", folder, settings, 0, nowMillis, error)) {
+                const std::int64_t madeAtMillis = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+                if (!createWorldFolder(gameDir / "saves", folder, settings, 0, madeAtMillis, error)) {
                     falcon::log::line("could not create the world '%s': %s\n", folder.c_str(), error.c_str());
                 } else {
                     falcon::log::line("made the world '%s' for this run\n", folder.c_str());

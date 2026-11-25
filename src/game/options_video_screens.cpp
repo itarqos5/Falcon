@@ -746,8 +746,8 @@ void VideoSettingsScreen::drawDeveloper(GuiGraphics& g) {
     g.fill(px, py, px + panelWidth, py + 20, withAlpha(kRed, 0.25f));
     g.text("Highest FPS Test", static_cast<float>(px + 10), static_cast<float>(py + 6), kWhite, false, false, true);
     int ty = py + 30;
-    for (const std::string& row : wrap(g, "Are you sure? This will overwrite all your current settings.\nThey are put back, exactly as they are now, when the test is stopped.", panelWidth - 20)) {
-        g.text(row, static_cast<float>(px + 10), static_cast<float>(ty), kWhite);
+    for (const std::string& wrappedLine : wrap(g, "Are you sure? This will overwrite all your current settings.\nThey are put back, exactly as they are now, when the test is stopped.", panelWidth - 20)) {
+        g.text(wrappedLine, static_cast<float>(px + 10), static_cast<float>(ty), kWhite);
         ty += 10;
     }
     for (int i = 0; i < 2; ++i) {
