@@ -54,6 +54,7 @@ void GameSession::renderLocalMobs(const std::array<double, 3>& camPos) {
         if (dx * dx + dz * dz > maxDistSq) continue;
         MobPose pose;
         pose.position = {m.xo + (m.x - m.xo) * partialTick_, m.yo + (m.y - m.yo) * partialTick_, m.zo + (m.z - m.zo) * partialTick_};
+        if (services_.options.entityShadows) renderer_.addEntityShadow(pose.position[0], pose.position[1], pose.position[2], 0.45);
         pose.bodyYaw = m.yawo + wrap(m.yaw - m.yawo) * partial;
         pose.headYaw = m.headYaw;
         pose.headPitch = m.headPitch;
@@ -133,6 +134,7 @@ void GameSession::renderWorld(int framebufferWidth, int framebufferHeight) {
     renderer_.setClouds(services_.options.cloudStatus != CloudStatus::Off, services_.options.cloudStatus == CloudStatus::Fancy, services_.options.cloudRange);
     renderer_.setWeather(raining_, services_.options.weatherRadius);
     renderer_.setBlockTextureMipmaps(services_.options.mipmapLevels);
+    renderer_.setChunkFade(services_.options.chunkSectionFadeInTime);
     setEntitySkyLight(skyNow.skyLightFactor, skyNow.skyLightColor, skyNow.ambient);
     renderer_.render(cam, framebufferWidth, framebufferHeight, renderDistance());
     if (ready_ && target_) renderer_.drawSelection(cam, framebufferWidth, framebufferHeight, target_->x, target_->y, target_->z);

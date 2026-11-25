@@ -14,6 +14,7 @@ layout(std140, set = 0, binding = 0) uniform Block {
     vec2 uEnvFog;
     float uAlphaCut;
     float uGamma;
+    float uFade;
     vec3 uHeldOrigin;
     float uHeldOn;
 } u;

@@ -19,6 +19,7 @@ layout(std140, set = 0, binding = 0) uniform Block {
     vec2 uEnvFog;
     float uAlphaCut;
     float uGamma;
+    float uFade;
     vec3 uHeldOrigin;
     float uHeldOn;
 } u;
@@ -66,5 +67,5 @@ void main() {
         blockLight = max(blockLight, texture(uHeldLight, (vPos + n * 0.5 - u.uHeldOrigin) * (1.0 / 32.0)).r);
     }
     float fog = max(clamp((vDist - u.uFogRange.x) / (u.uFogRange.y - u.uFogRange.x), 0.0, 1.0), clamp((vDist - u.uEnvFog.x) / (u.uEnvFog.y - u.uEnvFog.x), 0.0, 1.0));
-    frag = vec4(mix(c.rgb * (vTint * lightColor(vLight.x, blockLight)), u.uFogColor, fog), c.a);
+    frag = vec4(mix(c.rgb * (vTint * lightColor(vLight.x, blockLight)), u.uFogColor, fog), c.a * u.uFade);
 }

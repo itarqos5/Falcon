@@ -250,7 +250,21 @@ void WorldRenderer::render(const Camera& camera, int framebufferWidth, int frame
     // with) and then water and other see-through blocks, back to front, blended and without writing depth. Their faces are seen from both
     // sides (the underside of the sea surface): the mesher makes that surface a second, reversed quad, so back faces stay culled.
     gl::Uniform1f(uGamma_, brightness_);
-    if (useMultiDraw_) {
+    gl::Uniform1f(uFade_, 1.0f);
+    if (chunkFadeSeconds_ > 0.0f) {  // a section that has just been built fades in, and while any does, the sections are drawn one at a time (each with its own fade)
+        const double nowFade = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+        const float step = lastFrameSeconds_ > 0.0 ? static_cast<float>(std::min(0.1, nowFade - lastFrameSeconds_)) / chunkFadeSeconds_ : 0.0f;
+        for (auto& entry : sections_) {
+            GpuSection& section = entry.second;
+            if (!section.fadeSeen) {
+                section.fadeSeen = true;
+                section.fade = 0.0f;  // (its first frame: it appears out of nothing)
+            } else if (section.fade < 1.0f) {
+                section.fade = std::min(1.0f, section.fade + step);
+            }
+        }
+    }
+    if (useMultiDraw_ && chunkFadeSeconds_ <= 0.0f) {
         // Every pass's commands are made first and sent to the GPU in one go; then each pass is one call.
         commands_.clear();
         commandOffsets_.clear();
@@ -316,17 +330,32 @@ void WorldRenderer::render(const Camera& camera, int framebufferWidth, int frame
         for (const VisibleSection& v : visible_) {  // opaque, nearest first: hidden pixels are rejected early
             if (v.section->opaqueVertices == 0) continue;
             gl::Uniform3f(uOffset_, v.ox, v.oy, v.oz);
+            const bool fadingIn = v.section->fade < 1.0f;
+            if (fadingIn) {
+                gl::Uniform1f(uFade_, v.section->fade);
+                gl::Enable(gl::BLEND);
+                gl::BlendFuncSeparate(gl::SRC_ALPHA, gl::ONE_MINUS_SRC_ALPHA, gl::ONE, gl::ONE_MINUS_SRC_ALPHA);
+            }
             forEachRun(v, v.section->opaqueGroups, [&](std::uint32_t first, std::uint32_t length) {
                 gl::DrawElementsBaseVertex(gl::TRIANGLES, static_cast<gl::GLsizei>(length / 4 * 6), gl::UNSIGNED_INT, nullptr, static_cast<gl::GLint>(v.section->arenaBase + first));
                 quads += length / 4;
                 ++drawCalls;
                 ++drawCommands;
             });
+            if (fadingIn) {
+                gl::Uniform1f(uFade_, 1.0f);
+                gl::Disable(gl::BLEND);
+            }
         }
         gl::Uniform1f(uAlphaCut_, 0.5f);
         for (const VisibleSection& v : visible_) {
             if (v.section->cutoutVertices == 0) continue;
             gl::Uniform3f(uOffset_, v.ox, v.oy, v.oz);
+            if (v.section->fade < 1.0f) {
+                gl::Uniform1f(uFade_, v.section->fade);
+                gl::Enable(gl::BLEND);
+                gl::BlendFuncSeparate(gl::SRC_ALPHA, gl::ONE_MINUS_SRC_ALPHA, gl::ONE, gl::ONE_MINUS_SRC_ALPHA);
+            }
             forEachRun(v, v.section->cutoutGroups, [&](std::uint32_t first, std::uint32_t length) {
                 gl::DrawElementsBaseVertex(gl::TRIANGLES, static_cast<gl::GLsizei>(length / 4 * 6), gl::UNSIGNED_INT, nullptr,
                                            static_cast<gl::GLint>(v.section->arenaBase + static_cast<std::uint32_t>(v.section->opaqueVertices) + first));
@@ -334,6 +363,10 @@ void WorldRenderer::render(const Camera& camera, int framebufferWidth, int frame
                 ++drawCalls;
                 ++drawCommands;
             });
+            if (v.section->fade < 1.0f) {
+                gl::Uniform1f(uFade_, 1.0f);
+                gl::Disable(gl::BLEND);
+            }
         }
         gl::Enable(gl::BLEND);
         gl::BlendFuncSeparate(gl::SRC_ALPHA, gl::ONE_MINUS_SRC_ALPHA, gl::ONE, gl::ONE_MINUS_SRC_ALPHA);
@@ -361,6 +394,16 @@ void WorldRenderer::render(const Camera& camera, int framebufferWidth, int frame
         const std::array<float, 3> fogColor = underwater_ ? waterFogColor_ : skyState_.horizon;
         const std::array<float, 2> fogRange = underwater_ ? std::array<float, 2>{waterFogStart_, waterFogEnd_} : std::array<float, 2>{envFogStart_, envFogEnd_};
         const bool rainOn = rain_ && rainTexture_.id() != 0 && !underwater_;
+        if (!shadows_.empty() && shadowTexture_.id() != 0) {  // the soft shadow under each mob, on the ground at its feet
+            sprites_.begin(viewProj, fogColor, fogRange, shadowTexture_, nullptr, lightmapTex_);
+            for (const std::array<double, 4>& s : shadows_) {
+                const float sx = static_cast<float>(s[0] - camera.x), sy = static_cast<float>(s[1] - camera.y) + 0.02f, sz = static_cast<float>(s[2] - camera.z);
+                const float w = static_cast<float>(s[3]);
+                sprites_.quad({sx - w, sy, sz - w}, {sx - w, sy, sz + w}, {sx + w, sy, sz + w}, {sx + w, sy, sz - w}, 0.0f, 0.0f, 1.0f, 1.0f, {0.0f, 0.0f, 0.0f}, 0.55f);
+            }
+            sprites_.end();
+            shadows_.clear();
+        }
         if (!bits_.empty() || rainOn) {
             const std::array<float, 3> right = {view.m[0], view.m[4], view.m[8]};
             const std::array<float, 3> up = {view.m[1], view.m[5], view.m[9]};

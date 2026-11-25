@@ -64,6 +64,7 @@ uniform vec2 uFogRange;               // the render distance's fog: start, end (
 uniform vec2 uEnvFog;                 // the fog of the medium the eyes are in (water): start, end; far away when there is none
 uniform float uAlphaCut;
 uniform float uGamma;                 // the Brightness option, 0..1
+uniform float uFade;                  // 1: the section is drawn as it is; less while it fades in (the Chunk Fade option), blended over the world
 // The light the player carries (a torch in the hand): the light level of every block of a 32 x 32 x 32 volume around them, flooded
 // round walls like the block light is. uHeldOrigin is the volume's corner relative to the camera; uHeldOn is 0 with nothing held.
 uniform sampler3D uHeldLight;
@@ -119,7 +120,7 @@ void main() {
     }
     // The game's fog is the larger of the render distance's and the medium's (water's: it starts at the eyes and ends 24 to 96 blocks on).
     float fog = max(clamp((vDist - uFogRange.x) / (uFogRange.y - uFogRange.x), 0.0, 1.0), clamp((vDist - uEnvFog.x) / (uEnvFog.y - uEnvFog.x), 0.0, 1.0));
-    frag = vec4(mix(c.rgb * (vTint * lightColor(vLight.x, blockLight)), uFogColor, fog), c.a);
+    frag = vec4(mix(c.rgb * (vTint * lightColor(vLight.x, blockLight)), uFogColor, fog), c.a * uFade);
 }
 )";
 
@@ -319,6 +320,7 @@ WorldRenderer::WorldRenderer(BlockModels& models, std::int64_t seed, TerrainStyl
     uFogRange_ = world_.uniform("uFogRange");
     uAlphaCut_ = world_.uniform("uAlphaCut");
     uGamma_ = world_.uniform("uGamma");
+    uFade_ = world_.uniform("uFade");
     uTex_ = world_.uniform("uTex");
     uEnvFog_ = world_.uniform("uEnvFog");
     uHeldLight_ = world_.uniform("uHeldLight");
@@ -341,6 +343,26 @@ WorldRenderer::WorldRenderer(BlockModels& models, std::int64_t seed, TerrainStyl
     celestialImage_ = makeCelestialAtlas(models.resources());
     celestial_ = Texture2D(celestialImage_, FilterMode::Nearest);
     sprites_.init();
+    {   // The soft blob under a mob: white, with the alpha of a shadow that fades to nothing at its edge.
+        Image blob;
+        blob.width = blob.height = 64;
+        blob.rgba.assign(64u * 64u * 4u, 0);
+        for (int y = 0; y < 64; ++y) {
+            for (int x = 0; x < 64; ++x) {
+                const float dx = (static_cast<float>(x) + 0.5f) / 64.0f * 2.0f - 1.0f;
+                const float dy = (static_cast<float>(y) + 0.5f) / 64.0f * 2.0f - 1.0f;
+                const float r = std::sqrt(dx * dx + dy * dy);
+                const float edge = std::clamp(1.0f - r, 0.0f, 1.0f);
+                const auto alpha = static_cast<std::uint8_t>(255.0f * edge * edge * edge);
+                const std::size_t at = (static_cast<std::size_t>(y) * 64u + static_cast<std::size_t>(x)) * 4u;
+                blob.rgba[at + 0] = 255;
+                blob.rgba[at + 1] = 255;
+                blob.rgba[at + 2] = 255;
+                blob.rgba[at + 3] = alpha;
+            }
+        }
+        shadowTexture_ = Texture2D(blob, FilterMode::Nearest);
+    }
     // The game's own cloud picture: 256 by 256 texels, 12 blocks to a texel, so the layer repeats every 3072 blocks.
     if (const auto bytes = models.resources().readBytes(ResourceLocation("minecraft", "textures/environment/clouds.png"))) {
         if (auto image = decodePng(*bytes); image && !image->empty()) cloudTexture_ = Texture2D(*image, FilterMode::Nearest);

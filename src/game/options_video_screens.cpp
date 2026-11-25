@@ -296,8 +296,6 @@ void buildPages(VideoSettingsModel& m, ScreenServices& services, const std::func
                &GameOptions::renderDistance, chunks, true);
     b.intRange(1, 1, tr("options.simulationDistance"), "How far from you things move and grow: mobs, crops, fire. Chunks beyond it are still drawn but stand still.", Impact::Medium, 5, 32,
                &GameOptions::simulationDistance, chunks, true);
-    b.intRange(1, 1, tr("options.biomeBlendRadius"), "How softly the colours of grass, leaves and water change from biome to biome.", Impact::Low, 0, 7, &GameOptions::biomeBlendRadius,
-               [tr](int n) { return tr("options.biomeBlendRadius." + std::to_string(2 * n + 1)); }, true);
     b.toggle(1, 2, tr("options.ao"), "Smooth lighting: the soft shade in corners and under overhangs.", Impact::Medium, &GameOptions::ambientOcclusion, true);
     b.cycle(1, 2, tr("options.renderClouds"), "Fast clouds are flat, fancy ones have a thickness.", Impact::Medium, {tr("options.off"), tr("options.clouds.fast"), tr("options.clouds.fancy")},
             &GameOptions::cloudStatus, true);
@@ -313,23 +311,7 @@ void buildPages(VideoSettingsModel& m, ScreenServices& services, const std::func
 
     b.intRange(1, 3, tr("options.mipmapLevels"), "How far textures shrink into smaller copies of themselves with distance: smoother far away, a little blurrier.", Impact::Low, 0, 4,
                &GameOptions::mipmapLevels, offOr, true);
-    b.cycle(1, 3, tr("options.textureFiltering"),
-            "None: textures are displayed without any filtering. Blocks may look blurry when viewed at an angle.\nRGSS (Rotated Grid Super Sampling): a shader-based filtering method "
-            "that improves texture quality with a moderate performance impact.\nAnisotropic: a hardware-based filtering method, but impacts performance and significantly impacts "
-            "video memory usage. May not be supported on all hardware.",
-            Impact::Medium, {tr("options.textureFiltering.none"), tr("options.textureFiltering.rgss"), tr("options.textureFiltering.anisotropic")}, &GameOptions::textureFiltering, true);
-    {
-        Option& anisotropy = b.intRange(1, 3, tr("options.maxAnisotropy"),
-                                        "Each level significantly improves how smooth textures look, but impacts performance and significantly impacts video memory usage. Requires "
-                                        "Texture Filtering to be set to Anisotropic.",
-                                        Impact::Medium, 1, 3, &GameOptions::maxAnisotropyBit, [](int n) { return std::to_string(1 << n) + "x"; }, true);
-        anisotropy.enabled = [](const GameOptions& g) { return g.textureFiltering == TextureFiltering::Anisotropic; };
-    }
     b.toggle(1, 3, tr("options.cutoutLeaves"), "Allows you to see through gaps in leaves. Disabling improves performance.", Impact::Medium, &GameOptions::cutoutLeaves, true);
-    b.toggle(1, 3, tr("options.improvedTransparency"),
-             "An experimental approach that uses an order-independent transparency algorithm to avoid graphical issues normally present when looking through multiple layers of "
-             "translucent objects.\nThis will impact performance.",
-             Impact::High, &GameOptions::improvedTransparency, true);
     b.intRange(1, 3, tr("options.accessibility.menu_background_blurriness"), tr("options.accessibility.menu_background_blurriness.tooltip"), Impact::Low, 0, 10,
                &GameOptions::menuBackgroundBlurriness, offOr, true);
 
@@ -368,7 +350,6 @@ void buildPages(VideoSettingsModel& m, ScreenServices& services, const std::func
     }
 
     // ---- Other ----
-    b.toggle(4, 0, tr("options.autosaveIndicator"), {}, Impact::None, &GameOptions::showAutosaveIndicator, false);
     b.toggle(4, 0, tr("options.vignette"),
              "This is a subtle texture over the game screen used for reducing brightness towards the edges of the screen and warning about the world border.", Impact::None,
              &GameOptions::vignette, false);

@@ -56,7 +56,7 @@ const std::vector<Expected>& programs() {
         {"lod", {"uViewProj", "uOffset", "uCell", "uFogColor", "uFogRange", "uEnvFog", "uHoleOrigin", "uHoleRadius2"}, {{"uTex", 1, 0}, {"uLightmap", 0, 2}}, {{0, 4}, {1, 4}}},
         {"cracks", {"uViewProj"}, {{"uTex", 0, 0}}, {{0, 3}, {1, 2}}},
         {"world",
-         {"uViewProj", "uOffset", "uInstanced", "uFogColor", "uFogRange", "uEnvFog", "uAlphaCut", "uGamma", "uHeldOrigin", "uHeldOn"},
+         {"uViewProj", "uOffset", "uInstanced", "uFogColor", "uFogRange", "uEnvFog", "uAlphaCut", "uGamma", "uHeldOrigin", "uHeldOn", "uFade"},
          {{"uTex", 1, 0}, {"uHeldLight", 2, 1}, {"uLightmap", 0, 2}},
          {{0, 4}, {1, 2}, {2, 4}, {3, 4}, {4, 3}}},
         {"entity", {"uProj", "uLight", "uTint", "uHurt"}, {{"uSkin", 0, 0}}, {{0, 3}, {1, 2}, {2, 1}}},

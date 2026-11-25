@@ -152,6 +152,10 @@ public:
     // Mipmap Levels (0: the block pictures are drawn at their own size, the sharpest and the cheapest; 1 to 4: the smaller copies of themselves the game makes, which far away
     // blocks are drawn from). Call with the option; it costs nothing when the level has not changed.
     void setBlockTextureMipmaps(int levels);
+    // Chunk Fade: how long a section that has just been built takes to fade in, in seconds (0: it appears at once, the cheapest).
+    void setChunkFade(double seconds) { chunkFadeSeconds_ = static_cast<float>(std::max(0.0, seconds)); }
+    // The soft shadow under a mob, on the ground at its feet: the session adds one for each mob it draws and the renderer empties the list every frame.
+    void addEntityShadow(double x, double y, double z, double width) { shadows_.push_back({x, y, z, width}); }
     // Rain (or snow, but that is the picture's business): drops drawn round the player out to `radius` blocks, over the world. Off: none are drawn and the ones that were are gone.
     void setWeather(bool rain, int radius) {
         rain_ = rain;
@@ -292,6 +296,9 @@ private:
         // How many vertices of the opaque and of the cutout part face each way (east, west, up, down, south, north, other): the parts are
         // stored in that order, so the draw can skip the directions that turn away from the camera.
         std::array<int, kFacingGroups> opaqueGroups{}, cutoutGroups{};
+        // The Chunk Fade option: a section that has just been built is drawn blended, from nothing (fade 0) to itself (1) over that many seconds.
+        bool fadeSeen = false;    // it has been through a frame since it was built
+        float fade = 1.0f;
         bool lodFar = false;      // built without the leaf faces between leaf blocks (it was far from the player)
         bool lodMatters = false;  // it has such faces: worth building again when it crosses the line
     };
@@ -371,7 +378,7 @@ private:
     bool skyVisible_ = true, skyStarsOn_ = true;
     gl::GLint crackViewProj_ = -1, crackTex_ = -1;
     gl::GLuint crackVao_ = 0, crackVbo_ = 0;
-    gl::GLint uViewProj_ = -1, uOffset_ = -1, uFogColor_ = -1, uFogRange_ = -1, uAlphaCut_ = -1, uTex_ = -1, uGamma_ = -1;
+    gl::GLint uViewProj_ = -1, uOffset_ = -1, uFogColor_ = -1, uFogRange_ = -1, uAlphaCut_ = -1, uTex_ = -1, uGamma_ = -1, uFade_ = -1;
     gl::GLint uHeldLight_ = -1, uHeldOrigin_ = -1, uHeldOn_ = -1, uEnvFog_ = -1;
     bool underwater_ = false;
     std::array<float, 3> waterFogColor_{};
@@ -405,6 +412,9 @@ private:
     double lastFrameSeconds_ = 0.0;  // (the frame before this one: what the bits fall by)
     unsigned bitSeed_ = 12345u;
     int blockMipLevels_ = -1;  // (the Mipmap Levels the block pictures were set to: -1, not set yet)
+    float chunkFadeSeconds_ = 0.0f;
+    Texture2D shadowTexture_;                         // (a soft round blob, made in code: white with an alpha that fades to nothing at its edge)
+    std::vector<std::array<double, 4>> shadows_;      // x, y, z of where a mob stands, and how wide its shadow is
     [[nodiscard]] float bitRandom();
     bool cloudsOn_ = false, cloudsThick_ = false;
     int cloudDistance_ = 128;
