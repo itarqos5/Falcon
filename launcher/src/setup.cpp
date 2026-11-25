@@ -284,6 +284,21 @@ Result<bool> installWebView2Runtime(HttpClient& http) {
     return R::success(true);
 }
 
+#elif defined(__APPLE__)
+
+// A Mac program that lives in an application bundle needs no entry made for it: Finder, the Dock and Spotlight find the .app itself, and an icon in
+// the program (NSApp.applicationIconImage) is the icon. Nothing to install.
+bool createStartMenuShortcut() { return true; }
+
+// A Mac build has no Authenticode signature to check: the report says Unsigned and the callers treat that as "nothing to verify here". (A real Mac
+// release is signed and notarised as a whole .app; the launcher's own bundle check is what protects it there.)
+FileSignature verifyFileSignature(const fs::path&, std::string_view) { return FileSignature{FileSignature::State::Unsigned, {}, {}}; }
+
+// The web view is a framework of the system (WebKit): if it were missing the program would not have started at all.
+bool webView2RuntimeInstalled() { return true; }
+
+Result<bool> installWebView2Runtime(HttpClient&) { return Result<bool>::fail("unsupported", "There is nothing to install here: the web view is WKWebView, a framework of the system."); }
+
 #else
 
 // An entry in the application menu (a .desktop file in the user's own folder, with the icon next to it): "Falcon Launcher", for the program that is running.

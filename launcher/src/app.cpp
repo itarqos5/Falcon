@@ -146,6 +146,11 @@ constexpr const char* kPlatform = "windows";
 constexpr const char* kRuntimeStep = "Checking the web runtime";
 constexpr const char* kShortcutStep = "Adding a Start menu shortcut";
 constexpr const char* kRuntimeDone = "Microsoft Edge WebView2 is installed";
+#elif defined(__APPLE__)
+constexpr const char* kPlatform = "macos";
+constexpr const char* kRuntimeStep = "Checking the web view";
+constexpr const char* kShortcutStep = "Preparing the launcher";
+constexpr const char* kRuntimeDone = "WKWebView is available";
 #else
 constexpr const char* kPlatform = "linux";
 constexpr const char* kRuntimeStep = "Checking the web view";

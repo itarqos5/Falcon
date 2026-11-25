@@ -25,7 +25,7 @@ export interface Account {
 
 export interface LauncherState {
   phase: Phase;
-  app: { version: string; mock: boolean; gameVersion: string; clientBundled: boolean; gameDir: string; platform: 'windows' | 'linux' };
+  app: { version: string; mock: boolean; gameVersion: string; clientBundled: boolean; gameDir: string; platform: 'windows' | 'linux' | 'macos' };
   setup: { steps: StepState[]; error: ErrorInfo | null };
   auth: {
     configured: boolean;
@@ -89,3 +89,4 @@ export interface ModSearchResult {
   /** Set when a newer search replaced this one: the page ignores the answer. */
   superseded?: boolean;
 }
+

@@ -1,9 +1,10 @@
-# Falcon Launcher: a native app (C++20) whose UI is a React app shown by the system's web view (no browser is bundled): WebView2 on Windows, WebKitGTK on Linux.
+# Falcon Launcher: a native app (C++20) whose UI is a React app shown by the system's web view (no browser is bundled): WebView2 on Windows, WebKitGTK on Linux,
+# WKWebView on a Mac.
 #
 #   cmake --build --preset launcher        builds dist-launcher/FalconLauncher(.exe) (and the client and the UI it embeds)
 #
 # Not part of the ordinary build: it needs Node (for the React UI) and builds the game first. See launcher/README.md.
-if(NOT WIN32 AND NOT (UNIX AND NOT APPLE))
+if(NOT WIN32 AND NOT UNIX)
     return()
 endif()
 
@@ -172,11 +173,68 @@ PRODUCTVERSION ${PROJECT_VERSION_MAJOR},${PROJECT_VERSION_MINOR},${PROJECT_VERSI
         COMMAND "${CMAKE_COMMAND}" -E copy_if_different "$<TARGET_FILE:falcon_launcher>" "${FALCON_LAUNCHER_DIST}/FalconLauncher.exe"
         COMMENT "Placing FalconLauncher.exe in dist-launcher/"
         VERBATIM)
+elseif(APPLE)
+    # -----------------------------------------------------------------------
+    # The program (a Mac): AppKit and WKWebView, both frameworks of the system. The UI, the game client (always bundled, put in place by the first-run
+    # setup) and the icon are in the program itself: an assembler file includes them between named symbols (see Blob in src/setup.hpp). The result is a
+    # FalconLauncher.app bundle, which is what Finder launches and what a Mac release signs and notarises.
+    # -----------------------------------------------------------------------
+    enable_language(OBJCXX)
+    enable_language(ASM)
+
+    set(LAUNCHER_ASM "${CMAKE_CURRENT_BINARY_DIR}/embedded_mac.S")
+    file(GENERATE OUTPUT "${LAUNCHER_ASM}" CONTENT
+".section __DATA,__const
+.p2align 4
+.globl _falcon_client_start
+.globl _falcon_client_end
+_falcon_client_start:
+.incbin \"$<TARGET_FILE:falcon_client_licensed>\"
+_falcon_client_end:
+.p2align 4
+.globl _falcon_ui_start
+.globl _falcon_ui_end
+_falcon_ui_start:
+.incbin \"${UI_DIST}/index.html\"
+_falcon_ui_end:
+.p2align 4
+.globl _falcon_icon_start
+.globl _falcon_icon_end
+_falcon_icon_start:
+.incbin \"${CMAKE_SOURCE_DIR}/resources/falcon_icon.png\"
+_falcon_icon_end:
+")
+    set_source_files_properties("${LAUNCHER_ASM}" PROPERTIES GENERATED TRUE
+        OBJECT_DEPENDS "${UI_DIST}/index.html;${CMAKE_BINARY_DIR}/licensed/Falcon;${CMAKE_SOURCE_DIR}/resources/falcon_icon.png")
+    add_library(falcon_launcher_embedded OBJECT EXCLUDE_FROM_ALL "${LAUNCHER_ASM}")
+    add_dependencies(falcon_launcher_embedded falcon_launcher_ui falcon_client_licensed)
+
+    # The Mac window host is Objective-C++ and is written under ARC.
+    set_source_files_properties(src/webview_host_mac.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
+
+    add_executable(falcon_launcher MACOSX_BUNDLE EXCLUDE_FROM_ALL
+        src/main.cpp
+        src/webview_host_mac.mm
+        $<TARGET_OBJECTS:falcon_launcher_embedded>)
+    set_target_properties(falcon_launcher PROPERTIES
+        OUTPUT_NAME "FalconLauncher"
+        OBJCXX_STANDARD 20
+        OBJCXX_STANDARD_REQUIRED ON
+        MACOSX_BUNDLE_BUNDLE_NAME "Falcon Launcher"
+        MACOSX_BUNDLE_GUI_IDENTIFIER "xyz.literaluu.falcon.launcher"
+        MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
+        MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"
+        MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/src/Info.plist.in")
+    target_link_libraries(falcon_launcher PRIVATE falcon_launcher_core "-framework Cocoa" "-framework WebKit")
+    target_link_options(falcon_launcher PRIVATE $<$<CONFIG:Release>:-s>)
+
+    add_custom_command(TARGET falcon_launcher POST_BUILD
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "${FALCON_LAUNCHER_DIST}"
+        COMMAND "${CMAKE_COMMAND}" -E rm -rf "${FALCON_LAUNCHER_DIST}/FalconLauncher.app"
+        COMMAND "${CMAKE_COMMAND}" -E copy_directory "$<TARGET_BUNDLE_DIR:falcon_launcher>" "${FALCON_LAUNCHER_DIST}/FalconLauncher.app"
+        COMMENT "Placing FalconLauncher.app in dist-launcher/"
+        VERBATIM)
 else()
-    # -----------------------------------------------------------------------
-    # The program (Linux): GTK 3 and WebKitGTK from the system. The UI, the game client (always bundled, put in place by the first-run setup) and the icon are in the
-    # program itself: an assembler file includes them between named symbols (see Blob in src/setup.hpp).
-    # -----------------------------------------------------------------------
     enable_language(ASM)
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(FALCON_GTK3 REQUIRED IMPORTED_TARGET gtk+-3.0)

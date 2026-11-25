@@ -209,9 +209,13 @@ bool readFile(const fs::path& path, std::string& out) {
 #ifndef _WIN32
 namespace {
 
-// xdg-open starts the program the desktop has for an address or a folder. (No shell: the argument is never read as a command.)
+// xdg-open (Linux) or open (a Mac) starts the program the desktop has for an address or a folder. (No shell: the argument is never read as a command.)
 void openWithDesktop(const std::string& target) {
+#ifdef __APPLE__
+    std::string program = "open";
+#else
     std::string program = "xdg-open";
+#endif
     std::string argument = target;
     char* argv[] = {program.data(), argument.data(), nullptr};
     posix_spawn_file_actions_t actions;
@@ -220,7 +224,7 @@ void openWithDesktop(const std::string& target) {
     posix_spawn_file_actions_addopen(&actions, STDOUT_FILENO, "/dev/null", O_WRONLY, 0);
     posix_spawn_file_actions_addopen(&actions, STDERR_FILENO, "/dev/null", O_WRONLY, 0);
     pid_t pid = 0;
-    if (posix_spawnp(&pid, "xdg-open", &actions, nullptr, argv, environ) != 0) logLine("xdg-open could not be started");
+    if (posix_spawnp(&pid, program.c_str(), &actions, nullptr, argv, environ) != 0) logLine(program + " could not be started");
     posix_spawn_file_actions_destroy(&actions);
 }
 

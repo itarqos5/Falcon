@@ -22,6 +22,12 @@
 
 #include <windows.h>
 #include <shellapi.h>
+#elif defined(__APPLE__)
+#include "webview_host_mac.hpp"
+
+#include <fcntl.h>
+#include <sys/file.h>
+#include <unistd.h>
 #else
 #include "webview_host_gtk.hpp"
 

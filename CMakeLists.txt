@@ -691,7 +691,7 @@ endif()
 # The launcher: a native window with a React UI in the system's web view (WebView2 on Windows, WebKitGTK on Linux). Not part of the ordinary build (it needs Node, and builds
 # the game first): cmake --build --preset launcher. See launcher/README.md.
 # ---------------------------------------------------------------------------
-if(WIN32)
+if(WIN32 OR APPLE)
     set(_falcon_launcher_default ON)
 else()
     set(_falcon_launcher_default OFF)  # (on Linux it needs GTK and WebKitGTK to be installed, which the game does not: ask for it with -DFALCON_BUILD_LAUNCHER=ON)
