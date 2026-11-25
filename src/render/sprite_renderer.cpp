@@ -49,10 +49,19 @@ uniform vec2 uFogRange;               // the world's fog: start, end (distance f
 uniform float uFullbright;            // 1: drawn at its own brightness (the sun through no light map at all), 0: lit by the sky
 out vec4 frag;
 void main() {
-    vec4 t = vFromBlocks > 0.5 ? texture(uPictures, vec3(vUv, vLayer)) : texture(uPicture, vUv);
-    float alpha = t.a * vColor.a;
-    if (alpha < 0.02) discard;  // (the holes in the cloud picture, and the clear parts of a picture)
-    vec3 col = t.rgb * vColor.rgb;
+    vec4 t;
+    float alpha;
+    vec3 col;
+    if (vLayer < -1.5) {  // the soft shadow under a mob: a round blob of its own, with no picture (nothing here is that plain shade of a circle with an edge that fades)
+        vec2 d = vUv * 2.0 - 1.0;
+        alpha = vColor.a * clamp(1.0 - dot(d, d), 0.0, 1.0);
+        col = vColor.rgb;
+    } else {
+        t = vFromBlocks > 0.5 ? texture(uPictures, vec3(vUv, vLayer)) : texture(uPicture, vUv);
+        alpha = t.a * vColor.a;
+        col = t.rgb * vColor.rgb;
+    }
+    if (alpha < 0.02) discard;  // (the holes in the cloud picture, the clear parts of a picture, the corners of a shadow)
     if (uFullbright < 0.5) col *= texture(uLightmap, vec2(15.5 / 16.0, 0.5 / 16.0)).rgb;  // sky light 15, no block light
     float fog = clamp((vDist - uFogRange.x) / max(1.0, uFogRange.y - uFogRange.x), 0.0, 1.0);
     frag = vec4(mix(col, uFogColor, fog), alpha);

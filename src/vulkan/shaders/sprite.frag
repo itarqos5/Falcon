@@ -16,10 +16,19 @@ layout(set = 1, binding = 1) uniform sampler2DArray uPictures;
 layout(set = 1, binding = 2) uniform sampler2D uLightmap;
 layout(location = 0) out vec4 frag;
 void main() {
-    vec4 t = vFromBlocks > 0.5 ? texture(uPictures, vec3(vUv, vLayer)) : texture(uPicture, vUv);
-    float alpha = t.a * vColor.a;
+    vec4 t;
+    float alpha;
+    vec3 col;
+    if (vLayer < -1.5) {  // the soft shadow under a mob: a round blob of its own, with no picture
+        vec2 d = vUv * 2.0 - 1.0;
+        alpha = vColor.a * clamp(1.0 - dot(d, d), 0.0, 1.0);
+        col = vColor.rgb;
+    } else {
+        t = vFromBlocks > 0.5 ? texture(uPictures, vec3(vUv, vLayer)) : texture(uPicture, vUv);
+        alpha = t.a * vColor.a;
+        col = t.rgb * vColor.rgb;
+    }
     if (alpha < 0.02) discard;
-    vec3 col = t.rgb * vColor.rgb;
     if (u.uFullbright < 0.5) col *= texture(uLightmap, vec2(15.5 / 16.0, 0.5 / 16.0)).rgb;
     float fog = clamp((vDist - u.uFogRange.x) / max(1.0, u.uFogRange.y - u.uFogRange.x), 0.0, 1.0);
     frag = vec4(mix(col, u.uFogColor, fog), alpha);

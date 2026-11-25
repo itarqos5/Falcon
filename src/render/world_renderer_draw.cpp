@@ -264,7 +264,10 @@ void WorldRenderer::render(const Camera& camera, int framebufferWidth, int frame
             }
         }
     }
-    if (useMultiDraw_ && chunkFadeSeconds_ <= 0.0f) {
+    // While the Chunk Fade is on, the sections that are mid-fade are left out of the multi-draw batch and drawn one by one afterwards (see below): everything else keeps the
+    // fast path.
+    const bool fadingSomewhere = chunkFadeSeconds_ > 0.0f && std::any_of(visible_.begin(), visible_.end(), [](const VisibleSection& v) { return v.section->fade < 1.0f; });
+    if (useMultiDraw_) {
         // Every pass's commands are made first and sent to the GPU in one go; then each pass is one call.
         commands_.clear();
         commandOffsets_.clear();
@@ -275,7 +278,7 @@ void WorldRenderer::render(const Camera& camera, int framebufferWidth, int frame
             commandOffsets_.push_back(v.oz);
         };
         for (const VisibleSection& v : visible_) {
-            if (v.section->opaqueVertices == 0) continue;
+            if (v.section->opaqueVertices == 0 || v.section->fade < 1.0f) continue;  // (a section that is fading is drawn apart)
             forEachRun(v, v.section->opaqueGroups, [&](std::uint32_t first, std::uint32_t length) {
                 add(v, length / 4 * 6, static_cast<std::int32_t>(v.section->arenaBase + first));
                 quads += length / 4;
@@ -283,7 +286,7 @@ void WorldRenderer::render(const Camera& camera, int framebufferWidth, int frame
         }
         const std::size_t cutoutBegin = commands_.size();
         for (const VisibleSection& v : visible_) {
-            if (v.section->cutoutVertices == 0) continue;
+            if (v.section->cutoutVertices == 0 || v.section->fade < 1.0f) continue;
             forEachRun(v, v.section->cutoutGroups, [&](std::uint32_t first, std::uint32_t length) {
                 add(v, length / 4 * 6, static_cast<std::int32_t>(v.section->arenaBase + static_cast<std::uint32_t>(v.section->opaqueVertices) + first));
                 quads += length / 4;
@@ -291,6 +294,7 @@ void WorldRenderer::render(const Camera& camera, int framebufferWidth, int frame
         }
         const std::size_t translucentBegin = commands_.size();
         for (const VisibleSection* v : translucentOrder_) {
+            if (v->section->fade < 1.0f) continue;
             add(*v, static_cast<std::uint32_t>(v->section->translucentVertices / 4 * 6),
                 static_cast<std::int32_t>(v->section->arenaBase) + v->section->opaqueVertices + v->section->cutoutVertices);
             quads += static_cast<std::size_t>(v->section->translucentVertices / 4);
@@ -381,6 +385,35 @@ void WorldRenderer::render(const Camera& camera, int framebufferWidth, int frame
             ++drawCommands;
         }
     }
+    // The few sections that are mid-fade: blended, each with its own fade, in one pass of their own over everything else.
+    if (fadingSomewhere && useMultiDraw_) {
+        gl::BindVertexArray(arenaVao_);
+        gl::Uniform1f(uInstanced_, 0.0f);
+        gl::Enable(gl::BLEND);
+        gl::BlendFuncSeparate(gl::SRC_ALPHA, gl::ONE_MINUS_SRC_ALPHA, gl::ONE, gl::ONE_MINUS_SRC_ALPHA);
+        for (const VisibleSection& v : visible_) {
+            if (v.section->fade >= 1.0f) continue;
+            gl::Uniform3f(uOffset_, v.ox, v.oy, v.oz);
+            gl::Uniform1f(uFade_, v.section->fade);
+            gl::Uniform1f(uAlphaCut_, 0.0f);
+            forEachRun(v, v.section->opaqueGroups, [&](std::uint32_t first, std::uint32_t length) {
+                gl::DrawElementsBaseVertex(gl::TRIANGLES, static_cast<gl::GLsizei>(length / 4 * 6), gl::UNSIGNED_INT, nullptr, static_cast<gl::GLint>(v.section->arenaBase + first));
+            });
+            gl::Uniform1f(uAlphaCut_, 0.5f);
+            forEachRun(v, v.section->cutoutGroups, [&](std::uint32_t first, std::uint32_t length) {
+                gl::DrawElementsBaseVertex(gl::TRIANGLES, static_cast<gl::GLsizei>(length / 4 * 6), gl::UNSIGNED_INT, nullptr,
+                                           static_cast<gl::GLint>(v.section->arenaBase + static_cast<std::uint32_t>(v.section->opaqueVertices) + first));
+            });
+            gl::Uniform1f(uAlphaCut_, 0.01f);
+            if (v.section->translucentVertices > 0) {
+                gl::DrawElementsBaseVertex(gl::TRIANGLES, v.section->translucentVertices / 4 * 6, gl::UNSIGNED_INT, nullptr,
+                                           static_cast<gl::GLint>(v.section->arenaBase) + v.section->opaqueVertices + v.section->cutoutVertices);
+            }
+        }
+        gl::Uniform1f(uFade_, 1.0f);
+        gl::Uniform1f(uInstanced_, 1.0f);
+        gl::Disable(gl::BLEND);
+    }
     gl::DepthMask(gl::TRUE_);
     gl::Disable(gl::BLEND);
     gl::BindVertexArray(0);
@@ -394,16 +427,17 @@ void WorldRenderer::render(const Camera& camera, int framebufferWidth, int frame
         const std::array<float, 3> fogColor = underwater_ ? waterFogColor_ : skyState_.horizon;
         const std::array<float, 2> fogRange = underwater_ ? std::array<float, 2>{waterFogStart_, waterFogEnd_} : std::array<float, 2>{envFogStart_, envFogEnd_};
         const bool rainOn = rain_ && rainTexture_.id() != 0 && !underwater_;
-        if (!shadows_.empty() && shadowTexture_.id() != 0) {  // the soft shadow under each mob, on the ground at its feet
-            sprites_.begin(viewProj, fogColor, fogRange, shadowTexture_, nullptr, lightmapTex_);
+        if (!shadows_.empty()) {  // the soft shadow under each mob, on the ground at its feet (drawn by the sprite shader's own blob: no picture is that)
+            sprites_.begin(viewProj, fogColor, fogRange, cloudTexture_, nullptr, lightmapTex_);
             for (const std::array<double, 4>& s : shadows_) {
-                const float sx = static_cast<float>(s[0] - camera.x), sy = static_cast<float>(s[1] - camera.y) + 0.02f, sz = static_cast<float>(s[2] - camera.z);
+                // (a mob's position is the base of the block it stands on, and its feet are one above that: the shadow lies just over the ground's top face)
+                const float sx = static_cast<float>(s[0] - camera.x), sy = static_cast<float>(s[1] - camera.y) + 1.02f, sz = static_cast<float>(s[2] - camera.z);
                 const float w = static_cast<float>(s[3]);
-                sprites_.quad({sx - w, sy, sz - w}, {sx - w, sy, sz + w}, {sx + w, sy, sz + w}, {sx + w, sy, sz - w}, 0.0f, 0.0f, 1.0f, 1.0f, {0.0f, 0.0f, 0.0f}, 0.55f);
+                sprites_.quad({sx - w, sy, sz - w}, {sx - w, sy, sz + w}, {sx + w, sy, sz + w}, {sx + w, sy, sz - w}, 0.0f, 0.0f, 1.0f, 1.0f, {0.0f, 0.0f, 0.0f}, 0.65f, -2.0f);
             }
             sprites_.end();
-            shadows_.clear();
         }
+        shadows_.clear();  // (the session adds them again next frame; nothing is kept when none was drawn)
         if (!bits_.empty() || rainOn) {
             const std::array<float, 3> right = {view.m[0], view.m[4], view.m[8]};
             const std::array<float, 3> up = {view.m[1], view.m[5], view.m[9]};

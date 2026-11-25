@@ -90,6 +90,7 @@ struct ClientOptions {
     bool audioDevices = false;                         // --audio-devices: list outputs, try each silently, exit
     std::optional<std::string> connect;                // --connect HOST[:PORT]: join this server at start-up (it must not check accounts)
     std::optional<std::string> play;                   // --play <folder>: open this world of saves/ at start-up
+    bool newWorld = false;                             // --new-world: make the world of --play first if it is not there (a scripted run needs one, and the menus are not there to make it)
     std::optional<std::array<double, 5>> camera;       // --cam X,Y,Z,YAW,PITCH: put the player there (and make them fly)
     std::optional<double> benchmark;                   // --bench <s>: fly a fixed path for s seconds, print frame times, exit
     std::optional<double> holdLoading;                 // --hold-loading <s>: keep the "Loading terrain..." screen up at least this long

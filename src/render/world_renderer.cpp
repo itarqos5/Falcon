@@ -343,26 +343,6 @@ WorldRenderer::WorldRenderer(BlockModels& models, std::int64_t seed, TerrainStyl
     celestialImage_ = makeCelestialAtlas(models.resources());
     celestial_ = Texture2D(celestialImage_, FilterMode::Nearest);
     sprites_.init();
-    {   // The soft blob under a mob: white, with the alpha of a shadow that fades to nothing at its edge.
-        Image blob;
-        blob.width = blob.height = 64;
-        blob.rgba.assign(64u * 64u * 4u, 0);
-        for (int y = 0; y < 64; ++y) {
-            for (int x = 0; x < 64; ++x) {
-                const float dx = (static_cast<float>(x) + 0.5f) / 64.0f * 2.0f - 1.0f;
-                const float dy = (static_cast<float>(y) + 0.5f) / 64.0f * 2.0f - 1.0f;
-                const float r = std::sqrt(dx * dx + dy * dy);
-                const float edge = std::clamp(1.0f - r, 0.0f, 1.0f);
-                const auto alpha = static_cast<std::uint8_t>(255.0f * edge * edge * edge);
-                const std::size_t at = (static_cast<std::size_t>(y) * 64u + static_cast<std::size_t>(x)) * 4u;
-                blob.rgba[at + 0] = 255;
-                blob.rgba[at + 1] = 255;
-                blob.rgba[at + 2] = 255;
-                blob.rgba[at + 3] = alpha;
-            }
-        }
-        shadowTexture_ = Texture2D(blob, FilterMode::Nearest);
-    }
     // The game's own cloud picture: 256 by 256 texels, 12 blocks to a texel, so the layer repeats every 3072 blocks.
     if (const auto bytes = models.resources().readBytes(ResourceLocation("minecraft", "textures/environment/clouds.png"))) {
         if (auto image = decodePng(*bytes); image && !image->empty()) cloudTexture_ = Texture2D(*image, FilterMode::Nearest);

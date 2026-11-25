@@ -184,6 +184,8 @@ ClientOptions parseOptions(int argc, const char* const* argv) {
             o.connect = nextValue(i, argc, argv);
         } else if (arg == "--play") {
             o.play = nextValue(i, argc, argv);
+        } else if (arg == "--new-world") {
+            o.newWorld = true;
         } else if (arg == "--cam") {
             const std::string v = nextValue(i, argc, argv);
             std::array<double, 5> cam{};

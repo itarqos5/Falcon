@@ -39,6 +39,7 @@
 #include "falcon/util/options_file.hpp"
 #include "falcon/util/task_pool.hpp"
 #include "falcon/util/text_util.hpp"
+#include "falcon/world/new_world.hpp"
 #include "falcon/game/edition_badge.hpp"
 #include "falcon/game/panorama.hpp"
 #include "falcon/game/splash_manager.hpp"
@@ -755,6 +756,18 @@ int Client::run() {
             const std::string folder = *worldToStart;
             worldToStart.reset();
             appliedEarly = navigator.apply(screens);
+            if (options_.newWorld && !std::filesystem::exists(gameDir / "saves" / pathFromUtf8(folder) / "level.dat")) {
+                // A scripted run (--capture) has no menu to make a world in, so it makes one here, the same way Create New World does.
+                NewWorldSettings settings;
+                settings.name = folder;
+                std::string error;
+                const std::int64_t nowMillis = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+                if (!createWorldFolder(gameDir / "saves", folder, settings, 0, nowMillis, error)) {
+                    falcon::log::line("could not create the world '%s': %s\n", folder.c_str(), error.c_str());
+                } else {
+                    falcon::log::line("made the world '%s' for this run\n", folder.c_str());
+                }
+            }
             auto levelInfo = readLevelInfo(gameDir / "saves" / pathFromUtf8(folder));
             if (levelInfo && options_.gameType) levelInfo->gameType = *options_.gameType;  // --gamemode
             if (levelInfo && options_.cheats) levelInfo->allowCommands = true;               // --cheats

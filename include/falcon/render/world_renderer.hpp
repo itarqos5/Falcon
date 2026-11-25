@@ -413,7 +413,6 @@ private:
     unsigned bitSeed_ = 12345u;
     int blockMipLevels_ = -1;  // (the Mipmap Levels the block pictures were set to: -1, not set yet)
     float chunkFadeSeconds_ = 0.0f;
-    Texture2D shadowTexture_;                         // (a soft round blob, made in code: white with an alpha that fades to nothing at its edge)
     std::vector<std::array<double, 4>> shadows_;      // x, y, z of where a mob stands, and how wide its shadow is
     [[nodiscard]] float bitRandom();
     bool cloudsOn_ = false, cloudsThick_ = false;
