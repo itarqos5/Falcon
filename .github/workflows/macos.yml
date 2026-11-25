@@ -5,12 +5,12 @@ name: macOS
 on:
   push:
     branches: [main]
-    paths-ignore: ['website/**', 'docs/**', '**.md', '.github/workflows/discord.yml']
+    tags: ['v*']  # (a release's tag: the build is attached to that release); no path filter, so a tag always runs
   pull_request:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write  # (to attach the build to a release)
 
 jobs:
   build:
@@ -46,3 +46,15 @@ jobs:
           name: falcon-macos
           path: build/Falcon
           if-no-files-found: error
+
+      # A tag's build is the release's Mac download. The launcher is not built on a Mac yet, so this is the client itself: unpack it, name the game folder with
+      # --game-dir, or run the launcher elsewhere. (The Intel runner makes an Intel binary; Apple silicon runs it under Rosetta.)
+      - name: Attach to the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          cp build/Falcon out-Falcon-macos-x86_64
+          shasum -a 256 out-Falcon-macos-x86_64 | cut -d' ' -f1 > out-Falcon-macos-x86_64.sha256
+          gh release upload "$TAG" out-Falcon-macos-x86_64 out-Falcon-macos-x86_64.sha256 --clobber --repo "$GITHUB_REPOSITORY"
