@@ -883,4 +883,61 @@ std::shared_ptr<Chunk> decodeChunk(Reader& r, int stateCount, const std::vector<
     return nullptr;
 }
 
+namespace {
+
+// A BitSet as the network writes it: the number of longs, then the longs, bit 0 of the first being section 0.
+bool readLightMask(Reader& r, std::vector<bool>& bits, int layers) {
+    const int longs = r.varint();
+    if (!r.ok || longs < 0 || longs > (layers + 63) / 64 || static_cast<std::size_t>(longs) * 8 > r.left()) return false;
+    bits.assign(static_cast<std::size_t>(layers), false);
+    for (int i = 0; i < longs; ++i) {
+        const std::uint64_t v = static_cast<std::uint64_t>(r.i64());
+        for (int b = 0; b < 64; ++b) {
+            const int layer = i * 64 + b;
+            if (layer >= layers) break;
+            if (((v >> b) & 1) != 0) bits[static_cast<std::size_t>(layer)] = true;
+        }
+    }
+    return r.ok;
+}
+
+// One layer of a section's light: 2048 bytes of two nibbles a byte, the same order as the blocks of a section.
+bool readLightLayer(Reader& r, NibbleArray& out) {
+    if (r.left() < out.data.size()) {
+        r.ok = false;
+        return false;
+    }
+    std::copy(r.here(), r.here() + out.data.size(), out.data.begin());
+    r.skip(out.data.size());
+    return r.ok;
+}
+
+}  // namespace
+
+bool readLight(Reader& r, ChunkLight& out) {
+    constexpr int kLayers = kSectionCount + 2;  // a layer below the world and one above it are in the masks too
+    std::vector<bool> skySent, blockSent, skyEmpty, blockEmpty;
+    if (!readLightMask(r, skySent, kLayers) || !readLightMask(r, blockSent, kLayers) || !readLightMask(r, skyEmpty, kLayers) ||
+        !readLightMask(r, blockEmpty, kLayers)) {
+        return false;
+    }
+    // The arrays are in the order of the bits from the bottom layer up; the sky's all come before the block light's.
+    const auto readSide = [&](const std::vector<bool>& sent, const std::vector<bool>& empty, std::array<std::shared_ptr<const NibbleArray>, kSectionCount>& into,
+                              std::array<std::uint8_t, kSectionCount>& fill) {
+        for (int layer = 0; layer < kLayers; ++layer) {
+            const bool inWorld = layer >= 1 && layer <= kSectionCount;  // (layer 0 is below the world, the last one above it)
+            if (sent[static_cast<std::size_t>(layer)]) {
+                auto bytes = std::make_shared<NibbleArray>();
+                if (!readLightLayer(r, *bytes)) return false;
+                if (inWorld) into[static_cast<std::size_t>(layer - 1)] = std::move(bytes);
+            } else if (empty[static_cast<std::size_t>(layer)] && inWorld) {
+                fill[static_cast<std::size_t>(layer - 1)] = 0;  // (an empty layer is all dark; the section keeps the array it had otherwise)
+            }
+        }
+        return r.ok;
+    };
+    if (!readSide(skySent, skyEmpty, out.sky, out.skyFill)) return false;
+    return readSide(blockSent, blockEmpty, out.block, out.blockFill);
+}
+
 }  // namespace falcon::net

@@ -788,6 +788,42 @@ void test_chunk_biomes() {
     }
 }
 
+// The light a server sends with a chunk: four masks and then a layer of 2048 bytes for each bit that is set, the sky's layers all before the block light's.
+void test_chunk_light() {
+    Writer w;
+    // the sky: the layer below the world (index 0, skipped), the first two sections of the world and the last one. The block light: nothing sent, the first and the last
+    // section called empty.
+    const std::uint64_t skySent = (1ull << 0) | (1ull << 1) | (1ull << 2) | (1ull << kSectionCount);
+    w.varint(1);
+    w.i64(static_cast<std::int64_t>(skySent));
+    w.varint(0);  // no block light sent
+    w.varint(0);  // no empty sky layers
+    const std::uint64_t blockEmpty = (1ull << 1) | (1ull << kSectionCount);
+    w.varint(1);
+    w.i64(static_cast<std::int64_t>(blockEmpty));
+    for (const int v : {0x00, 0xFF, 0x5A, 0x11}) {  // (in the order of the bits: below the world, section 0, section 1, the last)
+        for (int i = 0; i < 2048; ++i) w.u8(v);
+    }
+    Reader r(w.data);
+    ChunkLight light;
+    CHECK(readLight(r, light));
+    CHECK(r.left() == 0);
+    CHECK(light.sky[0] != nullptr);
+    CHECK(light.sky[0] && light.sky[0]->get(0) == 15);
+    CHECK(light.sky[1] && light.sky[1]->get(0) == 10);  // (0x5A: the low nibble comes first)
+    CHECK(light.sky[static_cast<std::size_t>(kSectionCount - 1)] && light.sky[static_cast<std::size_t>(kSectionCount - 1)]->get(0) == 1);
+    CHECK(light.sky[2] == nullptr);  // (a section the packet says nothing about keeps what it had)
+    CHECK(light.block[0] == nullptr);
+    CHECK(light.blockFill[0] == 0);  // an empty layer is dark
+    CHECK(light.blockFill[static_cast<std::size_t>(kSectionCount - 1)] == 0);
+    {   // cut short: a layer that is not all there
+        const Bytes body(w.data.begin(), w.data.end() - 100);
+        Reader cut(body);
+        ChunkLight broken;
+        CHECK(!readLight(cut, broken));
+    }
+}
+
 int main() {
     test_varints();
     test_reader_runs_out();
@@ -806,6 +842,7 @@ int main() {
     test_lp_vec3();
     test_item_components();
     test_chunk_biomes();
+    test_chunk_light();
 #ifdef _WIN32
     test_encrypted_connection();
 #endif

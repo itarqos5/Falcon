@@ -830,10 +830,16 @@ void WorldRenderer::requestMeshes(ChunkPos pos) {
 }
 
 void WorldRenderer::acceptChunk(ChunkPos pos, std::shared_ptr<Chunk> chunk) {
+    // A chunk from a server comes with the light the server worked out, so there is nothing to light here (requestLight leaves it alone).
+    const bool litByServer = chunk->light != nullptr;
     level_.putChunk(pos, std::move(chunk));
-    // This chunk may complete the surroundings of itself and of its eight neighbours: they can be lit now.
+    // This chunk may complete the surroundings of itself and of its eight neighbours: they can be lit now, and a chunk that already has its light can be meshed.
     for (int dz = -1; dz <= 1; ++dz) {
-        for (int dx = -1; dx <= 1; ++dx) requestLight({pos.x + dx, pos.z + dz}, false);
+        for (int dx = -1; dx <= 1; ++dx) {
+            const ChunkPos p{pos.x + dx, pos.z + dz};
+            requestLight(p, false);
+            if (litByServer && level_.chunk(p) != nullptr && neighborsLit(p)) requestMeshes(p);
+        }
     }
 }
 
