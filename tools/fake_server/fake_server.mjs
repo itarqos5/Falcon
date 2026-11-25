@@ -62,6 +62,21 @@ class W {
 const frame = (id, body) => { const inner = Buffer.concat([new W().varint(id).buf(), body || Buffer.alloc(0)]); return Buffer.concat([new W().varint(inner.length).buf(), inner]); };
 
 // ---- the world: a grass floor
+// The light of a chunk: an open sky at `sky` and none from blocks. A layer below the world and one above it are in the masks too.
+function lightData(sky) {
+  const w = new W();
+  const allLayers = (1n << 26n) - 1n;
+  w.varint(1).i64(allLayers);   // the sky layers that follow
+  w.varint(0);                  // no block light to send
+  w.varint(0);                  // no empty sky layers
+  w.varint(1).i64(allLayers);   // every block layer is dark
+  const v = (sky & 15) * 17;    // (both nibbles of a byte)
+  for (let i = 0; i < 26; i++) w.raw(Buffer.alloc(2048, v));
+  return w.buf();
+}
+function lightUpdatePacket(cx, cz, sky) {
+  return frame(49, new W().varint(cx).varint(cz).raw(lightData(sky)).buf());
+}
 function chunkPacket(cx, cz, block = process.env.FALCON_MP_FLOOR || 'grass_block') {
   const data = new W();
   const grass = stateOf(block);
@@ -74,14 +89,8 @@ function chunkPacket(cx, cz, block = process.env.FALCON_MP_FLOOR || 'grass_block
   }
   const body = new W().i32(cx).i32(cz).varint(0).varint(data.b.length).raw(data.b);
   body.varint(0);  // no block entities
-  // the light: an open sky over the whole world, no light from blocks (24 layers of the world between a layer below it and one above it)
-  const allLayers = (1n << 26n) - 1n;
-  body.varint(1).i64(allLayers);   // the sky layers that follow
-  body.varint(0);                  // no block light to send
-  body.varint(0);                  // no empty sky layers
-  body.varint(1).i64(allLayers);   // every block layer is dark
-  const sky = Number(process.env.FALCON_MP_LIGHT || 15) & 15;  // (a dim sky shows whether the client took this light or worked out its own)
-  for (let i = 0; i < 26; i++) body.raw(Buffer.alloc(2048, (sky << 4) | sky));
+  // (a dim sky shows whether the client took this light or worked out its own)
+  body.raw(lightData(Number(process.env.FALCON_MP_LIGHT || 15)));
   return frame(46, body.buf());
 }
 
@@ -197,6 +206,12 @@ const server = net.createServer((sock) => {
     s.write(frame(96, new W().varint(0).varint(0).buf()));
     s.write(frame(12));
     for (let cx = -8; cx <= 8; cx++) for (let cz = -8; cz <= 8; cz++) s.write(chunkPacket(cx, cz));
+    if (process.env.FALCON_MP_LIGHT_AFTER) {  // the light changes later, as it does when a block is placed: only a light update says so
+      const after = Number(process.env.FALCON_MP_LIGHT_AFTER);
+      setTimeout(() => {
+        for (let cx = -8; cx <= 8; cx++) for (let cz = -8; cz <= 8; cz++) s.write(lightUpdatePacket(cx, cz, after));
+      }, 2500);
+    }
     s.write(frame(11, new W().varint(289).buf()));
     const sc = (table[scenario] || (() => ({ view: { x: 0.5, y: 64, z: 0.5, yaw: 0, pitch: 0 }, tick: () => {} })))(s);
     const v = sc.view;
