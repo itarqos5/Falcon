@@ -122,10 +122,10 @@ void test_remote_players() {
     {  // a move of one block east: the entity gets there in three steps (a third, then half of what is left, then the rest)
         Writer w;
         w.varint(5);
+        w.varint(1);  // one tick of it, standing on the ground
         w.i16(4096);
         w.i16(0);
         w.i16(0);
-        w.u8(1);
         client.injectPlayPacket(54, w.data, h);
         client.tickPlayers();
         CHECK(closeTo(client.players().at(5).x, 10.0 + 1.0 / 3.0, 1e-6));
@@ -137,17 +137,18 @@ void test_remote_players() {
     {  // a position sync moves the base: the next relative move adds to the new place, not the old one
         Writer w;
         w.varint(5);
-        for (const double v : {20.0, 64.0, 20.0, 0.0, 0.0, 0.0}) w.f64(v);
+        w.varint(0);  // one point, not a path of them
+        for (const double v : {20.0, 64.0, 20.0}) w.f64(v);
         w.f32(0.0f);
         w.f32(0.0f);
         w.u8(1);
         client.injectPlayPacket(35, w.data, h);
         Writer m;
         m.varint(5);
+        m.varint(1);
         m.i16(4096);
         m.i16(0);
         m.i16(0);
-        m.u8(1);
         client.injectPlayPacket(54, m.data, h);
         tick(6);
         CHECK(closeTo(client.players().at(5).x, 21.0, 1e-6) && closeTo(client.players().at(5).z, 20.0, 1e-6));
@@ -157,10 +158,10 @@ void test_remote_players() {
     for (int i = 0; i < 40; ++i) {
         Writer m;
         m.varint(5);
+        m.varint(1);
         m.i16(1024);  // a quarter of a block a tick
         m.i16(0);
         m.i16(0);
-        m.u8(1);
         client.injectPlayPacket(54, m.data, h);
         client.tickPlayers();
         client.tickPlayers();

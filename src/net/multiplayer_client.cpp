@@ -1231,11 +1231,20 @@ void MultiplayerClient::handlePlay(const Packet& p, RemoteHandler& h) {
         case 55:
         case 57: {  // move_entity_pos, move_entity_pos_rot, move_entity_rot
             const int id = r.varint();
+            const int properties = r.varint();  // the ticks this move is spread over, and bit 0 for whether it is standing on the ground
+            const int steps = properties >> 1;
             const auto it = id == controlledEntity_ ? players_.end() : players_.find(id);  // (the one this machine drives is not moved by the server)
             const auto item = items_.find(id);
             const bool flying = it != players_.end() && projectilePhysics_.count(it->second.type) != 0;  // (what flies is moved by its own velocity: the server's word is taken at once)
             if (p.id != 57) {
-                const double dx = r.i16() / 4096.0, dy = r.i16() / 4096.0, dz = r.i16() / 4096.0;
+                // Either one move of a tick (three shorts) or a step for each tick of a longer one: a step is a tick and three shorts, and the last step is where it is now.
+                double dx = 0.0, dy = 0.0, dz = 0.0;
+                for (int i = 0; i < (steps == 0 ? 1 : steps) && r.ok; ++i) {
+                    if (steps != 0) r.varint();  // the tick this step lands on
+                    dx = r.i16() / 4096.0;
+                    dy = r.i16() / 4096.0;
+                    dz = r.i16() / 4096.0;
+                }
                 if (it != players_.end() && r.ok) {
                     it->second.sx += dx;  // (relative to where the server had it, not to where it is drawn)
                     it->second.sy += dy;
@@ -1265,9 +1274,8 @@ void MultiplayerClient::handlePlay(const Packet& p, RemoteHandler& h) {
                     }
                 }
             }
-            const bool onGround = r.boolean();
-            if (it != players_.end()) it->second.onGround = onGround;
-            if (item != items_.end()) item->second.onGround = onGround;
+            if (it != players_.end()) it->second.onGround = (properties & 1) != 0;
+            if (item != items_.end()) item->second.onGround = (properties & 1) != 0;
             break;
         }
         case 128: {  // teleport_entity (entity_position_sync has its own kind of position: not followed)
@@ -1298,7 +1306,24 @@ void MultiplayerClient::handlePlay(const Packet& p, RemoteHandler& h) {
         }
         case 35: {  // entity_position_sync: where the server really has an entity (sent now and then, so that the small moves in between never drift)
             const int id = r.varint();
-            const PositionMoveRotation m = readPositionMoveRotation(r);
+            // The position is one point or a path of them a tick apart (the last is where it is now); the angles are floats here, not bytes.
+            PositionMoveRotation m{};
+            const int kind = r.varint();
+            if (kind == 0) {
+                m.x = r.f64();
+                m.y = r.f64();
+                m.z = r.f64();
+            } else {
+                const int points = r.varint();
+                for (int i = 0; i < points && r.ok; ++i) {
+                    m.x = r.f64();
+                    m.y = r.f64();
+                    m.z = r.f64();
+                    r.varint();  // the tick this point is for
+                }
+            }
+            m.yaw = r.f32();
+            m.pitch = r.f32();
             const bool onGround = r.boolean();
             if (!r.ok) break;
             if (const auto it = id == controlledEntity_ ? players_.end() : players_.find(id); it != players_.end()) {
