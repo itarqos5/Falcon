@@ -1,5 +1,6 @@
-# Builds Falcon on macOS (Apple silicon) and runs the unit tests. The game is the same GLFW + OpenGL client as on the other systems; the launcher is not built here,
-# because its window is the system web view (WebView2 on Windows, WebKitGTK on Linux) and a Mac has neither.
+# Builds Falcon on macOS (the Intel runner) and runs the unit tests. The game is the same GLFW + OpenGL client as on the other systems, and the launcher is the
+# same program with the system's own web view: WKWebView (Cocoa/WebKit), where Windows has WebView2 and Linux has WebKitGTK. The launcher is a FalconLauncher.app
+# bundle with the client inside it, so a Mac download is one thing that runs (Intel; Apple silicon runs it under Rosetta).
 name: macOS
 
 on:
@@ -21,34 +22,56 @@ jobs:
       - name: Packages
         run: brew install openssl@3 ninja ccache
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
       - uses: hendrikmuhs/ccache-action@v1.2
         with:
           key: macos-${{ github.sha }}
           restore-keys: macos-
 
       - name: Configure
-        run: cmake --preset release -DCMAKE_PREFIX_PATH="$(brew --prefix openssl@3)" -DFALCON_BUILD_LAUNCHER=OFF
+        run: cmake --preset release -DCMAKE_PREFIX_PATH="$(brew --prefix openssl@3)" -DFALCON_BUILD_LAUNCHER=ON
 
       - name: Build the client
         run: cmake --build --preset release -j 4
 
+      - name: Build the launcher (the client is embedded in it)
+        run: cmake --build --preset launcher -j 4
+
       - name: Test
         run: cmake --build --preset check -j 4
 
-      - name: What the program links against
+      - name: What the programs link against
         run: |
           otool -L build/Falcon || true
           ls -l build/Falcon
+          ls -lR dist-launcher/FalconLauncher.app || true
+          otool -L dist-launcher/FalconLauncher.app/Contents/MacOS/FalconLauncher || true
+
+      # The UI drawn off-screen by the real web view, with no window on screen: proves the host, the page and the falcon:// scheme work on this system.
+      # (A runner has no logged-in desktop session, so a failure here is reported and does not fail the build.)
+      - name: Draw the launcher UI off-screen
+        continue-on-error: true
+        run: |
+          mkdir -p screenshot
+          FALCON_LAUNCHER_HOME="$PWD/screenshot/home" FALCON_SOUND_LOG=0 \
+            dist-launcher/FalconLauncher.app/Contents/MacOS/FalconLauncher --mock --screenshot "$PWD/screenshot/launcher.png" --wait 1500
+          cat screenshot/launcher.png.txt || true
 
       - name: Upload the Mac build
         uses: actions/upload-artifact@v4
         with:
           name: falcon-macos
-          path: build/Falcon
-          if-no-files-found: error
+          path: |
+            build/Falcon
+            dist-launcher/FalconLauncher.app
+            screenshot/launcher.png
+            screenshot/launcher.png.txt
+          if-no-files-found: warn
 
-      # A tag's build is the release's Mac download. The launcher is not built on a Mac yet, so this is the client itself: unpack it, name the game folder with
-      # --game-dir, or run the launcher elsewhere. (The Intel runner makes an Intel binary; Apple silicon runs it under Rosetta.)
+      # A tag's build is the release's Mac download: the launcher bundle (with the client inside it) and the plain client, each with its SHA-256.
       - name: Attach to the release
         if: startsWith(github.ref, 'refs/tags/v')
         env:
@@ -57,4 +80,7 @@ jobs:
         run: |
           cp build/Falcon out-Falcon-macos-x86_64
           shasum -a 256 out-Falcon-macos-x86_64 | cut -d' ' -f1 > out-Falcon-macos-x86_64.sha256
-          gh release upload "$TAG" out-Falcon-macos-x86_64 out-Falcon-macos-x86_64.sha256 --clobber --repo "$GITHUB_REPOSITORY"
+          ditto -c -k --keepParent dist-launcher/FalconLauncher.app out-FalconLauncher-macos-x86_64.zip
+          shasum -a 256 out-FalconLauncher-macos-x86_64.zip | cut -d' ' -f1 > out-FalconLauncher-macos-x86_64.zip.sha256
+          gh release upload "$TAG" out-Falcon-macos-x86_64 out-Falcon-macos-x86_64.sha256 \
+            out-FalconLauncher-macos-x86_64.zip out-FalconLauncher-macos-x86_64.zip.sha256 --clobber --repo "$GITHUB_REPOSITORY"
