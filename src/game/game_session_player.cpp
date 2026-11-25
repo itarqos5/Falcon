@@ -104,6 +104,10 @@ void GameSession::tickPlayer(double seconds, bool steering) {
         if (ready_ && redstone_) redstone_->tick();
         if (ready_) tickContainers();
         if (ready_) tickMods();
+        // Minecraft.runTick: ServerboundClientTickEndPacket goes out at the end of the tick, after the level has ticked, not with
+        // the movement (LocalPlayer.sendChanges, which comes before ClientLevel.tick). It is not held back until the world has
+        // loaded, as the movement is.
+        if (remote_ && remote_->inPlay()) remote_->sendTickEnd();
     }
     // Out of the world (below the void line) the void hurts a survival player (4 a tick, through any protection) until they die; anyone else
     // starts again at the spawn.

@@ -734,7 +734,8 @@ void GameSession::pumpRemote() {
 
 // What LocalPlayer.tick says to the server: the keys when they changed, the sprint, the position, and that the tick is over.
 void GameSession::sendRemoteTick(const PlayerInput& input, bool riding, const BoatBody* steered) {
-    if (!remote_ || !remote_->inPlay() || !remoteTeleported_) return;
+    // LocalPlayer.sendChanges returns until the client has told the server it has the world (hasClientLoaded): no keys, no movement before that.
+    if (!remote_ || !remote_->inPlay() || !remoteTeleported_ || !loadedSent_) return;
     const int flags = (input.forward ? 1 : 0) | (input.backward ? 2 : 0) | (input.left ? 4 : 0) | (input.right ? 8 : 0) | (input.jump ? 16 : 0) | (input.shift ? 32 : 0) | (input.sprint ? 64 : 0);
     if (flags != lastInputFlags_) {
         remote_->sendInput(flags);
@@ -753,7 +754,6 @@ void GameSession::sendRemoteTick(const PlayerInput& input, bool riding, const Bo
     if (riding) {  // ClientboundSetPassengers: the rider's position is the vehicle's; the server is told only how it looks round, and the vehicle's place when the rider steers it
         remote_->sendRotation(player_.yaw, player_.pitch, player_.onGround, player_.horizontalCollision);
         if (steered != nullptr) remote_->sendMoveVehicle(steered->x, steered->y, steered->z, steered->yaw, 0.0f, steered->onGround);
-        remote_->sendTickEnd();
         remote_->tickPlayers();
         return;
     }
@@ -766,7 +766,6 @@ void GameSession::sendRemoteTick(const PlayerInput& input, bool riding, const Bo
     state.onGround = player_.onGround;
     state.horizontalCollision = player_.horizontalCollision;
     remote_->sendMovement(state);
-    remote_->sendTickEnd();
     remote_->tickPlayers();
 }
 
