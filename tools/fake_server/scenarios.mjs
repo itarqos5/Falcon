@@ -130,7 +130,8 @@ export function scenarios(h) {
       view: { x: 0.5, y: 64, z: -1, yaw: 0, pitch: 5 },
       tick: (t) => {
         const x = 3 + 1.5 * Math.sin(t / 50), qx = Math.round(x * 4096);
-        sock.write(frame(54, new W().varint(109).i16(qx - boat.q.x).i16(0).i16(0).bool(true).buf()));
+        // (26.3: a varint of the ticks the move covers, bit 0 for standing on the ground, and then the move itself)
+        sock.write(frame(54, new W().varint(109).varint(1).i16(qx - boat.q.x).i16(0).i16(0).buf()));
         boat.q.x = qx;
       },
     };

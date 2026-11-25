@@ -73,6 +73,15 @@ function chunkPacket(cx, cz, block = process.env.FALCON_MP_FLOOR || 'grass_block
     data.u8(0).varint(biome);               // biomes: a single value
   }
   const body = new W().i32(cx).i32(cz).varint(0).varint(data.b.length).raw(data.b);
+  body.varint(0);  // no block entities
+  // the light: an open sky over the whole world, no light from blocks (24 layers of the world between a layer below it and one above it)
+  const allLayers = (1n << 26n) - 1n;
+  body.varint(1).i64(allLayers);   // the sky layers that follow
+  body.varint(0);                  // no block light to send
+  body.varint(0);                  // no empty sky layers
+  body.varint(1).i64(allLayers);   // every block layer is dark
+  const sky = Number(process.env.FALCON_MP_LIGHT || 15) & 15;  // (a dim sky shows whether the client took this light or worked out its own)
+  for (let i = 0; i < 26; i++) body.raw(Buffer.alloc(2048, (sky << 4) | sky));
   return frame(46, body.buf());
 }
 
@@ -121,12 +130,14 @@ function moveTick(sock, p) {
   const yawB = angle(p.yaw), pitchB = angle(p.pitch);
   const rotated = yawB !== p.lastYaw || pitchB !== p.lastPitch;
   const moved = dx !== 0 || dy !== 0 || dz !== 0;
+  // (26.3: a varint of the ticks the move covers, bit 0 for standing on the ground, and then the move itself - a tick of it with no steps)
+  const props = p.onGround === false ? 0 : 1;
   if (moved && Math.abs(dx) < 32000 && Math.abs(dy) < 32000 && Math.abs(dz) < 32000) {
-    if (rotated) sock.write(frame(55, new W().varint(100 + p.id).i16(dx).i16(dy).i16(dz).i8(yawB).i8(pitchB).bool(p.onGround ?? true).buf()));
-    else sock.write(frame(54, new W().varint(100 + p.id).i16(dx).i16(dy).i16(dz).bool(p.onGround ?? true).buf()));
+    if (rotated) sock.write(frame(55, new W().varint(100 + p.id).varint(props).i16(dx).i16(dy).i16(dz).i8(yawB).i8(pitchB).buf()));
+    else sock.write(frame(54, new W().varint(100 + p.id).varint(props).i16(dx).i16(dy).i16(dz).buf()));
     p.qx = qx; p.qy = qy; p.qz = qz;
   } else if (rotated) {
-    sock.write(frame(57, new W().varint(100 + p.id).i8(yawB).i8(pitchB).bool(p.onGround ?? true).buf()));
+    sock.write(frame(57, new W().varint(100 + p.id).varint(props).i8(yawB).i8(pitchB).buf()));
   }
   p.lastYaw = yawB; p.lastPitch = pitchB;
   const headB = angle(p.head);
