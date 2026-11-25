@@ -37,7 +37,7 @@ void setComponentTranslator(std::function<std::string(const std::string&)> trans
 // The light that comes after a chunk's data (and on its own in a light update): four masks - the sections whose light is sent, and the ones that are all dark - and then
 // a 2048-byte array for each set bit, the sky's first and the block light's after, from the section below the world (index 0) upwards. The two layers outside the world are
 // skipped: a ChunkLight already has full sky above it and none below. False when the data does not read.
-bool readLight(Reader& r, ChunkLight& out);
+bool readLight(Reader& r, ChunkLightPatch& out);
 
 // The numbers (in the game's data component type registry) of the components of an item that Falcon can read; -1 for one the game's data does not have.
 // A component that is not one of these has no layout known here and cannot be stepped over.

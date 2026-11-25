@@ -914,7 +914,7 @@ bool readLightLayer(Reader& r, NibbleArray& out) {
 
 }  // namespace
 
-bool readLight(Reader& r, ChunkLight& out) {
+bool readLight(Reader& r, ChunkLightPatch& out) {
     constexpr int kLayers = kSectionCount + 2;  // a layer below the world and one above it are in the masks too
     std::vector<bool> skySent, blockSent, skyEmpty, blockEmpty;
     if (!readLightMask(r, skySent, kLayers) || !readLightMask(r, blockSent, kLayers) || !readLightMask(r, skyEmpty, kLayers) ||
@@ -923,21 +923,24 @@ bool readLight(Reader& r, ChunkLight& out) {
     }
     // The arrays are in the order of the bits from the bottom layer up; the sky's all come before the block light's.
     const auto readSide = [&](const std::vector<bool>& sent, const std::vector<bool>& empty, std::array<std::shared_ptr<const NibbleArray>, kSectionCount>& into,
-                              std::array<std::uint8_t, kSectionCount>& fill) {
+                              std::array<std::uint8_t, kSectionCount>& state) {
         for (int layer = 0; layer < kLayers; ++layer) {
             const bool inWorld = layer >= 1 && layer <= kSectionCount;  // (layer 0 is below the world, the last one above it)
             if (sent[static_cast<std::size_t>(layer)]) {
                 auto bytes = std::make_shared<NibbleArray>();
                 if (!readLightLayer(r, *bytes)) return false;
-                if (inWorld) into[static_cast<std::size_t>(layer - 1)] = std::move(bytes);
+                if (inWorld) {
+                    into[static_cast<std::size_t>(layer - 1)] = std::move(bytes);
+                    state[static_cast<std::size_t>(layer - 1)] = ChunkLightPatch::kSent;
+                }
             } else if (empty[static_cast<std::size_t>(layer)] && inWorld) {
-                fill[static_cast<std::size_t>(layer - 1)] = 0;  // (an empty layer is all dark; the section keeps the array it had otherwise)
+                state[static_cast<std::size_t>(layer - 1)] = ChunkLightPatch::kDark;  // (a section the packet says nothing about keeps its light)
             }
         }
         return r.ok;
     };
-    if (!readSide(skySent, skyEmpty, out.sky, out.skyFill)) return false;
-    return readSide(blockSent, blockEmpty, out.block, out.blockFill);
+    if (!readSide(skySent, skyEmpty, out.sky, out.skyState)) return false;
+    return readSide(blockSent, blockEmpty, out.block, out.blockState);
 }
 
 }  // namespace falcon::net

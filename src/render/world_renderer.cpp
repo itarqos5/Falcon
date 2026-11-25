@@ -1000,10 +1000,12 @@ void WorldRenderer::update(double playerX, double playerZ, int renderDistance, d
     if (remote_) {
         std::vector<std::pair<ChunkPos, std::shared_ptr<Chunk>>> arrived;
         std::vector<ChunkPos> forgotten;
+        std::vector<std::pair<ChunkPos, ChunkLightPatch>> relit;
         {
             std::lock_guard<std::mutex> lock(remoteMutex_);
             arrived.swap(remoteChunks_);
             forgotten.swap(remoteForgets_);
+            relit.swap(remoteLights_);
         }
         for (auto& [pos, chunk] : arrived) {
             if (chunk == nullptr) {  // forgetAllChunks: the old world is gone
@@ -1021,6 +1023,7 @@ void WorldRenderer::update(double playerX, double playerZ, int renderDistance, d
             dropSections(pos);
             level_.removeChunk(pos);
         }
+        for (const auto& [pos, patch] : relit) applyServerLight(pos, patch);
     }
 
     // Light the workers finished.
@@ -1110,6 +1113,21 @@ void WorldRenderer::update(double playerX, double playerZ, int renderDistance, d
 void WorldRenderer::receiveChunk(ChunkPos pos, std::shared_ptr<Chunk> chunk) {
     std::lock_guard<std::mutex> lock(remoteMutex_);
     remoteChunks_.emplace_back(pos, std::move(chunk));
+}
+
+void WorldRenderer::receiveLight(ChunkPos pos, const ChunkLightPatch& patch) {
+    std::lock_guard<std::mutex> lock(remoteMutex_);
+    remoteLights_.emplace_back(pos, patch);
+}
+
+// The server sent the light of a few sections of a chunk again: put them in its light and mesh the sections that changed, as a light job would.
+void WorldRenderer::applyServerLight(ChunkPos pos, const ChunkLightPatch& patch) {
+    Chunk* chunk = level_.chunk(pos);
+    if (chunk == nullptr) return;
+    auto light = chunk->light ? std::make_shared<ChunkLight>(*chunk->light) : std::make_shared<ChunkLight>();
+    patch.applyTo(*light);
+    lightRequested_.erase(pos);
+    applyLight(LightResult{pos, ++lightStamps_[pos], std::move(light)});
 }
 
 void WorldRenderer::enterDimension(DimensionWorld world) {

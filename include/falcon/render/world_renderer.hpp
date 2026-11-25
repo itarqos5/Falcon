@@ -258,6 +258,8 @@ public:
     void setRemote(bool on) { remote_ = on; }
     [[nodiscard]] bool remote() const { return remote_; }
     void receiveChunk(ChunkPos pos, std::shared_ptr<Chunk> chunk);
+    // The light of some sections of a chunk a server sent again (any thread): the sections it names replace what they had, and are meshed again.
+    void receiveLight(ChunkPos pos, const ChunkLightPatch& patch);
     void forgetChunk(ChunkPos pos);
     void forgetAllChunks();  // another world: every chunk of the old one goes (in order with the chunks that come after)
 
@@ -337,6 +339,7 @@ private:
     };
     void requestLight(ChunkPos pos, bool force);
     void applyLight(LightResult&& result);
+    void applyServerLight(ChunkPos pos, const ChunkLightPatch& patch);
     void requestSectionMesh(const SectionKey& key, float priority);
     void remeshAll();  // re-mesh every section on the GPU (after a change to smooth lighting or the leaves option)
     // Leaf level of detail: leaf faces hidden between two leaf blocks are only made within this many chunks of the player (a forest has
@@ -450,6 +453,7 @@ private:
     bool remote_ = false;
     std::mutex remoteMutex_;
     std::vector<std::pair<ChunkPos, std::shared_ptr<Chunk>>> remoteChunks_;
+    std::vector<std::pair<ChunkPos, ChunkLightPatch>> remoteLights_;
     std::vector<ChunkPos> remoteForgets_;
     std::vector<SectionKey> batchTouched_;
     std::unordered_set<ChunkPos, ChunkPosHash> batchLight_;

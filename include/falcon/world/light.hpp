@@ -42,6 +42,33 @@ struct ChunkLight {
     [[nodiscard]] std::size_t memoryBytes() const;
 };
 
+// What a server says about the light of a chunk when it changes, or with the chunk itself: the sections whose light it sent and the ones it says are dark. A section it
+// says nothing about keeps the light it has (a block was placed and only the light around it was sent again).
+struct ChunkLightPatch {
+    static constexpr std::uint8_t kUnchanged = 0, kSent = 1, kDark = 2;
+    std::array<std::shared_ptr<const NibbleArray>, kSectionCount> sky, block;
+    std::array<std::uint8_t, kSectionCount> skyState{}, blockState{};
+
+    [[nodiscard]] bool empty() const {
+        for (std::size_t s = 0; s < kSectionCount; ++s) {
+            if (skyState[s] != kUnchanged || blockState[s] != kUnchanged) return false;
+        }
+        return true;
+    }
+    void applyTo(ChunkLight& light) const {
+        for (std::size_t s = 0; s < kSectionCount; ++s) {
+            if (skyState[s] != kUnchanged) {
+                light.sky[s] = skyState[s] == kSent ? sky[s] : nullptr;
+                light.skyFill[s] = 0;
+            }
+            if (blockState[s] != kUnchanged) {
+                light.block[s] = blockState[s] == kSent ? block[s] : nullptr;
+                light.blockFill[s] = 0;
+            }
+        }
+    }
+};
+
 // What the light of a chunk depends on: its own sections and those of the 8 chunks around it (light reaches at most 15
 // blocks), index (dx+1) + 3*(dz+1). Sections are immutable and shared, so this is a cheap snapshot for a worker thread.
 struct LightInput {

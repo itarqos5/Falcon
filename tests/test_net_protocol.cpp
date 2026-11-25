@@ -805,21 +805,42 @@ void test_chunk_light() {
         for (int i = 0; i < 2048; ++i) w.u8(v);
     }
     Reader r(w.data);
-    ChunkLight light;
-    CHECK(readLight(r, light));
+    ChunkLightPatch patch;
+    CHECK(readLight(r, patch));
     CHECK(r.left() == 0);
-    CHECK(light.sky[0] != nullptr);
+    CHECK(!patch.empty());
+    CHECK(patch.skyState[0] == ChunkLightPatch::kSent && patch.sky[0] && patch.sky[0]->get(0) == 15);
+    CHECK(patch.skyState[1] == ChunkLightPatch::kSent && patch.sky[1] && patch.sky[1]->get(0) == 10);  // (0x5A: the low nibble comes first)
+    const auto last = static_cast<std::size_t>(kSectionCount - 1);
+    CHECK(patch.skyState[last] == ChunkLightPatch::kSent && patch.sky[last] && patch.sky[last]->get(0) == 1);
+    CHECK(patch.skyState[2] == ChunkLightPatch::kUnchanged);  // (a section the packet says nothing about keeps its light)
+    CHECK(patch.blockState[0] == ChunkLightPatch::kDark && patch.blockState[last] == ChunkLightPatch::kDark);
+    CHECK(patch.blockState[2] == ChunkLightPatch::kUnchanged);
+    ChunkLight light;
+    patch.applyTo(light);
     CHECK(light.sky[0] && light.sky[0]->get(0) == 15);
-    CHECK(light.sky[1] && light.sky[1]->get(0) == 10);  // (0x5A: the low nibble comes first)
-    CHECK(light.sky[static_cast<std::size_t>(kSectionCount - 1)] && light.sky[static_cast<std::size_t>(kSectionCount - 1)]->get(0) == 1);
-    CHECK(light.sky[2] == nullptr);  // (a section the packet says nothing about keeps what it had)
-    CHECK(light.block[0] == nullptr);
+    CHECK(light.sky[2] == nullptr && light.skyFill[2] == 0);
     CHECK(light.blockFill[0] == 0);  // an empty layer is dark
-    CHECK(light.blockFill[static_cast<std::size_t>(kSectionCount - 1)] == 0);
+    {   // a later update that names one section touches only that one: the sky the chunk had stays
+        Writer u;
+        u.varint(0);  // no sky layers in it
+        u.varint(1);
+        u.i64(static_cast<std::int64_t>(1ull << 1));  // the block light of the first section
+        u.varint(0);
+        u.varint(0);
+        for (int i = 0; i < 2048; ++i) u.u8(0x77);
+        Reader ur(u.data);
+        ChunkLightPatch update;
+        CHECK(readLight(ur, update));
+        CHECK(update.skyState[0] == ChunkLightPatch::kUnchanged);
+        update.applyTo(light);
+        CHECK(light.sky[0] && light.sky[0]->get(0) == 15);  // (the sky is what it was)
+        CHECK(light.block[0] && light.block[0]->get(0) == 7);
+    }
     {   // cut short: a layer that is not all there
         const Bytes body(w.data.begin(), w.data.end() - 100);
         Reader cut(body);
-        ChunkLight broken;
+        ChunkLightPatch broken;
         CHECK(!readLight(cut, broken));
     }
 }

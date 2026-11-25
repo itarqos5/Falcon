@@ -145,6 +145,7 @@ struct MoveState {
 struct RemoteHandler {
     std::function<MoveState()> self;  // where the player is now (to confirm a teleport with)
     std::function<void(ChunkPos, std::shared_ptr<Chunk>)> chunk;
+    std::function<void(ChunkPos, const ChunkLightPatch&)> light;  // the sections of a chunk whose light the server sent again (a block was placed or broken there)
     std::function<void(ChunkPos)> forget;
     std::function<void(int, int, int, Block)> block;
     // The server moves the player: absolute values (the relative parts have been resolved). The player must be moved to these and left like this.

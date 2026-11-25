@@ -66,24 +66,17 @@ int inventorySlotOfMenu(int menu) {
     return -1;
 }
 
-// The block entity list of a chunk packet: the x and z packed in a byte, y, the type number and what the block entity holds. Nothing is done with them yet, but the light
-// of the chunk comes after them and has to be reached. The shape of the tag is not certain across versions, so the caller tries the shapes it may have.
-bool skipBlockEntities(Reader& r, int shape) {
+// The block entity list of a chunk packet, stepped over to reach the light after it. ClientboundLevelChunkPacketData$BlockEntityInfo is BYTE (the x and z, four bits each),
+// SHORT (y), the block entity type (a number of the block entity registry) and OPTIONAL_COMPOUND_TAG, and a tag on the network is NbtIo.writeAnyTag: the type byte and then
+// the payload, with no name for the root and no length in front of it. Nothing is done with the block entities themselves yet.
+bool skipBlockEntities(Reader& r) {
     const int count = r.varint();
     if (count < 0 || !r.ok) return false;
     for (int i = 0; i < count && r.ok; ++i) {
-        r.u8();
-        r.i16();
-        r.varint();
-        if (shape == 2) continue;               // the tag alone, with no "is there one" in front of it
-        if (!r.boolean()) continue;             // there is none
-        if (shape == 1) {
-            (void)readNetworkNbt(r);            // the tag itself
-        } else {
-            const int n = r.varint();           // (its length first)
-            if (n < 0 || static_cast<std::size_t>(n) > r.left()) return false;
-            r.skip(static_cast<std::size_t>(n));
-        }
+        r.u8();      // the x and z of the block, four bits each
+        r.i16();     // y
+        r.varint();  // the type of the block entity
+        if (r.boolean()) (void)readNetworkNbt(r);
     }
     return r.ok;
 }
@@ -764,22 +757,25 @@ void MultiplayerClient::handlePlay(const Packet& p, RemoteHandler& h) {
             std::string error;
             if (auto chunk = decodeChunk(r, static_cast<int>(registry_.stateCount()), &biomeIds_, error)) {
                 // What is left is the block entities (not followed yet) and then the light. The light is the server's own - the light of every block it has changed, of
-                // torches and lava and of what the other players have built - so it is not worked out again here. The shape of the block entity data has to be right to
-                // reach it, and the packet ends with the light, so the first shape that reads to the end of it is the one taken.
-                std::shared_ptr<const ChunkLight> light;
-                for (const int shape : {0, 1, 2}) {
-                    Reader rest = r;
-                    if (!skipBlockEntities(rest, shape)) continue;
-                    auto candidate = std::make_shared<ChunkLight>();
-                    if (!readLight(rest, *candidate) || rest.left() != 0) continue;
-                    light = std::move(candidate);
-                    break;
+                // torches and lava and of what the other players have built - so it is not worked out again here.
+                if (skipBlockEntities(r)) {
+                    ChunkLightPatch patch;
+                    if (readLight(r, patch)) {
+                        auto light = std::make_shared<ChunkLight>();
+                        patch.applyTo(*light);
+                        chunk->light = std::move(light);
+                    }
                 }
-                if (light) chunk->light = std::move(light);
                 if (h.chunk) h.chunk({cx, cz}, std::move(chunk));
             } else {
                 falcon::log::line("chunk %d, %d: %s\n", cx, cz, error.c_str());
             }
+            break;
+        }
+        case 49: {  // light_update: the light of the sections a block was placed in or broken out of, so it is the server's light and not one worked out again
+            const ChunkPos pos{r.varint(), r.varint()};
+            ChunkLightPatch patch;
+            if (readLight(r, patch) && !patch.empty() && h.light) h.light(pos, patch);
             break;
         }
         case 38: {  // forget_level_chunk

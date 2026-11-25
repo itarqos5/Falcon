@@ -293,6 +293,7 @@ bool GameSession::connectRemote(const std::string& host, int port, const std::st
         return s;
     };
     h.chunk = [this](ChunkPos pos, std::shared_ptr<Chunk> chunk) { renderer_.receiveChunk(pos, std::move(chunk)); };
+    h.light = [this](ChunkPos pos, const ChunkLightPatch& patch) { renderer_.receiveLight(pos, patch); };
     h.forget = [this](ChunkPos pos) { renderer_.forgetChunk(pos); };
     h.block = [this](int x, int y, int z, Block b) { renderer_.setBlock(x, y, z, b); };
     h.teleport = [this](double x, double y, double z, double dx, double dy, double dz, float yaw, float pitch, int relative) {
