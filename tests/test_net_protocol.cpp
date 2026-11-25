@@ -721,6 +721,73 @@ void test_item_components() {
 
 }  // namespace
 
+// A chunk as a server sends it: the blocks and the biomes of each section are paletted containers, and the biome numbers are the server's own registry (the order of the names it
+// sends in its registry_data packet). The biomes are what colours the grass, the leaves and the water, so they have to come out as Falcon's own biome numbers.
+void test_chunk_biomes() {
+    auto chunkBody = [](int grassState, int serverBiome, int sectionCount = kSectionCount) {
+        Writer sections;
+        for (int s = 0; s < sectionCount; ++s) {
+            const bool solid = s == 0 && grassState != 0;
+            sections.i16(solid ? 4096 : 0);  // the blocks that are not air
+            sections.i16(0);                 // and the fluids
+            sections.u8(0);                  // a single value, no palette and no packed data
+            sections.varint(solid ? grassState : 0);
+            sections.u8(0);                  // the biomes, the same way
+            sections.varint(serverBiome);
+        }
+        Writer body;
+        body.varint(0);  // no heightmaps
+        body.varint(static_cast<std::int32_t>(sections.data.size()));
+        body.raw(sections.data);
+        return body.data;
+    };
+
+    std::vector<std::uint16_t> biomes(8, 0);
+    biomes[7] = 42;  // the server's biome 7 is Falcon's 42 (a name both registries have)
+    {
+        const Bytes body = chunkBody(9, 7);
+        Reader r(body);
+        std::string error;
+        const std::shared_ptr<Chunk> chunk = decodeChunk(r, 35723, &biomes, error);
+        if (chunk == nullptr) std::cerr << "biome chunk: " << error << '\n';
+        CHECK(chunk != nullptr);
+        CHECK(error.empty());
+        CHECK(chunk && chunk->sections[0] != nullptr);            // the grass
+        CHECK(chunk && chunk->sections[0]->at(0, 0, 0) == static_cast<Block>(9));
+        CHECK(chunk && chunk->sections[1] == nullptr);            // air
+        CHECK(chunk && chunk->biomes != nullptr);
+        CHECK(chunk && chunk->biomes->at(0, kMinY, 0) == 42);     // the first cell of the first section
+        CHECK(chunk && chunk->biomes->at(15, kMinY + 63, 15) == 42);  // the last one of the section above
+        CHECK(chunk && chunk->biomes->at(0, 200, 0) == 42);       // and the top of the world
+    }
+    {   // a biome the two registries do not share keeps the first of Falcon's (the file the colours come from is not empty)
+        std::vector<std::uint16_t> partial(8, 0);
+        const Bytes body = chunkBody(0, 3);
+        Reader r(body);
+        std::string error;
+        const std::shared_ptr<Chunk> chunk = decodeChunk(r, 35723, &partial, error);
+        CHECK(chunk != nullptr);
+        CHECK(chunk && chunk->biomes != nullptr);
+        CHECK(chunk && chunk->biomes->at(4, 4, 4) == 0);
+    }
+    {   // no table at all (a server that sent no biome registry): still a chunk, with no colour of its own
+        const Bytes body = chunkBody(9, 7);
+        Reader r(body);
+        std::string error;
+        const std::shared_ptr<Chunk> chunk = decodeChunk(r, 35723, nullptr, error);
+        CHECK(chunk != nullptr);
+        CHECK(chunk && chunk->biomes != nullptr);
+    }
+    {   // cut short: the sections cannot be read, and nothing is made up
+        const Bytes body = chunkBody(9, 7, kSectionCount - 1);
+        Reader r(body);
+        std::string error;
+        const std::shared_ptr<Chunk> chunk = decodeChunk(r, 35723, &biomes, error);
+        CHECK(chunk == nullptr);
+        CHECK(!error.empty());
+    }
+}
+
 int main() {
     test_varints();
     test_reader_runs_out();
@@ -738,6 +805,7 @@ int main() {
     test_trade_offers();
     test_lp_vec3();
     test_item_components();
+    test_chunk_biomes();
 #ifdef _WIN32
     test_encrypted_connection();
 #endif

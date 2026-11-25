@@ -449,6 +449,9 @@ private:
     ItemIcons itemIcons_;
     HandRenderer hand_;
     std::shared_ptr<const worldgen::OverworldGenerator> overworld_;  // the game-exact terrain (null: Superflat or the simple fallback)
+    // A server makes the world, so there is no generator, but its chunks still name the game's biomes and their grass, leaves and water take their colours: the biome files are read
+    // on their own for that.
+    std::shared_ptr<const worldgen::BiomeRegistry> remoteBiomes_;
     WorldRenderer renderer_;
     Player player_;
 

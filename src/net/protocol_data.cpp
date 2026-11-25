@@ -239,15 +239,27 @@ bool readContainer(Reader& r, int size, int maxIndirectBits, int directBits, boo
     return r.ok;
 }
 
-bool readSections(Reader& data, int stateCount, bool lengthPrefixed, Chunk& chunk) {
+bool readSections(Reader& data, int stateCount, bool lengthPrefixed, const std::vector<std::uint16_t>* biomeIds, Chunk& chunk) {
     int directBits = 1;
     while ((1 << directBits) < stateCount) ++directBits;
+    auto grid = std::make_shared<BiomeGrid>();  // the biomes of the 4x4x4 cells of each section: what tints the grass, the leaves and the water
     for (int s = 0; s < kSectionCount; ++s) {
         data.i16();  // the number of blocks that are not air
         data.i16();  // and (since 26.x) of fluids
         std::vector<std::uint16_t> blocks;
         if (!readContainer(data, 4096, 8, directBits, lengthPrefixed, &blocks)) return false;
-        if (!readContainer(data, 64, 3, 7, lengthPrefixed, nullptr)) return false;  // the biomes are not used
+        std::vector<std::uint16_t> biomes;
+        if (!readContainer(data, 64, 3, 7, lengthPrefixed, &biomes)) return false;
+        for (int dy = 0; dy < 4; ++dy) {  // (a paletted container is packed x fastest, then z, then y: index = (y << 4) | (z << 2) | x)
+            for (int dz = 0; dz < 4; ++dz) {
+                for (int dx = 0; dx < 4; ++dx) {
+                    const std::uint16_t global = biomes[static_cast<std::size_t>((dy << 4) | (dz << 2) | dx)];
+                    const int local = biomeIds != nullptr && global < biomeIds->size() ? static_cast<int>((*biomeIds)[global]) : 0;
+                    // BiomeGrid: (qz * 4 + qx) * 96 + qy, qy counted from the bottom of the world (-64) in quarters of four blocks.
+                    grid->ids[static_cast<std::size_t>((dz * 4 + dx) * BiomeGrid::kQuartsY + (4 * s + dy))] = static_cast<std::uint8_t>(local);
+                }
+            }
+        }
         SectionBuilder builder;
         bool any = false;
         for (int i = 0; i < 4096; ++i) {
@@ -257,6 +269,7 @@ bool readSections(Reader& data, int stateCount, bool lengthPrefixed, Chunk& chun
         }
         if (any) chunk.sections[static_cast<std::size_t>(s)] = builder.build();
     }
+    if (data.ok) chunk.biomes = std::move(grid);
     return data.ok;
 }
 
@@ -844,7 +857,7 @@ void writeItemStack(Writer& w, const ItemStack& stack) {
     w.varint(0);
 }
 
-std::shared_ptr<Chunk> decodeChunk(Reader& r, int stateCount, std::string& error) {
+std::shared_ptr<Chunk> decodeChunk(Reader& r, int stateCount, const std::vector<std::uint16_t>* biomeIds, std::string& error) {
     const int heightmaps = r.varint();
     for (int i = 0; i < heightmaps && r.ok; ++i) {
         r.varint();                                   // which heightmap
@@ -861,7 +874,7 @@ std::shared_ptr<Chunk> decodeChunk(Reader& r, int stateCount, std::string& error
     for (const bool lengthPrefixed : {false, true}) {
         Reader data(r.here(), static_cast<std::size_t>(size));
         auto chunk = std::make_shared<Chunk>();
-        if (readSections(data, stateCount, lengthPrefixed, *chunk) && data.left() == 0) {
+        if (readSections(data, stateCount, lengthPrefixed, biomeIds, *chunk) && data.left() == 0) {
             r.skip(static_cast<std::size_t>(size));
             return chunk;
         }

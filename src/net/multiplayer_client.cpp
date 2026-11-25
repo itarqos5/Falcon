@@ -359,11 +359,15 @@ void MultiplayerClient::handleConfiguration(const Packet& p, RemoteHandler& h) {
             const std::string registry = r.string();
             const int n = r.varint();
             const bool paintings = registry == "minecraft:painting_variant", enchantments = registry == "minecraft:enchantment";
+            const bool biomes = registry == "minecraft:worldgen/biome";
             if (paintings) paintingVariants_.clear();
             if (enchantments) enchantments_.clear();
+            if (biomes) biomeIds_.clear();
             for (int i = 0; i < n && r.ok; ++i) {
                 const std::string entryName = r.string();
                 if (enchantments) enchantments_.push_back(entryName);
+                // A biome's number is where it stands in this list: the chunk palettes name biomes by it.
+                if (biomes) biomeIds_.push_back(biomeResolver_ ? biomeResolver_(entryName) : 0);
                 NbtTag data;
                 const bool hasData = r.boolean();
                 if (hasData) data = readNetworkNbt(r);
@@ -736,7 +740,7 @@ void MultiplayerClient::handlePlay(const Packet& p, RemoteHandler& h) {
         case 46: {  // level_chunk_with_light
             const int cx = r.i32(), cz = r.i32();
             std::string error;
-            if (auto chunk = decodeChunk(r, static_cast<int>(registry_.stateCount()), error)) {
+            if (auto chunk = decodeChunk(r, static_cast<int>(registry_.stateCount()), &biomeIds_, error)) {
                 if (h.chunk) h.chunk({cx, cz}, std::move(chunk));
             } else {
                 falcon::log::line("chunk %d, %d: %s\n", cx, cz, error.c_str());

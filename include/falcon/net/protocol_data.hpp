@@ -28,8 +28,10 @@ void setComponentTranslator(std::function<std::string(const std::string&)> trans
 [[nodiscard]] StyledText readComponent(Reader& r);  // (reads the tag first)
 
 // The chunk of a level_chunk_with_light packet, from just after the chunk position: heightmaps, then the sections of blocks and biomes. `stateCount` is how many block
-// states there are (a palette of more than eight bits is the state's number as it is). Null and `error` when the data does not read.
-[[nodiscard]] std::shared_ptr<Chunk> decodeChunk(Reader& r, int stateCount, std::string& error);
+// states there are (a palette of more than eight bits is the state's number as it is). `biomes` turns a number of the server's biome registry into one of Falcon's (see
+// BiomeRegistry::find): the grass, the leaves and the water of a chunk the server sends take the colours of its own biome, as they do in singleplayer. Null to leave them
+// uncoloured. Null and `error` when the data does not read.
+[[nodiscard]] std::shared_ptr<Chunk> decodeChunk(Reader& r, int stateCount, const std::vector<std::uint16_t>* biomes, std::string& error);
 
 // The numbers (in the game's data component type registry) of the components of an item that Falcon can read; -1 for one the game's data does not have.
 // A component that is not one of these has no layout known here and cannot be stepped over.

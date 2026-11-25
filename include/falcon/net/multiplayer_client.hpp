@@ -207,6 +207,9 @@ public:
     void setAccount(const Account& account) { account_ = account; }  // before start()
     [[nodiscard]] bool encrypted() const { return connection_.encrypted(); }
     [[nodiscard]] bool chatSigned() const { return chatSessionSent_; }  // the chat is signed with the account's key (what a server that enforces secure profiles wants)
+    // The server's biomes, by their number, as Falcon's own (0 where the two have no name in common): a chunk the server sends takes the colours of its biome. The numbers come
+    // from the registry_data packet of the configuration phase, in the order the server lists the biomes; this turns each name into the number of Falcon's own registry.
+    void setBiomeResolver(std::function<std::uint16_t(std::string_view)> resolve) { biomeResolver_ = std::move(resolve); }
     void setParticleKinds(std::unordered_map<int, ParticleData> kinds) { particleKinds_ = std::move(kinds); }  // what each particle type carries (see particleDataOf)
     void setSoundNames(std::vector<std::string> names) { soundNames_ = std::move(names); }  // by the number the game gives each sound event
     [[nodiscard]] Phase phase() const { return phase_; }
@@ -340,6 +343,8 @@ private:
     std::map<Uuid, TabEntry> tab_;
     std::map<std::string, TeamInfo> teams_;
     std::unordered_map<int, ParticleData> particleKinds_;
+    std::vector<std::uint16_t> biomeIds_;  // the server's biome numbers, as Falcon's (see setBiomeResolver)
+    std::function<std::uint16_t(std::string_view)> biomeResolver_;
     std::string dimension_;                      // the dimension the player is in (its name), to tell a respawn that changes the world from one that does not
     void clearWorld(RemoteHandler& h);           // everything of the old world that was followed
     bool skipDataValue(int serializer, Reader& r);  // skipEntityDataValue and the kinds that need the tables of this connection

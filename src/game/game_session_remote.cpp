@@ -257,6 +257,21 @@ bool GameSession::connectRemote(const std::string& host, int port, const std::st
         const int type = entityTypeNumber(dataRoot_, (std::string("minecraft:") + kThrownTypes[i]).c_str());
         if (const auto item = itemRegistry().find(kThrownItems[i]); type >= 0 && item) thrownItems_[type] = *item;
     }
+    if (!overworld_) {  // a server makes the world: its grass, leaves and water still take the colours of the game's biomes, so their files are read without a generator
+        std::string biomeError;
+        remoteBiomes_ = worldgen::BiomeRegistry::load(dataRoot_ / "data" / "minecraft" / "worldgen" / "biome", biomeError);
+        if (remoteBiomes_) {
+            models_.setBiomes(remoteBiomes_.get());
+        } else {
+            falcon::log::line("the biomes of the server's chunks could not be read (%s): grass and leaves keep one colour\n", biomeError.c_str());
+        }
+    }
+    remote_->setBiomeResolver([this](std::string_view name) -> std::uint16_t {  // the server's biome registry comes in during configuration: its names are Falcon's
+        const worldgen::BiomeRegistry* biomes = remoteBiomes_ ? remoteBiomes_.get() : (overworld_ ? &overworld_->biomes() : nullptr);
+        if (biomes == nullptr) return 0;
+        const worldgen::BiomeId id = biomes->find(name);
+        return id == worldgen::kNoBiome ? 0 : static_cast<std::uint16_t>(id);
+    });
     remote_->setComponentIds(componentIds(dataRoot_));
     remote_->setParticleKinds(particleKinds(dataRoot_));
     remote_->setSoundNames(soundEventNames(dataRoot_));
