@@ -16,10 +16,29 @@ const reg = JSON.parse(fs.readFileSync(dataDir + '/registries.json', 'utf8'));
 const componentId = (n) => reg['minecraft:data_component_type'].entries['minecraft:' + n].protocol_id;
 const itemId = (n) => reg['minecraft:item'].entries['minecraft:' + n].protocol_id;
 const typeId = (n) => reg['minecraft:entity_type'].entries['minecraft:' + n].protocol_id;
-const blocks = JSON.parse(fs.readFileSync((process.env.FALCON_REPORTS || process.env.TEMP + '/falcon-gen/out/reports') + '/blocks.json', 'utf8'));
+const reports = process.env.FALCON_REPORTS || process.env.TEMP + '/falcon-gen/out/reports';
+// The block states by their global id. A vanilla server's --reports blocks.json when there is one; else the same numbering the client makes from the game's own files (the
+// blocks in the order of their protocol ids, each block's states in the order model-states.json lists them), so the two always agree.
+const blocks = fs.existsSync(reports + '/blocks.json') ? JSON.parse(fs.readFileSync(reports + '/blocks.json', 'utf8')) : (() => {
+  const regs = JSON.parse(fs.readFileSync(dataDir + '/registries.json', 'utf8'));
+  const modelStates = JSON.parse(fs.readFileSync(dataDir + '/model-states.json', 'utf8'));
+  const order = Object.entries(regs['minecraft:block'].entries).map(([k, v]) => [v.protocol_id, k]).sort((a, b) => a[0] - b[0]);
+  const table = {};
+  let id = 0;
+  for (const [, name] of order) {
+    const entry = modelStates[name];
+    const count = entry ? entry.states.length : 1;
+    table[name] = { states: Array.from({ length: count }, (_, i) => ({ id: id + i, properties: entry ? entry.states[i] : {} })) };
+    id += count;
+  }
+  return table;
+})();
+const biomeId = (name) => reg['minecraft:worldgen/biome'].entries['minecraft:' + name].protocol_id;
+// The state a block has with nothing set (snowy false, not waterlogged, facing north ...): the game's default state.
+const vanillaState = (x) => x.properties && Object.values(x.properties).every((v) => v === 'false' || v === '0' || v === 0);
 const stateOf = (name) => {
   const b = blocks['minecraft:' + name];
-  const s = b.states.find((x) => x.default) || b.states[0];
+  const s = b.states.find((x) => x.default) || b.states.find(vanillaState) || b.states[0];
   return s.id;
 };
 
@@ -43,14 +62,15 @@ class W {
 const frame = (id, body) => { const inner = Buffer.concat([new W().varint(id).buf(), body || Buffer.alloc(0)]); return Buffer.concat([new W().varint(inner.length).buf(), inner]); };
 
 // ---- the world: a grass floor
-function chunkPacket(cx, cz, block = 'grass_block') {
+function chunkPacket(cx, cz, block = process.env.FALCON_MP_FLOOR || 'grass_block') {
   const data = new W();
   const grass = stateOf(block);
+  const biome = 0;  // the one biome the fake server's registry has
   for (let s = 0; s < 24; s++) {
     const solid = s <= 7;
     data.i16(solid ? 4096 : 0).i16(0);
     data.u8(0).varint(solid ? grass : 0);  // blocks: a single value
-    data.u8(0).varint(0);                   // biomes: a single value
+    data.u8(0).varint(biome);               // biomes: a single value
   }
   const body = new W().i32(cx).i32(cz).varint(0).varint(data.b.length).raw(data.b);
   return frame(46, body.buf());
@@ -152,6 +172,8 @@ const server = net.createServer((sock) => {
         sock.write(frame(2, new W().uuid(200).str('Viewer').varint(0).buf()));  // login_finished
       } else if (state === 'login' && id === 3) {
         state = 'config';
+        // The biomes the chunks name: one registry entry, so biome number 0 is plains (a real server lists its whole registry here, in the order of its numbers).
+        sock.write(frame(7, new W().str('minecraft:worldgen/biome').varint(1).str('minecraft:plains').bool(false).buf()));
         sock.write(frame(3));  // finish_configuration
       } else if (state === 'config' && id === 3) {
         state = 'play';
