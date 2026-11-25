@@ -99,8 +99,23 @@ FetchContent_Declare(miniaudio
 
 FetchContent_MakeAvailable(glfw nlohmann_json stb_image stb_image_write stb_vorbis miniaudio)
 
+# OpenSSL on a Mac is Homebrew's, in a prefix that is not searched by default.
+if(APPLE AND NOT OPENSSL_ROOT_DIR)
+    foreach(_falcon_brew "/opt/homebrew/opt/openssl@3" "/usr/local/opt/openssl@3")
+        if(EXISTS "${_falcon_brew}/lib/libssl.dylib")
+            set(OPENSSL_ROOT_DIR "${_falcon_brew}")
+        endif()
+    endforeach()
+endif()
+
 # The Vulkan renderer (src/vulkan/): only the headers are needed to build it. The loader is looked for when the game starts, so a PC without Vulkan still runs the game on OpenGL.
-option(FALCON_VULKAN "Build the Vulkan renderer (the Graphics API setting's second choice)" ON)
+# (macOS has no Vulkan driver: Metal is the only one, and going through MoltenVK is not something this build does.)
+if(APPLE)
+    set(_falcon_vulkan_default OFF)
+else()
+    set(_falcon_vulkan_default ON)
+endif()
+option(FALCON_VULKAN "Build the Vulkan renderer (the Graphics API setting's second choice)" ${_falcon_vulkan_default})
 option(FALCON_STRIP "Strip the symbols from the Release exes (OFF for a build that tools/resolve_samples.mjs can read the profiler's samples of)" ON)
 # A fixed PE timestamp (and the header versions every Windows program normally carries), so the same sources and the same compiler give the same
 # bytes: a hash published with a release then means one file, not "another build of the same code".
@@ -170,7 +185,11 @@ endif()
 add_library(falcon_build_flags INTERFACE)
 if(NOT MSVC)
     target_compile_options(falcon_build_flags INTERFACE -pipe -ffunction-sections -fdata-sections)
-    target_link_options(falcon_build_flags INTERFACE -Wl,--gc-sections)
+    if(APPLE)
+        target_link_options(falcon_build_flags INTERFACE -Wl,-dead_strip)  # (ld64 has no --gc-sections)
+    else()
+        target_link_options(falcon_build_flags INTERFACE -Wl,--gc-sections)
+    endif()
 endif()
 
 # The PE header Windows programs normally carry: an OS and subsystem version of 6.1 instead of GNU ld's 4.0/5.2 (a value from before Windows XP), and a
@@ -287,6 +306,14 @@ target_link_libraries(falcon_base
 )
 if(WIN32)
     target_link_libraries(falcon_base PRIVATE user32 psapi dwmapi winmm winhttp)  # message boxes, console attach; memory use; dark title bar; the ownership check
+elseif(APPLE)
+    # A Mac: HTTPS (the ownership check, the session server, skins) and the cryptography of a server in online mode are OpenSSL's (Homebrew's); GLFW brings in the
+    # Cocoa, IOKit and CoreVideo frameworks its window needs.
+    find_package(Threads REQUIRED)
+    find_package(OpenSSL 1.1.1 REQUIRED)
+    target_sources(falcon_base PRIVATE src/platform/tls_http.cpp)  # HTTPS: the part the game and the launcher share
+    target_link_libraries(falcon_base PUBLIC OpenSSL::SSL OpenSSL::Crypto Threads::Threads ${CMAKE_DL_LIBS})
+    target_link_libraries(falcon_base PRIVATE "-framework CoreFoundation" "-framework Security")
 else()
     # Linux: HTTPS (the ownership check, the session server, skins) and the cryptography of a server in online mode are OpenSSL's; threads and dlopen for
     # the audio backends miniaudio loads at run time.
@@ -477,6 +504,10 @@ add_library(falcon_core
 add_library(falcon::core ALIAS falcon_core)
 if(WIN32)
     target_link_libraries(falcon_core PUBLIC ws2_32 dnsapi bcrypt)  # server status pings: sockets and the SRV lookup; the login of a server in online mode: RSA, AES, SHA
+elseif(APPLE)
+    target_link_libraries(falcon_core PUBLIC resolv)  # the SRV lookup (res_query, in libresolv)
+    # miniaudio plays through CoreAudio there, which is these frameworks; nothing else has to be installed.
+    target_link_libraries(falcon_core PRIVATE "-framework CoreAudio" "-framework AudioToolbox" "-framework CoreFoundation" "-framework CoreMIDI")
 else()
     target_link_libraries(falcon_core PUBLIC resolv)  # the SRV lookup (res_query: in libc since glibc 2.34, in libresolv before)
 endif()
@@ -494,6 +525,9 @@ target_compile_definitions(falcon_core PRIVATE
 if(WIN32)
     target_compile_definitions(falcon_core PRIVATE
         MA_ENABLE_ONLY_SPECIFIC_BACKENDS MA_ENABLE_WASAPI MA_ENABLE_WINMM)
+elseif(APPLE)
+    target_compile_definitions(falcon_core PRIVATE
+        MA_ENABLE_ONLY_SPECIFIC_BACKENDS MA_ENABLE_COREAUDIO)  # (one backend to compile, as on Windows)
 endif()
 # Third-party single-file implementations: not ours to fix warnings in.
 if(MSVC)

@@ -92,7 +92,7 @@ Window::Window(int width, int height, const std::string& title, bool background,
     timeBeginPeriod(1);
 #endif
 
-#ifndef _WIN32
+#if defined(__linux__)
     // What a desktop matches the window to its launcher entry (and so its icon and its place in the task bar) by: the window class on X11, the app id on Wayland.
     glfwWindowHintString(GLFW_X11_CLASS_NAME, "Falcon");
     glfwWindowHintString(GLFW_X11_INSTANCE_NAME, "falcon");

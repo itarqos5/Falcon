@@ -1,0 +1,48 @@
+# Builds Falcon on macOS (Apple silicon) and runs the unit tests. The game is the same GLFW + OpenGL client as on the other systems; the launcher is not built here,
+# because its window is the system web view (WebView2 on Windows, WebKitGTK on Linux) and a Mac has neither.
+name: macOS
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ['website/**', 'docs/**', '**.md', '.github/workflows/discord.yml']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Packages
+        run: brew install openssl@3 ninja ccache
+
+      - uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: macos-${{ github.sha }}
+          restore-keys: macos-
+
+      - name: Configure
+        run: cmake --preset release -DCMAKE_PREFIX_PATH="$(brew --prefix openssl@3)" -DFALCON_BUILD_LAUNCHER=OFF
+
+      - name: Build the client
+        run: cmake --build --preset release -j 4
+
+      - name: Test
+        run: cmake --build --preset check -j 4
+
+      - name: What the program links against
+        run: |
+          otool -L build/Falcon || true
+          ls -l build/Falcon
+
+      - name: Upload the Mac build
+        uses: actions/upload-artifact@v4
+        with:
+          name: falcon-macos
+          path: build/Falcon
+          if-no-files-found: error

@@ -11,6 +11,11 @@
 #include <windows.h>
 #include <dxgi.h>
 #endif
+#if defined(__APPLE__)
+#include <mach/mach.h>
+#include <sys/sysctl.h>
+#include <unistd.h>
+#endif
 #if defined(__x86_64__) || defined(__i386__)
 #include <cpuid.h>
 #endif
@@ -38,6 +43,14 @@ std::string cpuBrand() {
         std::copy(reinterpret_cast<const char*>(regs), reinterpret_cast<const char*>(regs) + 16, text + i * 16);
     }
     return text;
+#elif defined(__APPLE__)
+    // (the kernel's own name for the chip: "Apple M2 Pro", or an Intel part's full name)
+    char text[256] = {};
+    std::size_t size = sizeof(text);
+    if (sysctlbyname("machdep.cpu.brand_string", text, &size, nullptr, 0) == 0 && *text != '\0') return text;
+    size = sizeof(text);
+    if (sysctlbyname("hw.model", text, &size, nullptr, 0) == 0) return text;
+    return {};
 #else
     // (not x86: the kernel's list has the name, on ARM as "Model name" or "Hardware")
     std::ifstream in("/proc/cpuinfo");
@@ -67,6 +80,11 @@ std::string operatingSystem() {
         }
     }
     return "Windows";
+#elif defined(__APPLE__)
+    char version[64] = {};
+    std::size_t size = sizeof(version);
+    if (sysctlbyname("kern.osproductversion", version, &size, nullptr, 0) == 0 && *version != '\0') return std::string("macOS ") + version;
+    return "macOS";
 #else
     // /etc/os-release: PRETTY_NAME="Ubuntu 24.04.1 LTS"
     for (const char* file : {"/etc/os-release", "/usr/lib/os-release"}) {
@@ -149,6 +167,15 @@ SystemMemory systemMemory() {
     if (GlobalMemoryStatusEx(&status) != 0) {
         m.total = status.ullTotalPhys;
         m.available = status.ullAvailPhys;
+    }
+#elif defined(__APPLE__)
+    std::uint64_t total = 0;
+    std::size_t size = sizeof(total);
+    if (sysctlbyname("hw.memsize", &total, &size, nullptr, 0) == 0) m.total = total;
+    vm_statistics64_data_t vm{};
+    mach_msg_type_number_t count = HOST_VM_INFO64_COUNT;
+    if (host_statistics64(mach_host_self(), HOST_VM_INFO64, reinterpret_cast<host_info64_t>(&vm), &count) == KERN_SUCCESS) {
+        m.available = static_cast<std::uint64_t>(vm.free_count + vm.inactive_count) * static_cast<std::uint64_t>(sysconf(_SC_PAGESIZE));
     }
 #else
     // /proc/meminfo, in kibibytes: "MemTotal:  16314424 kB"

@@ -96,6 +96,34 @@ bool runTool(const std::vector<std::string>& args, bool wait) {
 
 }  // namespace
 
+#if defined(__APPLE__)
+namespace {
+
+// An AppleScript string literal: a backslash or a quote in the text is escaped, so it stays text.
+std::string appleScriptString(const std::string& text) {
+    std::string out;
+    for (const char c : text) {
+        if (c == '\\' || c == '"') out += '\\';
+        out += c;
+    }
+    return out;
+}
+
+}  // namespace
+
+// The alert the app itself would show, through osascript (a program started from Finder has no terminal to print to).
+void showErrorDialog(const std::string& title, const std::string& message) {
+    std::fprintf(stderr, "[falcon] %s: %s\n", title.c_str(), message.c_str());
+    const std::string script = "display alert \"" + appleScriptString(title) + "\" message \"" + appleScriptString(message) + "\" as critical";
+    runTool({"/usr/bin/osascript", "-e", script}, true);
+}
+
+void openFolderInFileManager(const std::string& path) { runTool({"/usr/bin/open", path}, false); }
+
+bool openWebAddress(const std::string& url) { return isWebAddress(url) && runTool({"/usr/bin/open", url}, false); }
+
+void attachParentConsole() {}  // (no console to attach to: the program's output goes wherever it was started from)
+#else
 // There is no message box in the C library: the message goes to the terminal, and to a dialog when the desktop has one of the usual tools (the game may have been
 // started from a file manager, where nobody sees the terminal).
 void showErrorDialog(const std::string& title, const std::string& message) {
@@ -113,6 +141,7 @@ void openFolderInFileManager(const std::string& path) { runTool({"xdg-open", pat
 bool openWebAddress(const std::string& url) { return isWebAddress(url) && runTool({"xdg-open", url}, false); }
 
 void attachParentConsole() {}  // (a terminal is already the program's own when it was started from one)
+#endif  // __APPLE__
 #endif
 
 }  // namespace falcon
