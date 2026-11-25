@@ -206,6 +206,20 @@ public:
     }
     void setComponentIds(const ComponentIds& ids) { componentIds_ = ids; }
     void setAccount(const Account& account) { account_ = account; }  // before start()
+    // What ServerboundClientInformationPacket tells the server (LocalPlayer's options): the view distance the server sends chunks for, the language,
+    // the chat visibility (0 full, 1 system, 2 hidden), the skin parts (bit 0 cape, 1 jacket, 2/3 sleeves, 4/5 pants, 6 hat), the main hand
+    // (0 left, 1 right) and the particles (0 all, 1 decreased, 2 minimal).
+    struct ClientInformation {
+        std::string language = "en_us";
+        int viewDistance = 8;
+        int chatVisibility = 0;
+        bool chatColors = true;
+        int skinParts = 0x7F;
+        int mainHand = 1;
+        bool allowListing = true;
+        int particles = 0;
+    };
+    void setClientInformation(const ClientInformation& information) { clientInformation_ = information; }  // before start()
     [[nodiscard]] bool encrypted() const { return connection_.encrypted(); }
     [[nodiscard]] bool chatSigned() const { return chatSessionSent_; }  // the chat is signed with the account's key (what a server that enforces secure profiles wants)
     // The server's biomes, by their number, as Falcon's own (0 where the two have no name in common): a chunk the server sends takes the colours of its biome. The numbers come
@@ -337,6 +351,7 @@ private:
     std::vector<std::string> soundNames_;
     int sequence_ = 0;
     int positionReminder_ = 0;
+    ClientInformation clientInformation_;
     bool haveLast_ = false;
     MoveState last_;
     bool lastOnGround_ = false, lastHorizontal_ = false;

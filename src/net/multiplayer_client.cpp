@@ -191,16 +191,17 @@ void MultiplayerClient::fail(const std::string& why, RemoteHandler* h) {
 }
 
 void MultiplayerClient::sendClientInformation(int target) {
+    const ClientInformation& info = clientInformation_;
     Writer w;
-    w.string("en_us");
-    w.u8(8);        // the view distance asked for
-    w.varint(0);    // chat shown
-    w.boolean(true);
-    w.u8(0x7F);     // every part of the skin
-    w.varint(1);    // right hand
-    w.boolean(false);
-    w.boolean(true);
-    w.varint(0);    // particles: all
+    w.string(info.language.empty() ? "en_us" : info.language);
+    w.u8(static_cast<std::uint8_t>(std::clamp(info.viewDistance, 2, 32)));  // (the option's range; the server sends its own limit at most)
+    w.varint(std::clamp(info.chatVisibility, 0, 2));
+    w.boolean(info.chatColors);
+    w.u8(static_cast<std::uint8_t>(info.skinParts & 0x7F));     // the parts of the skin that are shown
+    w.varint(info.mainHand == 0 ? 0 : 1);
+    w.boolean(false);  // text filtering
+    w.boolean(info.allowListing);
+    w.varint(std::clamp(info.particles, 0, 2));
     connection_.send(target, w.data);
 }
 
