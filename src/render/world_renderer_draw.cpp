@@ -460,11 +460,11 @@ void WorldRenderer::render(const Camera& camera, int framebufferWidth, int frame
                     n = n ^ (n >> 15);
                     return static_cast<float>(n & 0xFFFFu) / 65535.0f;
                 };
-                const float reach = static_cast<float>(std::max(3, rainRadius_));
-                const int drops = static_cast<int>(reach * reach * 2.2f) + 40;
+                const float rainReach = static_cast<float>(std::max(3, rainRadius_));
+                const int drops = static_cast<int>(rainReach * rainReach * 2.2f) + 40;
                 for (int i = 0; i < drops; ++i) {
                     const float angle = hash(static_cast<unsigned>(i) * 3u + 1u) * 6.2831853f;
-                    const float radius = std::sqrt(hash(static_cast<unsigned>(i) * 3u + 2u)) * reach;
+                    const float radius = std::sqrt(hash(static_cast<unsigned>(i) * 3u + 2u)) * rainReach;
                     const float x = static_cast<float>(camera.x) + std::cos(angle) * radius;
                     const float z = static_cast<float>(camera.z) + std::sin(angle) * radius;
                     const float fall = std::fmod(hash(static_cast<unsigned>(i) * 3u + 3u) * 24.0f + static_cast<float>(now) * 16.0f, 24.0f);
