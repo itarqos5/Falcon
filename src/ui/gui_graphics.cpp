@@ -155,6 +155,19 @@ void GuiGraphics::blitSprite(const std::string& id, int x, int y, int width, int
     }
 }
 
+void GuiGraphics::blitSpriteRegion(const std::string& id, int sourceX, int sourceY, int sourceWidth,
+                                   int sourceHeight, int x, int y, int width, int height,
+                                   std::uint32_t color) {
+    const Sprite& sprite = sprites_.get(id);
+    const float sw = static_cast<float>(std::max(sprite.texture.width(), 1));
+    const float sh = static_cast<float>(std::max(sprite.texture.height(), 1));
+    renderer_.quad(sprite.texture, static_cast<float>(x), static_cast<float>(y),
+                   static_cast<float>(x + width), static_cast<float>(y + height),
+                   static_cast<float>(sourceX) / sw, static_cast<float>(sourceY) / sh,
+                   static_cast<float>(sourceX + sourceWidth) / sw,
+                   static_cast<float>(sourceY + sourceHeight) / sh, color);
+}
+
 void GuiGraphics::blitSpriteFrame(const std::string& id, int x, int y, int width, int height,
                                   int frame, int frameCount, std::uint32_t color) {
     const Sprite& sprite = sprites_.get(id);

@@ -56,6 +56,11 @@ public:
               std::uint32_t color = kWhite);
     void blitSprite(const std::string& id, int x, int y, int width, int height,
                     std::uint32_t color = kWhite);
+    // A part of a sprite: the (sourceWidth x sourceHeight) region at (sourceX, sourceY) of its own picture, drawn (width x height).
+    // (The attack indicator is a bar that is partly filled, which is this.)
+    void blitSpriteRegion(const std::string& id, int sourceX, int sourceY, int sourceWidth,
+                          int sourceHeight, int x, int y, int width, int height,
+                          std::uint32_t color = kWhite);
     // One frame of an animated sprite whose texture stacks `frameCount` equal frames vertically.
     void blitSpriteFrame(const std::string& id, int x, int y, int width, int height, int frame,
                          int frameCount, std::uint32_t color = kWhite);
