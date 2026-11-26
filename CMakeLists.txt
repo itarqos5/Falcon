@@ -9,6 +9,12 @@ project(Falcon
 if(WIN32)
     enable_language(RC)  # for the exe icon resource
 endif()
+if(APPLE)
+    # The launcher's window host is Objective-C++ (WKWebView). The language is set up here, at the top of the project, because that is where CMake loads
+    # the rules a language needs; enabling it from inside launcher/CMakeLists.txt leaves CMAKE_OBJCXX_COMPILE_OBJECT (and the archive rules) unset, which
+    # is the configure error the Mac build used to stop at.
+    enable_language(OBJCXX)
+endif()
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

@@ -179,7 +179,9 @@ elseif(APPLE)
     # setup) and the icon are in the program itself: an assembler file includes them between named symbols (see Blob in src/setup.hpp). The result is a
     # FalconLauncher.app bundle, which is what Finder launches and what a Mac release signs and notarises.
     # -----------------------------------------------------------------------
-    enable_language(OBJCXX)
+    if(NOT CMAKE_OBJCXX_COMPILER)
+        enable_language(OBJCXX)  # (the project turns it on at the top; this is for a build that adds the launcher alone)
+    endif()
     enable_language(ASM)
 
     set(LAUNCHER_ASM "${CMAKE_CURRENT_BINARY_DIR}/embedded_mac.S")
