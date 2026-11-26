@@ -91,6 +91,14 @@ void GameSession::attackMob(int id) {
     if (!creative()) damageHeldTool(held.type().maxDamage > 0 && held.type().attackDamageBonus > 0.0f ? 1 : 0);
 }
 
+// Player.getAttackStrengthScale: how far the attack has charged, 0 to 1, over the 20 / attack speed ticks the held item takes (4 when the hand is empty).
+// The attack indicator and the damage of a hit are both this.
+float GameSession::attackStrengthScale() {
+    const ItemStack& held = inventory_.selectedItem();
+    const float speed = held.isEmpty() ? 4.0f : held.type().attackSpeed();
+    return std::clamp((static_cast<float>(sinceAttack_) + static_cast<float>(partialTick_)) / (20.0f / speed), 0.0f, 1.0f);
+}
+
 void GameSession::damageHeldTool(int amount) {
     ItemStack& tool = inventory_.selectedItem();
     if (tool.isEmpty() || !tool.isDamageable() || amount <= 0) return;
@@ -367,10 +375,11 @@ void GameSession::interact(double dt, bool active) {
         }
     }
     if (usingItem_) return;  // (LocalPlayer.isHandsBusy: nothing is dug, hit or put down while something is eaten)
-    if (attack && !target_ && breakCooldown_ <= 0.0) {  // a swing at the air: the attack cooldown starts over
+    if (attack && !target_ && breakCooldown_ <= 0.0) {  // a swing at the air: the attack cooldown starts over (Minecraft.startAttack, HitResult.Type.MISS)
         breakCooldown_ = kRepeatDelay;
         swingArm();
         hand_.resetAttackStrength();
+        sinceAttack_ = 0;
     }
     if (attack && !creative()) digSurvival(dt, freshPress);
     if (use && placeCooldown_ <= 0.0 && !remote_ && !inventory_.selectedItem().isEmpty()) {  // (on a server the click goes to it)

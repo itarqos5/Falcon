@@ -419,8 +419,19 @@ void GameSession::renderHud(GuiGraphics& g, int guiWidth, int guiHeight, bool ch
 
     // F1 hides the crosshair and the hotbar (the debug screen stays, which is what people take screenshots with).
     if (!hudHidden_ && !usingSpyglass_) {
-        // Crosshair: 15x15 in the middle (only in first person).
-        if (perspective_ == 0) g.blitSprite("hud/crosshair", (guiWidth - 15) / 2, (guiHeight - 15) / 2, 15, 15);
+        // Crosshair: 15x15 in the middle (only in first person), with the attack indicator under it while the attack is still charging (Hud.extractCrosshair).
+        if (perspective_ == 0) {
+            g.blitSprite("hud/crosshair", (guiWidth - 15) / 2, (guiHeight - 15) / 2, 15, 15);
+            if (services_.options.attackIndicator == AttackIndicator::Crosshair) {
+                const float strength = attackStrengthScale();
+                if (strength < 1.0f) {
+                    const int x = guiWidth / 2 - 8, y = guiHeight / 2 - 7 + 16;
+                    const int filled = std::min(16, static_cast<int>(strength * 17.0f));
+                    g.blitSprite("hud/crosshair_attack_indicator_background", x, y, 16, 4);
+                    if (filled > 0) g.blitSpriteRegion("hud/crosshair_attack_indicator_progress", 0, 0, filled, 4, x, y, filled, 4);
+                }
+            }
+        }
         if (info_.gameType != 3) drawHotbar(g, guiWidth, guiHeight);  // (a spectator has no hotbar: no inventory)
         if (survivalBars()) drawSurvivalBars(g, guiWidth, guiHeight);
         drawNameTags(g, guiWidth, guiHeight, camera());
@@ -519,6 +530,16 @@ void GameSession::drawFireOverlay(GuiGraphics& g, int guiWidth, int guiHeight) {
 void GameSession::drawHotbar(GuiGraphics& g, int guiWidth, int guiHeight) {
     const HotbarLayout layout = computeHotbarLayout(guiWidth, guiHeight, survivalBars());  // (the name sits higher where the bars are)
     g.blitSprite("hud/hotbar", layout.left, layout.top, 182, 22);
+    // The attack indicator beside the hotbar (Hud.extractItemHotbar): a bar that fills from the bottom, 18 pixels tall, while the attack is charging.
+    if (services_.options.attackIndicator == AttackIndicator::Hotbar) {
+        const float strength = attackStrengthScale();
+        if (strength < 1.0f) {
+            const int x = guiWidth / 2 - 91 - 22, y = guiHeight - 20;
+            const int filled = std::min(18, static_cast<int>(strength * 19.0f));
+            g.blitSprite("hud/hotbar_attack_indicator_background", x, y, 18, 18);
+            if (filled > 0) g.blitSpriteRegion("hud/hotbar_attack_indicator_progress", 0, 18 - filled, 18, filled, x, y + 18 - filled, 18, filled);
+        }
+    }
     g.blitSprite("hud/hotbar_selection", layout.selectionX(inventory_.selected), layout.selectionY(), 24, 23);
     const ItemStack& offhand = inventory_.offhand();
     if (!offhand.isEmpty()) {

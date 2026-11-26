@@ -391,6 +391,8 @@ private:
     void tickPortal();
     void tickDragonFight();
     void attackMob(int id);  // the player hits a mob: the damage the held item and the attack cooldown give, the knockback, the sounds
+    // Player.getAttackStrengthScale: how far the attack has charged (the attack indicator draws this, and a hit's damage is scaled by it).
+    [[nodiscard]] float attackStrengthScale();
     void mobHitsPlayer(float amount, double fromX, double fromZ, float knockback);
     void renderLocalMobs(const std::array<double, 3>& camPos);
     // F3 + B and F3 + G: the lines the game's EntityHitboxDebugRenderer and ChunkBorderRenderer draw (game_session_debug.cpp).
