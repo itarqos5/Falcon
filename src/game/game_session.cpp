@@ -720,16 +720,16 @@ void GameSession::update(double dt, bool active, int framebufferWidth, int frame
     interact(dt, active);
 }
 
-bool GameSession::keyIs(const char* action, int key) const {
+bool GameSession::keyIs(const char* action, int key) const { return keyIs(action, KeyId::keyboard(key)); }
+
+bool GameSession::keyIs(const char* action, const KeyId& key) const {
     const std::size_t index = keyMappingIndex(action);
-    return index < kKeyMappingCount && services_.options.keyBindings.key(index) == KeyId::keyboard(key);
+    return index < kKeyMappingCount && services_.options.keyBindings.key(index) == key;
 }
 
 void GameSession::onKey(int key, int mods) {
     modKeyEvent(KeyId::keyboard(key), true);
-    for (int slot = 0; slot < 9; ++slot) {
-        if (info_.gameType != 3 && keyIs(format("key.hotbar.%d", slot + 1).c_str(), key)) inventory_.setSelected(slot);  // (a spectator has no inventory to choose from)
-    }
+    actionPress(KeyId::keyboard(key), mods);
     // The debug key (F3): the debug screen is shown or hidden when it is let go, unless a chord (F3 + H, F3 + F4 ...) was used while it was
     // down (KeyboardHandler: handledDebugKey).
     if (keyIs("key.debug.overlay", key) || keyIs("key.debug.modifier", key)) {
@@ -768,16 +768,25 @@ void GameSession::onKey(int key, int mods) {
             }
         }
     }
-    if (services_.options.toggleCrouch && keyIs("key.sneak", key)) sneakLatched_ = !sneakLatched_;
-    if (services_.options.toggleSprint && keyIs("key.sprint", key)) sprintLatched_ = !sprintLatched_;
-    if (keyIs("key.pickItem", key) && target_) pickBlock(renderer_.level().block(target_->x, target_->y, target_->z));
+}
+
+// KeyboardHandler.handleKeybinds, but for the debug chords (which onKey reads a keyboard key for): the hotbar slots, the two toggles, picking a block, throwing
+// an item, the perspective, and the swap with the offhand. A mouse button reaches the same actions through here, which is how a side button put on a hotbar
+// slot selects it.
+void GameSession::actionPress(const KeyId& id, int mods) {
+    for (int slot = 0; slot < 9; ++slot) {
+        if (info_.gameType != 3 && keyIs(format("key.hotbar.%d", slot + 1).c_str(), id)) inventory_.setSelected(slot);  // (a spectator has no inventory to choose from)
+    }
+    if (services_.options.toggleCrouch && keyIs("key.sneak", id)) sneakLatched_ = !sneakLatched_;
+    if (services_.options.toggleSprint && keyIs("key.sprint", id)) sprintLatched_ = !sprintLatched_;
+    if (keyIs("key.pickItem", id) && target_) pickBlock(renderer_.level().block(target_->x, target_->y, target_->z));
     // Q throws the held item (Ctrl + Q the whole stack) out in front of the player.
-    if (keyIs("key.drop", key) && ready_ && info_.gameType != 3 && !dead_ && remote_) {  // on a server it takes the item (DROP_ITEM, DROP_ALL_ITEMS)
+    if (keyIs("key.drop", id) && ready_ && info_.gameType != 3 && !dead_ && remote_) {  // on a server it takes the item (DROP_ITEM, DROP_ALL_ITEMS)
         if (!inventory_.selectedItem().isEmpty()) {
             remote_->sendAction((mods & GLFW_MOD_CONTROL) != 0 ? 4 : 3);
             swingArm();
         }
-    } else if (keyIs("key.drop", key) && ready_ && info_.gameType != 3 && !dead_) {
+    } else if (keyIs("key.drop", id) && ready_ && info_.gameType != 3 && !dead_) {
         const ItemStack thrown = inventory_.removeFromSelected((mods & GLFW_MOD_CONTROL) != 0);
         if (!thrown.isEmpty()) {
             dropFromPlayer(thrown);
@@ -785,9 +794,9 @@ void GameSession::onKey(int key, int mods) {
         }
     }
     // F5: first person, from behind, from the front, and round again.
-    if (keyIs("key.togglePerspective", key) && ready_) perspective_ = (perspective_ + 1) % 3;
+    if (keyIs("key.togglePerspective", id) && ready_) perspective_ = (perspective_ + 1) % 3;
     // F swaps the held item with the offhand one.
-    if (keyIs("key.swapOffhand", key) && ready_ && info_.gameType != 3) {
+    if (keyIs("key.swapOffhand", id) && ready_ && info_.gameType != 3) {
         if (remote_) remote_->sendAction(6);  // SWAP_ITEM_WITH_OFFHAND: the server swaps and sends the slots
         else std::swap(inventory_.selectedItem(), inventory_.offhand());
     }
@@ -851,13 +860,13 @@ void GameSession::setGameType(int gameType) {
     sneakLatched_ = sprintLatched_ = false;
 }
 
+// A mouse button that goes down is a key that goes down: whatever action is bound to it starts (a side button on a hotbar slot selects it, one on the
+// offhand swap swaps the hands), the way the game's KeyboardHandler reads them.
 void GameSession::onMouseButton(int button) {
-    modKeyEvent(KeyId::mouse(button), true);
-    modKeyEvent(KeyId::mouse(button), false);
-    const std::size_t index = keyMappingIndex("key.pickItem");
-    if (index >= kKeyMappingCount || !ready_) return;
-    const KeyId bound = services_.options.keyBindings.key(index);
-    if (bound.type == KeyId::Type::Mouse && bound.code == button && target_) pickBlock(renderer_.level().block(target_->x, target_->y, target_->z));
+    const KeyId id = KeyId::mouse(button);
+    modKeyEvent(id, true);
+    if (ready_) actionPress(id, 0);
+    modKeyEvent(id, false);
 }
 
 // ServerGamePacketListenerImpl.tryPickItem: if the inventory has the block's item, that slot is selected (a hotbar one) or

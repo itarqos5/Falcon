@@ -121,8 +121,9 @@ public:
     void onKeyReleased(int glfwKey);
     void onMouseButton(int glfwButton);
     void onScroll(double dy);
-    // Whether a key press is the one bound to a key mapping name ("key.inventory").
+    // Whether a key press is the one bound to a key mapping name ("key.inventory"). A mouse button is a key here too: the game lets any action be bound to one.
     [[nodiscard]] bool keyIs(const char* action, int glfwKey) const;
+    [[nodiscard]] bool keyIs(const char* action, const KeyId& key) const;
 
     // For tests and the benchmark: put the player somewhere and make them fly (nothing falls).
     void teleport(double x, double y, double z, float yaw, float pitch);
@@ -425,6 +426,8 @@ private:
     // A flint and steel or a fire charge used on a block (TNT goes off, a campfire or candle lights, else a fire starts next to it). True if it did something.
     bool useFireStarter(const std::string& item, const BlockHit& hit);
     void interact(double dt, bool active);
+    // What a bound key or mouse button starts when it goes down (everything the game's KeyboardHandler.handleKeybinds does but the debug chords).
+    void actionPress(const KeyId& id, int mods);
     [[nodiscard]] Camera camera() const;
     [[nodiscard]] std::vector<std::string> debugLines() const;
 
