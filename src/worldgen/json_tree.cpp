@@ -3,10 +3,43 @@
 #include <nlohmann/json.hpp>
 
 #include <charconv>
+#include <cstdlib>
 #include <fstream>
 #include <iterator>
+#include <string>
 
 namespace falcon::worldgen {
+namespace {
+
+// A JSON number as a double. Apple's libc++ declares the floating-point std::from_chars overloads deleted, so a Mac reads them with strtod, which rounds
+// the same way (both are correctly rounded) and is unaffected by a locale the program never changes.
+bool parseNumber(const char* first, const char* last, double& out) {
+#if defined(__APPLE__)
+    if (first == last) return false;
+    const std::string text(first, last);
+    char* end = nullptr;
+    out = std::strtod(text.c_str(), &end);
+    return end == text.c_str() + text.size();
+#else
+    const auto r = std::from_chars(first, last, out);
+    return r.ec == std::errc() && r.ptr == last;
+#endif
+}
+
+bool parseNumber(const char* first, const char* last, float& out) {
+#if defined(__APPLE__)
+    if (first == last) return false;
+    const std::string text(first, last);
+    char* end = nullptr;
+    out = std::strtof(text.c_str(), &end);
+    return end == text.c_str() + text.size();
+#else
+    const auto r = std::from_chars(first, last, out);
+    return r.ec == std::errc() && r.ptr == last;
+#endif
+}
+
+}  // namespace
 
 const JsonValue* JsonValue::find(std::string_view key) const {
     if (kind != Kind::Object) return nullptr;
@@ -21,8 +54,7 @@ bool JsonValue::toDouble(double& out) const {
     const char* first = text.data();
     const char* last = first + text.size();
     if (first != last && *first == '+') ++first;
-    const auto r = std::from_chars(first, last, out);
-    return r.ec == std::errc() && r.ptr == last;
+    return parseNumber(first, last, out);
 }
 
 bool JsonValue::toFloat(float& out) const {
@@ -30,8 +62,7 @@ bool JsonValue::toFloat(float& out) const {
     const char* first = text.data();
     const char* last = first + text.size();
     if (first != last && *first == '+') ++first;
-    const auto r = std::from_chars(first, last, out);
-    return r.ec == std::errc() && r.ptr == last;
+    return parseNumber(first, last, out);
 }
 
 bool JsonValue::toInt(std::int32_t& out) const {
