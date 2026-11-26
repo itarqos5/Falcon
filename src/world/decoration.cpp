@@ -288,12 +288,53 @@ void Decorator::placeTree(std::vector<Edit>& edits, Tree kind, int chunkX, int c
             break;
         }
         case Tree::Jungle: {
-            for (int y = groundY + 1; y <= top; ++y) put(wx, y, wz, log, false);
-            blob(0, 0, top - 2, 2, true);
-            blob(0, 0, top - 1, 3, true);
-            blob(0, 0, top, 3, true);
-            blob(0, 0, top + 1, 2, true);
-            blob(0, 0, top + 2, 1, true);
+            // A jungle grows two kinds of tree (JungleTreeFeature and MegaJungleTreeFeature): a small one with a single trunk and a canopy like an oak's, and
+            // a great one whose trunk is 2 x 2 and twice as tall, with vines hanging off its sides. A great one is only grown where all four of its trunk
+            // columns are in this chunk, because the next chunk along would not draw its half.
+            const bool mega = height >= 10 && wx + 1 < x0 + 16 && wz + 1 < z0 + 16;
+            if (mega) {
+                for (int y = groundY + 1; y <= top; ++y) {
+                    put(wx, y, wz, log, false);
+                    put(wx + 1, y, wz, log, false);
+                    put(wx, y, wz + 1, log, false);
+                    put(wx + 1, y, wz + 1, log, false);
+                }
+                // The canopy: five layers over the top of the trunk, the lowest the widest.
+                for (int layer = 0; layer < 5; ++layer) {
+                    const int y = top + 2 - layer;
+                    const int r = layer == 0 ? 1 : layer == 1 ? 2 : 3;
+                    for (int dz = -r; dz <= r; ++dz) {
+                        for (int dx = -r; dx <= r; ++dx) {
+                            if (std::abs(dx) == r && std::abs(dz) == r && rnd(2) == 0) continue;
+                            put(wx + dx, y, wz + dz, leaves, true);
+                            put(wx + 1 + dx, y, wz + dz, leaves, true);
+                        }
+                    }
+                }
+            } else {
+                for (int y = groundY + 1; y <= top; ++y) put(wx, y, wz, log, false);
+                blob(0, 0, top - 2, 2, true);
+                blob(0, 0, top - 1, 3, true);
+                blob(0, 0, top, 3, true);
+                blob(0, 0, top + 1, 2, true);
+            }
+            // Vines (JungleTreeDecorator, VinesFeature): a hanging column down the side of the trunk, the face it is drawn on turned towards the trunk.
+            // (fx, fz) steps out of the trunk; (ax, az) walks along the trunk's face, which a great tree has two columns of.
+            struct Side {
+                int fx, fz, ax, az;
+                const char* face;
+            };
+            static constexpr Side kSides[4] = {{-1, 0, 0, 1, "east"}, {1, 0, 0, 1, "west"}, {0, -1, 1, 0, "south"}, {0, 1, 1, 0, "north"}};
+            for (const Side& side : kSides) {
+                for (int column = 0; column < (mega ? 2 : 1); ++column) {
+                    if (rnd(3) != 0) continue;  // not every side of every tree has one
+                    const int vx = wx + side.fx + (mega ? side.ax * column : 0);
+                    const int vz = wz + side.fz + (mega ? side.az * column : 0);
+                    const Block vine = named((std::string("vine[") + side.face + "=true]").c_str());
+                    int y = top - rnd(3);
+                    for (int length = 1 + rnd(6); length > 0 && y > groundY; --y, --length) put(vx, y, vz, vine, true);
+                }
+            }
             break;
         }
         case Tree::Cherry: {
