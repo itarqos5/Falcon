@@ -268,9 +268,13 @@ public:
     static constexpr int kMinRenderDistance = 2;
     static constexpr int kMaxRenderDistance = 32;
 
+    // An option changed while a server runs the world: it is told again, if what the packet carries is not what it was told (its chunk streaming is sized by it).
+    void refreshClientInformation();
+
 private:
     [[nodiscard]] bool isDown(const char* action) const;
     [[nodiscard]] int renderDistance() const;
+    [[nodiscard]] net::MultiplayerClient::ClientInformation clientInformationFromOptions() const;
     void applyLook(bool active);
     // The keys held right now, as the game's KeyboardInput reads them once per tick.
     [[nodiscard]] PlayerInput sampleInput() const;

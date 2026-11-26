@@ -230,22 +230,40 @@ void GameSession::syncCreativeSlots() {
     }
 }
 
+// Options in the game's own words, as ServerboundClientInformationPacket carries them: the view distance the server sizes its chunk streaming by, the language,
+// the chat, the parts of the skin that are shown, the main hand and the particles.
+net::MultiplayerClient::ClientInformation GameSession::clientInformationFromOptions() const {
+    net::MultiplayerClient::ClientInformation info;
+    info.language = services_.options.language;
+    info.viewDistance = renderDistance();  // (the server sends as many chunks as the client asks for, up to its own limit)
+    info.chatVisibility = static_cast<int>(services_.options.chatVisibility);
+    info.chatColors = services_.options.chatColors;
+    info.skinParts = 0;
+    for (int part = 0; part < 7; ++part) {
+        if (services_.options.modelParts[static_cast<std::size_t>(part)]) info.skinParts |= 1 << part;
+    }
+    info.mainHand = services_.options.mainHandRight ? 1 : 0;
+    info.particles = static_cast<int>(services_.options.particles);
+    return info;
+}
+
+// An option changed while a server runs the world: the packet again, if what it carries is not what the server was told (the game sends it whenever its options
+// change). The server reads it in the play phase too, and its view distance is what sizes the chunks it streams.
+void GameSession::refreshClientInformation() {
+    if (!remote_ || !remote_->inPlay()) return;
+    const net::MultiplayerClient::ClientInformation info = clientInformationFromOptions();
+    const net::MultiplayerClient::ClientInformation& old = remote_->clientInformation();
+    if (old.language == info.language && old.viewDistance == info.viewDistance && old.chatVisibility == info.chatVisibility && old.chatColors == info.chatColors &&
+        old.skinParts == info.skinParts && old.mainHand == info.mainHand && old.allowListing == info.allowListing && old.particles == info.particles) {
+        return;
+    }
+    remote_->setClientInformation(info);
+    remote_->clientInformationChanged();
+}
+
 bool GameSession::connectRemote(const std::string& host, int port, const std::string& username, std::string& error) {
     remote_ = std::make_unique<net::MultiplayerClient>(*registry_);
-    {  // the options the client information packet carries (Options in the game's own words)
-        net::MultiplayerClient::ClientInformation info;
-        info.language = services_.options.language;
-        info.viewDistance = renderDistance();  // (the server sends as many chunks as the client asks for, up to its own limit)
-        info.chatVisibility = static_cast<int>(services_.options.chatVisibility);
-        info.chatColors = services_.options.chatColors;
-        info.skinParts = 0;
-        for (int part = 0; part < 7; ++part) {
-            if (services_.options.modelParts[static_cast<std::size_t>(part)]) info.skinParts |= 1 << part;
-        }
-        info.mainHand = services_.options.mainHandRight ? 1 : 0;
-        info.particles = static_cast<int>(services_.options.particles);
-        remote_->setClientInformation(info);
-    }
+    remote_->setClientInformation(clientInformationFromOptions());
     {  // the account (a server in online mode asks for it); without a token only a server that does not check accounts can be joined
         net::Account account;
         account.accessToken = services_.accessToken;

@@ -810,6 +810,7 @@ int Client::run() {
         const bool screenChanged = navigator.apply(screens) || appliedEarly;
         if (screenChanged) {
             saveOptions();  // leaving a settings screen saves the settings
+            if (session) session->refreshClientInformation();  // (a server sizes its chunk streaming by the view distance it was told, so a change goes to it)
             falcon::log::debug("ui", "screen: %s (%d open)", falcon::log::typeName(typeid(*screens.back())).c_str(), static_cast<int>(screens.size()));
         }
         panorama.setSpeed(static_cast<float>(gameOptions.panoramaSpeed));

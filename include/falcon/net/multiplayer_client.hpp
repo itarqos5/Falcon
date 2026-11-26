@@ -221,7 +221,13 @@ public:
         bool allowListing = true;
         int particles = 0;
     };
-    void setClientInformation(const ClientInformation& information) { clientInformation_ = information; }  // before start()
+    void setClientInformation(const ClientInformation& information) { clientInformation_ = information; }  // before start(), or while playing (see clientInformationChanged)
+    [[nodiscard]] const ClientInformation& clientInformation() const { return clientInformation_; }
+    // An option changed while a server runs the world: ServerboundClientInformationPacket again, which the play phase has as well (14 there, 0 in the configuration
+    // phase). The server reads it: the view distance is what sizes the chunks it streams.
+    void clientInformationChanged() {
+        if (phase_ == Phase::Play) sendClientInformation(14);
+    }
     [[nodiscard]] bool encrypted() const { return connection_.encrypted(); }
     [[nodiscard]] bool chatSigned() const { return chatSessionSent_; }  // the chat is signed with the account's key (what a server that enforces secure profiles wants)
     // The server's biomes, by their number, as Falcon's own (0 where the two have no name in common): a chunk the server sends takes the colours of its biome. The numbers come
