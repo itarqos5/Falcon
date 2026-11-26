@@ -238,6 +238,8 @@ void GameSession::renderWorld(int framebufferWidth, int framebufferHeight) {
             frame.useRemaining = static_cast<float>(useTicksLeft_) - static_cast<float>(partialTick_) + 1.0f;
         }
         hand_.render(renderer_, frame);
+        // The offhand item, in the other hand at the left of the screen (ItemInHandRenderer.renderHandsWithItems draws both hands).
+        if (!inventory_.offhand().isEmpty()) hand_.render(renderer_, frame, &inventory_.offhand());
     }
     renderer_.endFrame();
 }

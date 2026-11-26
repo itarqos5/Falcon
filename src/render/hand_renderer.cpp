@@ -447,19 +447,25 @@ void HandRenderer::drawArm(const HandFrame& frame, float side, float swing, floa
     gl::BindVertexArray(0);
 }
 
-void HandRenderer::render(WorldRenderer& world, const HandFrame& frame) {
-    const float swing = swingProgress(frame.partialTick);
-    const float equip = equipProgress(frame.partialTick);
+void HandRenderer::render(WorldRenderer& world, const HandFrame& frame, const ItemStack* offhand) {
+    const bool other = offhand != nullptr;
+    const ItemStack& stack = other ? *offhand : shown_;
+    const float swing = other ? 0.0f : swingProgress(frame.partialTick);  // (a swing of the offhand is not animated here)
+    const float equip = other ? 0.0f : equipProgress(frame.partialTick);  // (0: the offhand is where it rests; 1 would be below the screen)
     const float swayX = frame.pitch - (xBobO_ + (xBob_ - xBobO_) * static_cast<float>(frame.partialTick));
     const float swayY = frame.yaw - (yBobO_ + (yBob_ - yBobO_) * static_cast<float>(frame.partialTick));
-    const float side = frame.rightHanded ? 1.0f : -1.0f;
+    const float side = (frame.rightHanded ? 1.0f : -1.0f) * (other ? -1.0f : 1.0f);
+    // The item's model comes nearer for the offhand (FIRST_PERSON_LEFT_HAND / RIGHT_HAND are the other way round from the main hand's).
+    const DisplayTransform& transform = other ? (frame.rightHanded ? modelFor(stack).firstLeft : modelFor(stack).firstRight)
+                                              : (frame.rightHanded ? modelFor(stack).firstRight : modelFor(stack).firstLeft);
+    const bool mirror = other ? frame.rightHanded : !frame.rightHanded;
 
-    gl::Clear(gl::DEPTH_BUFFER_BIT);  // the hand is always in front of the world
+    if (!other) gl::Clear(gl::DEPTH_BUFFER_BIT);  // the hand is always in front of the world (once, before both of them)
     gl::Enable(gl::DEPTH_TEST);
     // A held item is drawn with its back faces culled, as the game does. A flat item (a pickaxe, a sword) is a front face, a back face and a
     // ring of edge faces; with both sides drawn the back face showed beside the front one, so the tool looked like two sprites on top of each
     // other. (The bare arm is drawn without culling: its faces are not all wound the same way.)
-    if (!shown_.isEmpty()) {
+    if (!stack.isEmpty()) {
         gl::Enable(gl::CULL_FACE);
         gl::CullFace(gl::BACK);
         gl::FrontFace(gl::CCW);
@@ -468,11 +474,11 @@ void HandRenderer::render(WorldRenderer& world, const HandFrame& frame) {
     }
     gl::Disable(gl::BLEND);
 
-    if (shown_.isEmpty()) {
-        drawArm(frame, side, swing, equip, swayX, swayY);
+    if (stack.isEmpty()) {
+        if (!other) drawArm(frame, side, swing, equip, swayX, swayY);  // (an empty offhand is no arm on screen)
         return;
     }
-    const HeldModel& model = modelFor(shown_);
+    const HeldModel& model = modelFor(stack);
     if (model.empty) return;
     const double s = side;
     const double sq = std::sqrt(static_cast<double>(swing));
@@ -482,7 +488,7 @@ void HandRenderer::render(WorldRenderer& world, const HandFrame& frame) {
     const double g1 = std::sin(sq * kPi);
     M4 pose = rotX(swayX * 0.1) * rotY(swayY * 0.1) * translate(s * a, b, c) * translate(s * 0.56, -0.52 + static_cast<double>(equip) * -0.6, -0.72) *
               rotY(s * (45.0 + f1 * -20.0)) * rotZ(s * g1 * -20.0) * rotX(g1 * -80.0) * rotY(s * -45.0);
-    if (frame.useDuration > 0) {
+    if (!other && frame.useDuration > 0) {
         // FirstPersonHandsAndItemsRenderer.applyEatTransform, then applyItemArmTransform (no attack swing while something is eaten): the item bobs while it is chewed and is
         // brought to the middle, turned toward the mouth, as the use runs out.
         const double remaining = static_cast<double>(frame.useRemaining);
@@ -493,7 +499,7 @@ void HandRenderer::render(WorldRenderer& world, const HandFrame& frame) {
         eat = eat * translate(power * 0.6 * s, power * -0.5, 0.0) * rotY(s * power * 90.0) * rotX(power * 10.0) * rotZ(s * power * 30.0);
         pose = rotX(swayX * 0.1) * rotY(swayY * 0.1) * eat * translate(s * 0.56, -0.52 + static_cast<double>(equip) * -0.6, -0.72);
     }
-    pose = pose * applyTransform(frame.rightHanded ? model.firstRight : model.firstLeft, !frame.rightHanded) * translate(-0.5, -0.5, -0.5);
+    pose = pose * applyTransform(transform, mirror) * translate(-0.5, -0.5, -0.5);
 
     const float aspect = static_cast<float>(frame.width) / static_cast<float>(std::max(1, frame.height));
     const Matrix4f mvp = perspective(70.0f, aspect, 0.05f, 128.0f) * frame.bob * pose.toFloat();

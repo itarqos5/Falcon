@@ -61,8 +61,9 @@ public:
     // Attacking the air starts the attack cooldown over (the hand dips a little while it recovers).
     void resetAttackStrength() { attackTicker_ = 0; }
 
-    // Draws the hand over the world (clears the depth buffer first).
-    void render(WorldRenderer& world, const HandFrame& frame);
+    // Draws the hand over the world (clears the depth buffer first). With `offhand` it draws that stack in the other hand instead: mirrored, at rest
+    // (the game's ItemInHandRenderer.renderArmWithItem for InteractionHand.OFF_HAND, which has no swing or equip animation of its own).
+    void render(WorldRenderer& world, const HandFrame& frame, const ItemStack* offhand = nullptr);
     // Draws the items lying in the world (ItemEntityRenderer): each bobs and turns slowly, a bigger stack is drawn as a few copies. `viewProj` is the
     // frame's view and projection (the world is drawn relative to the camera, which is at `cam`).
     void renderGroundItems(WorldRenderer& world, const Matrix4f& viewProj, const std::array<double, 3>& cam, const std::vector<ItemEntity>& items, double partialTick);
