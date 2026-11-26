@@ -324,6 +324,10 @@ bool GameSession::connectRemote(const std::string& host, int port, const std::st
         player_.vz = (relative & 128) ? player_.vz + dz : dz;
         remoteTeleported_ = true;
     };
+    h.rotate = [this](float yaw, float pitch) {  // handleRotatePlayer: the angles are the player's now, and its old ones too (setOldRot)
+        player_.yaw = player_.yawO = yaw;
+        player_.pitch = player_.pitchO = std::clamp(pitch, -90.0f, 90.0f);
+    };
     h.moveVehicle = [this](double x, double y, double z, float yaw, float pitch) {  // ClientPacketListener.handleMoveVehicle: the server puts the boat that is driven here somewhere
         (void)pitch;
         if (!boat_ || remote_->vehicle() != boatEntity_) return;
@@ -779,6 +783,8 @@ void GameSession::sendRemoteTick(const PlayerInput& input, bool riding, const Bo
     state.pitch = player_.pitch;
     state.onGround = player_.onGround;
     state.horizontalCollision = player_.horizontalCollision;
+    // LocalPlayer.sendPosition sends nothing while the camera is not the player's own (spectating another entity through isControlledCamera); Falcon's camera is always the
+    // player, so only the other half of that method's guard applies here, and the position always goes.
     remote_->sendMovement(state);
     remote_->tickPlayers();
 }

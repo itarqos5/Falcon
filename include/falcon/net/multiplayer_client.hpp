@@ -144,6 +144,8 @@ struct MoveState {
 // What the world has to do for the packets the server sends. Called from pump(), on the thread that calls it.
 struct RemoteHandler {
     std::function<MoveState()> self;  // where the player is now (to confirm a teleport with)
+    // The server turns the player (ClientboundPlayerRotationPacket): the angles are already absolute, a relative one having been added to the player's own.
+    std::function<void(float yaw, float pitch)> rotate;
     std::function<void(ChunkPos, std::shared_ptr<Chunk>)> chunk;
     std::function<void(ChunkPos, const ChunkLightPatch&)> light;  // the sections of a chunk whose light the server sent again (a block was placed or broken there)
     std::function<void(ChunkPos)> forget;

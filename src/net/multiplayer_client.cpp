@@ -744,6 +744,20 @@ void MultiplayerClient::handlePlay(const Packet& p, RemoteHandler& h) {
             positionReminder_ = 0;
             break;
         }
+        case 74: {  // player_rotation: the server turns the player (a teleport that only changes the angles, a forced look)
+            const float yaw = r.f32();
+            const bool relativeY = r.boolean();
+            const float pitch = r.f32();
+            const bool relativeX = r.boolean();
+            if (!r.ok) break;
+            // ClientPacketListener.handleRotatePlayer: PositionMoveRotation.calculateAbsolute adds an angle to the player's own; the pitch is then clamped.
+            const MoveState now = h.self ? h.self() : MoveState{};
+            const float y = relativeY ? now.yaw + yaw : yaw;
+            const float x = std::clamp(relativeX ? now.pitch + pitch : pitch, -90.0f, 90.0f);
+            if (h.rotate) h.rotate(y, x);
+            sendRotation(y, x, false, false);  // (the handler sends the same move packet back, as the game does)
+            break;
+        }
         case 12: chunkBatchOpen_ = true; break;
         case 11: {  // chunk_batch_finished: say how many chunks a tick are welcome
             r.varint();
