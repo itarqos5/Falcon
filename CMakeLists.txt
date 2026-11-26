@@ -497,6 +497,7 @@ add_library(falcon_core
     src/game/item_render.cpp
     src/game/container_screen.cpp
     src/game/inventory_screen.cpp
+    src/game/recipe_book.cpp
     src/game/create_world_screen.cpp
     src/game/join_multiplayer_screen.cpp
     src/game/server_screens.cpp

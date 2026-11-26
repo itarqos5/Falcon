@@ -31,13 +31,117 @@ std::vector<SlotView> InventoryScreen::slotViews() {
     return views;
 }
 
-void InventoryScreen::drawBackground(GuiGraphics& g, int mouseX, int mouseY) {
-    g.blit(g.textures().get("gui/container/inventory.png"), leftPos_, topPos_, 0.0f, 0.0f, imageWidth_, imageHeight_, 256, 256);
-    session().drawPlayerPreview(g, leftPos_ + 26, topPos_ + 8, leftPos_ + 75, topPos_ + 78, 30.0f, static_cast<float>(mouseX), static_cast<float>(mouseY));  // InventoryScreen: box (26, 8)-(75, 78), scale 30
-}
-
 void InventoryScreen::drawLabels(GuiGraphics& g, int, int) {
     g.text(text("container.crafting"), static_cast<float>(leftPos_ + 97), static_cast<float>(topPos_ + 6), kLabelColor, /*shadow=*/false);
+}
+
+// ---- the recipe book -------------------------------------------------------------------------------------------
+
+namespace {
+constexpr int kBookWidth = 147, kBookHeight = 166;
+constexpr int kBookGridX = 11, kBookGridY = 31, kBookCell = 25;
+// InventoryScreen.getRecipeBookButtonPosition: leftPos + 104, height / 2 - 22 (the empty row under the crafting label, beside the player).
+constexpr int kBookButtonX = 104, kBookButtonY = 61, kBookButtonWidth = 20, kBookButtonHeight = 18;
+constexpr int kBookShift = 77;  // how far the window steps right to leave room for the page
+constexpr int kPageArrowY = 137, kPageArrowWidth = 23, kPageArrowHeight = 13;
+}  // namespace
+
+void InventoryScreen::init() {
+    ContainerScreen::init();
+    layout();
+}
+
+void InventoryScreen::layout() { leftPos_ = (width_ - imageWidth_) / 2 + (book_.open() ? kBookShift : 0); }
+
+void InventoryScreen::toggleBook() {
+    book_.toggle(session().inventory());
+    layout();
+}
+
+bool InventoryScreen::insideBook(double x, double y) const {
+    const int px = leftPos_ - kBookWidth;
+    return x >= px && x < px + kBookWidth && y >= topPos_ && y < topPos_ + kBookHeight;
+}
+
+int InventoryScreen::bookEntryAt(double x, double y) const {
+    if (!book_.open() || !insideBook(x, y)) return -1;
+    const int px = leftPos_ - kBookWidth;
+    const int column = static_cast<int>(x - px - kBookGridX) / kBookCell;
+    const int row = static_cast<int>(y - topPos_ - kBookGridY) / kBookCell;
+    if (column < 0 || column >= RecipeBook::kColumns || row < 0 || row >= RecipeBook::kRows) return -1;
+    const int index = book_.page() * RecipeBook::kPerPage + row * RecipeBook::kColumns + column;
+    return index < static_cast<int>(book_.entries().size()) ? index : -1;
+}
+
+// RecipeBookComponent's page: the background, a 4 x 5 grid of results (the button behind each says whether it can be made, and how many times), the
+// page arrows, and the name of the recipe under the mouse.
+void InventoryScreen::drawBook(GuiGraphics& g, int mouseX, int mouseY) {
+    const int px = leftPos_ - kBookWidth, py = topPos_;
+    g.blit(g.textures().get("gui/recipe_book.png"), px, py, 0.0f, 0.0f, kBookWidth, kBookHeight, 256, 256);
+    const std::vector<RecipeBook::Entry>& entries = book_.entries();
+    const int first = book_.page() * RecipeBook::kPerPage;
+    const Inventory& inventory = session().inventory();
+    for (int i = 0; i < RecipeBook::kPerPage && first + i < static_cast<int>(entries.size()); ++i) {
+        const int x = px + kBookGridX + (i % RecipeBook::kColumns) * kBookCell;
+        const int y = py + kBookGridY + (i / RecipeBook::kColumns) * kBookCell;
+        const int times = book_.craftableCount(first + i, inventory);
+        g.blitSprite(times <= 0 ? "recipe_book/slot_uncraftable" : times == 1 ? "recipe_book/slot_craftable" : "recipe_book/slot_many_craftable", x, y, kBookCell, kBookCell);
+        drawItem(g, session().itemIcons(), entries[static_cast<std::size_t>(first + i)].result, x + 4, y + 4);
+    }
+    if (const int pages = book_.pageCount(); pages > 1) {
+        g.blitSprite(book_.page() > 0 ? "recipe_book/page_backward" : "recipe_book/page_backward_highlighted", px + 14, py + kPageArrowY, kPageArrowWidth, kPageArrowHeight);
+        g.blitSprite(book_.page() < pages - 1 ? "recipe_book/page_forward" : "recipe_book/page_forward_highlighted", px + 108, py + kPageArrowY, kPageArrowWidth, kPageArrowHeight);
+    }
+    if (const int hovered = bookEntryAt(mouseX, mouseY); hovered >= 0) {
+        const ItemStack& stack = entries[static_cast<std::size_t>(hovered)].result;
+        g.setItemTooltip({{itemDisplayName(stack, services_.language), 0xFFFFFFFFu}}, mouseX, mouseY);
+    }
+}
+
+void InventoryScreen::drawBackground(GuiGraphics& g, int mouseX, int mouseY) {
+    if (book_.open()) drawBook(g, mouseX, mouseY);
+    g.blit(g.textures().get("gui/container/inventory.png"), leftPos_, topPos_, 0.0f, 0.0f, imageWidth_, imageHeight_, 256, 256);
+    session().drawPlayerPreview(g, leftPos_ + 26, topPos_ + 8, leftPos_ + 75, topPos_ + 78, 30.0f, static_cast<float>(mouseX), static_cast<float>(mouseY));  // InventoryScreen: box (26, 8)-(75, 78), scale 30
+    const bool overButton = mouseX >= leftPos_ + kBookButtonX && mouseX < leftPos_ + kBookButtonX + kBookButtonWidth && mouseY >= topPos_ + kBookButtonY &&
+                            mouseY < topPos_ + kBookButtonY + kBookButtonHeight;
+    g.blitSprite(overButton || book_.open() ? "recipe_book/button_highlighted" : "recipe_book/button", leftPos_ + kBookButtonX, topPos_ + kBookButtonY, kBookButtonWidth, kBookButtonHeight);
+}
+
+bool InventoryScreen::mouseClicked(double x, double y, int button) {
+    if (button == 0) {
+        if (x >= leftPos_ + kBookButtonX && x < leftPos_ + kBookButtonX + kBookButtonWidth && y >= topPos_ + kBookButtonY &&
+            y < topPos_ + kBookButtonY + kBookButtonHeight) {
+            toggleBook();
+            return true;
+        }
+        if (insideBook(x, y)) {
+            const int px = leftPos_ - kBookWidth;
+            if (book_.pageCount() > 1 && y >= topPos_ + kPageArrowY && y < topPos_ + kPageArrowY + kPageArrowHeight &&
+                ((x >= px + 14 && x < px + 14 + kPageArrowWidth) || (x >= px + 108 && x < px + 108 + kPageArrowWidth))) {
+                book_.scroll(x < px + kBookWidth / 2 ? -1 : 1);
+                return true;
+            }
+            if (const int entry = bookEntryAt(x, y); entry >= 0) {
+                if (book_.place(entry, session().inventoryMenu(), session().inventory())) book_.refresh(session().inventory());
+                return true;
+            }
+            return true;  // (the page covers the world behind it: a click on it puts nothing down)
+        }
+    }
+    return ContainerScreen::mouseClicked(x, y, button);
+}
+
+bool InventoryScreen::mouseScrolled(double x, double y, double dy) {
+    if (book_.open() && insideBook(x, y)) {
+        book_.scroll(dy > 0.0 ? -1 : dy < 0.0 ? 1 : 0);
+        return true;
+    }
+    return ContainerScreen::mouseScrolled(x, y, dy);
+}
+
+void InventoryScreen::slotClicked(const SlotView* view, int slotId, int button, ClickType type) {
+    ContainerScreen::slotClicked(view, slotId, button, type);
+    if (book_.open()) book_.refresh(session().inventory());  // (what can be made changed with what moved)
 }
 
 // ---------------------------------------------------------------------------------------------------------------

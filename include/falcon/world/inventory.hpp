@@ -93,6 +93,11 @@ public:
         }
         return slots_[static_cast<std::size_t>(slot)];
     }
+    // What is in a slot, for reading (the recipe book looks through the inventory as it is, and only a match takes anything).
+    [[nodiscard]] const ItemStack& item(int slot) const {
+        return slot >= 0 && slot < kSize ? slots_[static_cast<std::size_t>(slot)] : scratch_;
+    }
+    [[nodiscard]] const ItemStack& offhand() const { return slots_[kOffhand]; }
     [[nodiscard]] static bool isHotbarSlot(int slot) { return slot >= 0 && slot < kHotbarSize; }
 
     // The hotbar slot in the hand (0-8).

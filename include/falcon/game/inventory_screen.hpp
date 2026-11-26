@@ -2,23 +2,41 @@
 
 #include "falcon/game/container_screen.hpp"
 #include "falcon/game/creative_inventory.hpp"
+#include "falcon/game/recipe_book.hpp"
 
 #include <memory>
 
 namespace falcon {
 
 // The "E" screen of survival (InventoryScreen): 176 x 166 from textures/gui/container/inventory.png: the four armor slots, the
-// player's picture (a PLACEHOLDER silhouette here: a later stage draws the player), the offhand slot, the 2 x 2 crafting grid with
-// its result, the 27 inventory slots and the hotbar, and the "Crafting" label. Clicks go through the menu rules.
+// player's picture (drawn from the account's own skin), the offhand slot, the 2 x 2 crafting grid with its result, the 27 inventory
+// slots and the hotbar, and the "Crafting" label. Clicks go through the menu rules. The button in its corner opens the recipe book
+// (RecipeBookComponent): a 147 x 166 page to the left listing what the grid can make, which the window steps aside for.
 class InventoryScreen final : public ContainerScreen {
 public:
     InventoryScreen(ScreenNavigator& navigator, ScreenServices& services);
 
+    bool mouseClicked(double x, double y, int button) override;
+    bool mouseScrolled(double x, double y, double dy) override;
+
 protected:
+    void init() override;
     ContainerMenu& menu() override;
     std::vector<SlotView> slotViews() override;
     void drawBackground(GuiGraphics& graphics, int mouseX, int mouseY) override;
     void drawLabels(GuiGraphics& graphics, int mouseX, int mouseY) override;
+    void slotClicked(const SlotView* view, int slotId, int button, ClickType type) override;
+
+private:
+    // The window in the middle of the screen, moved right while the book is open (RecipeBookComponent offsets it by 77).
+    void layout();
+    void toggleBook();
+    void drawBook(GuiGraphics& graphics, int mouseX, int mouseY);
+    [[nodiscard]] bool insideBook(double x, double y) const;
+    // The row of the page under the point, its entry, or -1.
+    [[nodiscard]] int bookEntryAt(double x, double y) const;
+
+    RecipeBook book_;
 };
 
 // The "E" screen of creative (CreativeModeInventoryScreen): 195 x 136, a tab bar above and below with the icons of the tabs, a grid
