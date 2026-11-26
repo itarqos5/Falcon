@@ -7,6 +7,7 @@ int main() {
     testDayCycle();
     testMobPath();
     testMobMovement();
+    testMobFloats();
     testEndSpikes();
     testLegacyRandom();
     if (g_logicFailures != 0) {

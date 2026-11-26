@@ -163,3 +163,50 @@ void testMobMovement() {
         LCHECK(fastest < 0.6);
     }
 }
+
+// A land animal whose eyes are under the surface paddles up (FloatGoal) and comes to rest at the top of the water, bobbing there, instead of walking about the bottom of
+// the pool: the cow the user found strolling the sea floor.
+void testMobFloats() {
+    installBlockRegistry(BlockRegistry::makeMinimal());
+    const auto stone = blockRegistry().find("stone");
+    const auto water = blockRegistry().find("water");
+    LCHECK(stone.has_value() && water.has_value());
+    if (!stone || !water) return;
+    Level level = flatWorld(*stone);
+    for (int x = -6; x <= 6; ++x) {  // a tank three blocks deep over the ground at y = -1: its surface is y = 3, and its stone rim is a block higher
+        for (int z = -6; z <= 6; ++z) {
+            for (int y = 0; y <= 2; ++y) level.setBlock(x, y, z, *water);
+        }
+    }
+    for (int side = -7; side <= 7; ++side) {
+        for (int y = 0; y <= 3; ++y) {
+            level.setBlock(side, y, -7, *stone);
+            level.setBlock(side, y, 7, *stone);
+            level.setBlock(-7, y, side, *stone);
+            level.setBlock(7, y, side, *stone);
+        }
+    }
+    MobsHost host;
+    Mobs mobs(host, 11);
+    Mob* cow = mobs.spawn("cow", 0.5, 0.0, 0.5, true);
+    LCHECK(cow != nullptr);
+    if (cow == nullptr) return;
+    const int id = cow->id;
+    MobTick in;
+    in.level = &level;
+    in.player = {60.0, 0.0, 0.5};  // (far off: there is nothing to walk to)
+    in.playerTargetable = false;
+    in.difficulty = 0;
+    in.dayTime = 6000;
+    in.spawnMobs = false;
+    in.spawnMonsters = false;
+    for (int t = 0; t < 200; ++t) mobs.tick(in);
+    const double after = mobs.find(id)->y;
+    // FloatGoal paddles until the eyes are out of the water, not until the whole animal is: a cow is 1.4 tall, its eyes ~1.2 up, so it settles just under 1.8 of a pool that
+    // is three deep. On the bottom it would still be at 0.
+    std::printf("  a cow in a pool three deep: y = %.2f after 10 s\n", after);
+    LCHECK(after > 1.6);
+    for (int t = 0; t < 100; ++t) mobs.tick(in);
+    std::printf("  and after another 5 s: y = %.2f\n", mobs.find(id)->y);
+    LCHECK(mobs.find(id)->y > 1.6);  // (it stays up there, bobbing)
+}

@@ -16,5 +16,6 @@ extern int g_logicFailures;
 void testDayCycle();
 void testMobPath();
 void testMobMovement();
+void testMobFloats();
 void testEndSpikes();
 void testLegacyRandom();
