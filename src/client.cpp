@@ -364,6 +364,24 @@ int Client::run() {
                     badge ? "C++ EDITION" : "kept the original (unexpected edition.png layout)");
     }
     memStage("textures + badge");
+    // The vignette (Video Settings > Other) is the game's own picture: a grey that darkens what lies under it. It is turned into black with that much alpha
+    // once, so that the GUI's ordinary alpha blending darkens the edges by exactly what the picture asks for (black over a colour leaves it times 1 - alpha).
+    int vignetteWidth = 0, vignetteHeight = 0;
+    const bool hasVignette = [&] {
+        const auto bytes = resources.readBytes(ResourceLocation("minecraft", "textures/misc/vignette.png"));
+        if (!bytes) return false;
+        std::optional<Image> picture = decodePng(*bytes);
+        if (!picture || picture->empty()) return false;
+        for (std::size_t i = 0; i + 3 < picture->rgba.size(); i += 4) {
+            const unsigned char darken = picture->rgba[i];  // (the picture is grey, and its grey is how much the edges are darkened: GameRenderer blends dst * (1 - src))
+            picture->rgba[i] = picture->rgba[i + 1] = picture->rgba[i + 2] = 0;
+            picture->rgba[i + 3] = darken;
+        }
+        vignetteWidth = picture->width;
+        vignetteHeight = picture->height;
+        textures.add("falcon:vignette", *picture);
+        return true;
+    }();
     SpriteManager sprites(resources);
     memStage("sprites");
     GuiRenderer guiRenderer;
@@ -966,19 +984,8 @@ int Client::run() {
         markPhase(kFrameDraw);
         guiRenderer.begin(fbW, fbH, guiScale);
         graphics.beginFrame(guiWidth, guiHeight, fbW, fbH);
-        if (gameOptions.vignette) {  // the game's vignette: the edges of the screen darkened a little more than the middle (Video Settings > Other)
-            constexpr int steps = 20;
-            for (int i = 0; i < steps; ++i) {
-                const double fade = 1.0 - static_cast<double>(i) / steps;
-                const auto alpha = static_cast<std::uint32_t>(std::lround(70.0 * fade * fade));
-                if (alpha == 0) continue;
-                const std::uint32_t colour = alpha << 24;
-                const int up = i * guiHeight / (2 * steps), side = i * guiWidth / (2 * steps);
-                graphics.fill(0, up, guiWidth, up + 1, colour);
-                graphics.fill(0, guiHeight - up - 1, guiWidth, guiHeight - up, colour);
-                graphics.fill(side, 0, side + 1, guiHeight, colour);
-                graphics.fill(guiWidth - side - 1, 0, guiWidth - side, guiHeight, colour);
-            }
+        if (gameOptions.vignette && hasVignette && session != nullptr) {  // (the game draws it in Gui.render: over the world, under the HUD and any menu)
+            graphics.blit(textures.get("falcon:vignette"), 0, 0, 0.0f, 0.0f, guiWidth, guiHeight, vignetteWidth, vignetteHeight, vignetteWidth, vignetteHeight);
         }
         screens.back()->render(graphics, static_cast<int>(std::floor(mouseX)),
                                static_cast<int>(std::floor(mouseY)),
