@@ -297,6 +297,14 @@ endif()
 if(FALCON_BUILD_TESTS)
     add_executable(falcon_launcher_tests EXCLUDE_FROM_ALL tests/launcher_tests.cpp)
     target_link_libraries(falcon_launcher_tests PRIVATE falcon_launcher_core)
+    if(APPLE)
+        # The tests carry none of the pieces embedded in the real launcher, and the symbols that mark them are weak (setup.cpp); Darwin's linker still wants
+        # each one named and allowed to stay undefined, which is the empty blob the reader already handles.
+        target_link_options(falcon_launcher_tests PRIVATE
+            -Wl,-U,_falcon_client_start -Wl,-U,_falcon_client_end
+            -Wl,-U,_falcon_ui_start -Wl,-U,_falcon_ui_end
+            -Wl,-U,_falcon_icon_start -Wl,-U,_falcon_icon_end)
+    endif()
     add_test(NAME falcon_launcher_tests COMMAND falcon_launcher_tests)
     if(TARGET check)
         add_dependencies(check falcon_launcher_tests)
