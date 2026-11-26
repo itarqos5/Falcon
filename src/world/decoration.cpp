@@ -331,7 +331,7 @@ void Decorator::placeTree(std::vector<Edit>& edits, Tree kind, int chunkX, int c
                     const int vx = wx + side.fx + (mega ? side.ax * column : 0);
                     const int vz = wz + side.fz + (mega ? side.az * column : 0);
                     const Block vine = named((std::string("vine[") + side.face + "=true]").c_str());
-                    int y = top - rnd(3);
+                    int y = top - 3 - rnd(3);  // (under the canopy: the leaves round the trunk leave no face to hang on any higher)
                     for (int length = 1 + rnd(6); length > 0 && y > groundY; --y, --length) put(vx, y, vz, vine, true);
                 }
             }

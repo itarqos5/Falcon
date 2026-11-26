@@ -1,6 +1,7 @@
 // D:/Projects/Falcon/tests/worldgen_chunks tests (the others are in D:/Projects/Falcon/tests/test_worldgen_chunks_*.cpp).
 #include "test_worldgen_chunks_support.hpp"
 
+#include "falcon/world/decoration.hpp"
 #include "falcon/worldgen/lod_surface.hpp"
 
 // The surface the levels of detail are drawn from (worldgen/lod_surface.hpp), against the chunks the generator really makes: the ground read from whole chunks is the
@@ -158,6 +159,56 @@ void testFluidTracking(const GameData& gd, const falcon::BlockRegistry& registry
     (void)notFluid;
 }
 
+// Jungle trees (world/decoration.cpp): the great 2 x 2 kind with five layers of canopy and vines hanging down the trunk's sides. Seed 0 is the world Falcon starts a player in;
+// a jungle chunk of it near chunk 0,48 (found through the generator's biome map) is generated, decorated, and read back block by block.
+void testJungleTrees(const GameData& gd, const falcon::BlockRegistry& registry) {
+    std::string error;
+    const std::shared_ptr<const OverworldGenerator> gen = OverworldGenerator::create(gd.root, registry, 0, error);
+    if (!gen) {
+        std::fprintf(stderr, "jungle generator: %s\n", error.c_str());
+        ++g_failures;
+        return;
+    }
+    for (int cz = 44; cz <= 52; ++cz) {
+        for (int cx = -4; cx <= 4; ++cx) {
+            falcon::worldgen::ChunkExtras extras;
+            auto chunk = gen->generate(cx, cz, extras);
+            const int surface = extras.heightmaps.worldSurface[8 + 16 * 8] - 1;
+            if (gen->biomes().name(gen->biomeAt(cx * 16 + 8, surface, cz * 16 + 8)) != "minecraft:jungle") continue;
+            const falcon::Decorator decorator(*gen, registry, 0);
+            decorator.decorate(*chunk, cx, cz, extras);
+            const auto isLog = [&](int x, int y, int z) {
+                return x >= 0 && x < 16 && z >= 0 && z < 16 && registry.type(chunk->at(x, y, z)).name == "jungle_log";
+            };
+            int logs = 0, vines = 0, greatTrunks = 0;
+            for (int y = falcon::kMinY; y < falcon::kMaxY; ++y) {
+                for (int z = 0; z < 16; ++z) {
+                    for (int x = 0; x < 16; ++x) {
+                        const std::string& name = registry.type(chunk->at(x, y, z)).name;
+                        if (name == "jungle_log") ++logs;
+                        else if (name == "vine") ++vines;
+                    }
+                }
+            }
+            for (int y = falcon::kMinY + 1; y + 1 < falcon::kMaxY && greatTrunks == 0; ++y) {  // a 2 x 2 of logs, two blocks tall
+                for (int z = 0; z + 1 < 16 && greatTrunks == 0; ++z) {
+                    for (int x = 0; x + 1 < 16 && greatTrunks == 0; ++x) {
+                        if (isLog(x, y, z) && isLog(x + 1, y, z) && isLog(x, y, z + 1) && isLog(x + 1, y, z + 1) && isLog(x, y + 1, z) && isLog(x + 1, y + 1, z) &&
+                            isLog(x, y + 1, z + 1) && isLog(x + 1, y + 1, z + 1)) {
+                            ++greatTrunks;
+                        }
+                    }
+                }
+            }
+            std::printf("  jungle chunk %d,%d: %d jungle logs, %d vines, %d great trunk%s\n", cx, cz, logs, vines, greatTrunks, greatTrunks == 1 ? "" : "s");
+            CHECK(logs > 0);
+            CHECK(vines > 0);  // (a jungle tree that has none is fine; a whole jungle chunk of them is the bug)
+            return;
+        }
+    }
+    std::printf("  (no jungle chunk near chunk 0,48 of seed 0: the jungle's trees and vines were not checked)\n");
+}
+
 void performanceReport(const GameData& gd, const falcon::BlockRegistry& registry) {
     const std::size_t before = falcon::processWorkingSetBytes();
     std::string error;
@@ -231,6 +282,7 @@ int main() {
                 } else {
                     std::printf("  generator created in %.0f ms\n", std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count());
                     testPrimitives(*gen, *registry);
+                    testJungleTrees(gd, *registry);
                     Truth truth;
                     if (!std::filesystem::exists(testDataPath("chunks_seed12345.bin"))) {
                         // (The 40 real chunks are block data the game itself made, so the repository does not carry them: this check
