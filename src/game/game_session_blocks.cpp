@@ -250,9 +250,12 @@ void GameSession::digSurvival(double dt, bool fresh) {
 bool GameSession::useItemRemote() {
     const std::array<double, 3> eye = player_.eyePosition(partialTick_);
     const auto look = Look{player_.yaw, player_.pitch}.forward();
+    // The main hand first; when it holds nothing that can be put down and the offhand does, the offhand is the one the server is told about
+    // (Minecraft.startUseItem walks the two hands in that order until one of them does something).
+    const bool offHand = inventory_.selectedItem().type().blockIndex < 0 && inventory_.offhand().type().blockIndex >= 0;
     remote_->sendUseItemOn(target_->x, target_->y, target_->z, target_->face, eye[0] + look[0] * target_->distance - target_->x, eye[1] + look[1] * target_->distance - target_->y,
-                           eye[2] + look[2] * target_->distance - target_->z);
-    const ItemStack& held = inventory_.selectedItem();
+                           eye[2] + look[2] * target_->distance - target_->z, offHand);
+    const ItemStack& held = offHand ? inventory_.offhand() : inventory_.selectedItem();
     if (player_.sneaking && !held.isEmpty()) return true;
     const std::string& name = registry_->type(registry_->state(renderer_.level().block(target_->x, target_->y, target_->z)).block).name;
     static const char* const kAnswers[] = {"door", "trapdoor", "button", "lever", "chest", "barrel", "furnace", "smoker", "crafting_table", "anvil", "_bed", "shulker_box", "hopper",
@@ -509,9 +512,11 @@ void GameSession::interact(double dt, bool active) {
         const Aabb cell{static_cast<double>(place[0]), static_cast<double>(place[1]), static_cast<double>(place[2]),
                         static_cast<double>(place[0]) + 1.0, static_cast<double>(place[1]) + 1.0, static_cast<double>(place[2]) + 1.0};
         const bool insidePlayer = cell.intersects(player_.boundingBox());
-        // The held stack: a block item places its block (in the state blockStateForPlacement() chooses) and, outside
-        // creative, is used up one at a time.
-        ItemStack& heldStack = inventory_.selectedItem();
+        // The stack that places a block puts its block down (in the state blockStateForPlacement() chooses) and, outside creative, is used up one at a time.
+        // Minecraft.startUseItem tries the main hand and then the offhand, so a stack of blocks held off hand goes down when the main hand holds nothing
+        // that can be put there.
+        const auto placeFrom = [&](ItemStack& heldStack) -> bool {
+            bool placedNow = false;
         const int heldBlock = heldStack.isEmpty() ? -1 : heldStack.type().blockIndex;
         if (heldBlock >= 0 && inWorld && registry_->state(there).has(kStateReplaceable) && !insidePlayer) {
             const std::array<double, 3> cursor = {eye[0] + look[0] * target_->distance - target_->x, eye[1] + look[1] * target_->distance - target_->y, eye[2] + look[2] * target_->distance - target_->z};
@@ -528,6 +533,7 @@ void GameSession::interact(double dt, bool active) {
                     renderer_.setBlock(place[0], place[1] + 1, place[2], support_->upperHalf(placed));
                 }
                 setBlock(place[0], place[1], place[2], placed);
+                placedNow = true;
                 if (!remote_) connectChest(place[0], place[1], place[2]);  // a chest next to a single chest makes a double one
                 swingArm();
                 {  // the place sound of the new block
@@ -541,6 +547,9 @@ void GameSession::interact(double dt, bool active) {
                 }
             }
         }
+            return placedNow;
+        };
+        if (!placeFrom(inventory_.selectedItem())) placeFrom(inventory_.offhand());
     }
 }
 

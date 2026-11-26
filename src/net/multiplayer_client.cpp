@@ -1639,10 +1639,10 @@ void MultiplayerClient::sendDig(int action, int x, int y, int z, int face) {
     connection_.send(41, w.data);
 }
 
-void MultiplayerClient::sendUseItemOn(int x, int y, int z, int face, double cx, double cy, double cz) {
+void MultiplayerClient::sendUseItemOn(int x, int y, int z, int face, double cx, double cy, double cz, bool offHand) {
     if (phase_ != Phase::Play) return;
     Writer w;
-    w.varint(0);  // the main hand
+    w.varint(offHand ? 1 : 0);  // 0 the main hand, 1 the offhand
     w.i64(packBlockPos(x, y, z));
     w.varint(kProtocolDirection[face % 6]);
     w.f32(static_cast<float>(cx));
@@ -1685,10 +1685,10 @@ void MultiplayerClient::sendCreativeSlot(int inventorySlot, const ItemStack& sta
     connection_.send(57, w.data);
 }
 
-void MultiplayerClient::sendUseItem(float yaw, float pitch) {
+void MultiplayerClient::sendUseItem(float yaw, float pitch, bool offHand) {
     if (phase_ != Phase::Play) return;
     Writer w;
-    w.varint(0);  // the main hand
+    w.varint(offHand ? 1 : 0);  // 0 the main hand, 1 the offhand
     w.varint(++sequence_);
     w.f32(yaw);
     w.f32(pitch);

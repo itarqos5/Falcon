@@ -288,7 +288,7 @@ public:
     void sendRespawn();
     void sendHeldSlot(int slot);
     void sendDig(int action, int x, int y, int z, int face);  // 0 start, 1 abort, 2 finish
-    void sendUseItemOn(int x, int y, int z, int face, double cx, double cy, double cz);
+    void sendUseItemOn(int x, int y, int z, int face, double cx, double cy, double cz, bool offHand = false);
     // The player uses something on an entity (ServerboundInteractPacket): the point that was hit, relative to the entity, and whether sneaking. A boat is boarded, a villager trades,
     // a frame takes the item, an armor stand is dressed ... all of it by the server's answer.
     void sendInteract(int entityId, double dx, double dy, double dz, bool secondary);
@@ -304,7 +304,7 @@ public:
     void sendRenameItem(const std::string& name);           // what is typed into an anvil's name box
     // A click in a menu (container 0 is the player's own): the slot, the button, the kind (ClickType's number), the slots it changed with what they hold now, the stack on the cursor.
     void sendContainerClick(int containerId, int slot, int button, int mode, const std::vector<std::pair<int, ItemStack>>& changed, const ItemStack& carried);
-    void sendUseItem(float yaw, float pitch);  // the item in the hand is used (eaten, drawn, thrown)
+    void sendUseItem(float yaw, float pitch, bool offHand = false);  // the item in the hand is used (eaten, drawn, thrown)
     void sendAction(int action);               // ServerboundPlayerActionPacket without a block: 3 drop one, 4 drop all, 5 let go of a used item, 6 swap with the offhand
 
 private:
