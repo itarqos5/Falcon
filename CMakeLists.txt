@@ -10,10 +10,10 @@ if(WIN32)
     enable_language(RC)  # for the exe icon resource
 endif()
 if(APPLE)
-    # The launcher's window host is Objective-C++ (WKWebView). The language is set up here, at the top of the project, because that is where CMake loads
-    # the rules a language needs; enabling it from inside launcher/CMakeLists.txt leaves CMAKE_OBJCXX_COMPILE_OBJECT (and the archive rules) unset, which
-    # is the configure error the Mac build used to stop at.
-    enable_language(OBJCXX)
+    # The launcher's window host is Objective-C++ (WKWebView) and GLFW's Cocoa backend is Objective-C. Both are set up here, at the top of the project,
+    # because that is where CMake loads the rules a language needs: enabling one from inside launcher/CMakeLists.txt leaves CMAKE_OBJCXX_COMPILE_OBJECT
+    # unset. Objective-C is needed beside it, or CMake hands GLFW's .m files to the Objective-C++ rules and they fail on C's void pointers.
+    enable_language(OBJC OBJCXX)
 endif()
 
 set(CMAKE_CXX_STANDARD 20)
