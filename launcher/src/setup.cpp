@@ -37,16 +37,23 @@ Blob embeddedResource(const wchar_t* name) {
 
 #else
 
-// On Linux the pieces are put into the program by the linker (an assembler file with .incbin, see launcher/CMakeLists.txt), each between two symbols. A program built without
-// them (the tests) finds the symbols missing, which is what "weak" is for: their address is then null, and the blob is empty.
+// On Linux and macOS the pieces are put into the program by the linker (an assembler file with .incbin, see launcher/CMakeLists.txt), each between two symbols. A
+// program built without them (the tests) finds the symbols missing, which is what a weak reference is for: their address is then null, and the blob is empty.
+// Darwin spells that weak_import (a plain weak reference to a symbol nobody defines is still an error to its linker); elsewhere weak is enough.
+#if defined(__APPLE__)
+#define FALCON_BLOB_SYMBOL __attribute__((weak_import))
+#else
+#define FALCON_BLOB_SYMBOL __attribute__((weak))
+#endif
 extern "C" {
-extern const unsigned char falcon_client_start[] __attribute__((weak));
-extern const unsigned char falcon_client_end[] __attribute__((weak));
-extern const unsigned char falcon_ui_start[] __attribute__((weak));
-extern const unsigned char falcon_ui_end[] __attribute__((weak));
-extern const unsigned char falcon_icon_start[] __attribute__((weak));
-extern const unsigned char falcon_icon_end[] __attribute__((weak));
+extern const unsigned char falcon_client_start[] FALCON_BLOB_SYMBOL;
+extern const unsigned char falcon_client_end[] FALCON_BLOB_SYMBOL;
+extern const unsigned char falcon_ui_start[] FALCON_BLOB_SYMBOL;
+extern const unsigned char falcon_ui_end[] FALCON_BLOB_SYMBOL;
+extern const unsigned char falcon_icon_start[] FALCON_BLOB_SYMBOL;
+extern const unsigned char falcon_icon_end[] FALCON_BLOB_SYMBOL;
 }
+#undef FALCON_BLOB_SYMBOL
 
 namespace {
 Blob blobBetween(const unsigned char* begin, const unsigned char* end) {
