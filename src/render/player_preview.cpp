@@ -137,6 +137,11 @@ std::unique_ptr<PlayerPreview> PlayerPreview::create(const ResourceManager& reso
     auto model = loadEntityModel(dir, "minecraft:player#main", error);
     if (!model) return nullptr;
     out->model_ = std::move(*model);
+    std::string slimError;
+    if (auto slim = loadEntityModel(dir, "minecraft:player_slim#main", slimError)) {  // (a game file that lacks it only costs the slim arms)
+        out->slimModel_ = std::move(*slim);
+        out->hasSlim_ = true;
+    }
     const auto bytes = resources.readBytes(ResourceLocation("minecraft", "textures/entity/player/wide/steve.png"));
     auto skin = bytes ? decodePng(*bytes) : std::nullopt;
     if (!skin || skin->empty()) {
@@ -167,7 +172,7 @@ Image PlayerPreview::render(const View& view) const {
     // The pose of the figure in the game: LivingEntityRenderer turns it (180 - bodyRot about Y), flips the model's y-down, mirrored space
     // to the world (scale(-1, -1, 1)), shrinks the player to 0.9375 and drops it by 1.501; the GUI then puts a half-turn about Z and
     // the tilt about X (the mouse's up and down) on it and moves it by half the player's height (1.8) plus the box's offset.
-    EntityPart model = model_;
+    EntityPart model = view.slim && hasSlim_ ? slimModel_ : model_;
     if (EntityPart* head = model.find("head")) {
         head->rotation[1] = headYawDegrees * degrees;
         head->rotation[0] = headPitchDegrees * degrees;
@@ -193,12 +198,14 @@ Image PlayerPreview::render(const View& view) const {
     collect(model, Xf{}, toView, view.parts, (cx - static_cast<float>(view.x0)) * static_cast<float>(gs), (cy - static_cast<float>(view.y0)) * static_cast<float>(gs),
             pixelsPerBlock, faces);
 
-    // Fill them with a depth test, no culling, nearest texels and the skin's transparency cut out.
+    // Fill them with a depth test, no culling, nearest texels and the skin's transparency cut out. The picture is the player's own skin when it is
+    // known, and Steve until it has been downloaded (or for a player who has none).
+    const Image& skin = view.skin != nullptr && view.skin->width > 0 && view.skin->height > 0 ? *view.skin : skin_;
     std::vector<float> depth(static_cast<std::size_t>(image.width) * static_cast<std::size_t>(image.height), -1e30f);
     const auto texel = [&](float u, float v, unsigned char out[4]) {
-        const int tx = std::clamp(static_cast<int>(std::floor(u * static_cast<float>(skin_.width))), 0, skin_.width - 1);
-        const int ty = std::clamp(static_cast<int>(std::floor(v * static_cast<float>(skin_.height))), 0, skin_.height - 1);
-        const unsigned char* p = &skin_.rgba[(static_cast<std::size_t>(ty) * static_cast<std::size_t>(skin_.width) + static_cast<std::size_t>(tx)) * 4];
+        const int tx = std::clamp(static_cast<int>(std::floor(u * static_cast<float>(skin.width))), 0, skin.width - 1);
+        const int ty = std::clamp(static_cast<int>(std::floor(v * static_cast<float>(skin.height))), 0, skin.height - 1);
+        const unsigned char* p = &skin.rgba[(static_cast<std::size_t>(ty) * static_cast<std::size_t>(skin.width) + static_cast<std::size_t>(tx)) * 4];
         for (int i = 0; i < 4; ++i) out[i] = p[i];
     };
     const auto triangle = [&](const Face& f, int a, int b, int c) {

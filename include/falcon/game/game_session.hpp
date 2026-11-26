@@ -609,6 +609,7 @@ private:
     std::unique_ptr<net::SkinFetcher> localSkins_;                                   // the signed-in account's own skin, looked up at Mojang
     std::map<std::string, std::unique_ptr<Texture2D>> skinTextures_;                  // downloaded skins by their hash
     std::map<std::string, bool> skinSlim_;
+    std::map<std::string, Image> skinImages_;  // the same skins as pictures: the inventory's player is drawn on the CPU and needs the pixels
     std::string localSkinHash_;                                                        // the skin of this player (empty: the plain Steve)
     std::unique_ptr<RemoteMenu> remoteMenu_;  // the container a server opened (kept after it is closed, so that nothing points at a menu that is gone)
     std::string remoteMenuTitle_;

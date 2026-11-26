@@ -707,6 +707,7 @@ void GameSession::pumpSkins() {
     for (const net::SkinFetcher::Done& d : done) {
         skinTextures_[d.hash] = std::make_unique<Texture2D>(d.image, FilterMode::Nearest);
         skinSlim_[d.hash] = d.slim;
+        skinImages_[d.hash] = d.image;  // (the inventory's player is drawn on the CPU)
         if (localSkins_) {
             if (const auto own = localSkins_->profileSkin(services_.playerUuid)) {
                 if (d.cape && own->capeHash == d.hash) {

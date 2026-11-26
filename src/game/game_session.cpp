@@ -806,6 +806,11 @@ void GameSession::drawPlayerPreview(GuiGraphics& g, int x0, int y0, int x1, int 
     view.mouseY = mouseY;
     view.ageTicks = playerAgeTicks_ + partialTick_;
     view.parts = services_.options.modelParts;
+    // The account's own skin once it has been downloaded (Steve only stands there while it is on its way, or for a player who has no skin).
+    if (const auto found = skinImages_.find(localSkinHash_); !localSkinHash_.empty() && found != skinImages_.end()) {
+        view.skin = &found->second;
+        view.slim = skinSlim_[localSkinHash_];
+    }
     const Image picture = playerPreview_->render(view);
     // The picture goes through a texture of its own, replaced every frame (it is small), and is drawn 1:1 over the box.
     g.textures().add("falcon:player_preview", picture);

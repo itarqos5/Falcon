@@ -26,6 +26,10 @@ public:
         double ageTicks = 0.0;                // the player's age: the arms sway a little as they do in the game
         // Cape, Jacket, Left Sleeve, Right Sleeve, Left Pant Leg, Right Pant Leg, Hat: the Skin Customization options.
         std::array<bool, 7> parts = {true, true, true, true, true, true, true};
+        // The player's own skin, when there is one (null: the default Steve the game ships); `slim` is its narrower arms, which is a model of its own
+        // (minecraft:player_slim) because the sleeves are laid out differently in the picture.
+        const Image* skin = nullptr;
+        bool slim = false;
     };
 
     // Null (and `error`) when the model or the skin cannot be read.
@@ -36,6 +40,8 @@ public:
 
 private:
     EntityPart model_;
+    EntityPart slimModel_;  // minecraft:player_slim#main (the same figure with 3-pixel arms)
+    bool hasSlim_ = false;
     Image skin_;
 };
 
