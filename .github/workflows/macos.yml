@@ -1,4 +1,5 @@
-# Builds Falcon on macOS (the Intel runner) and runs the unit tests. The game is the same GLFW + OpenGL client as on the other systems, and the launcher is the
+# Builds Falcon on macOS (macos-15-intel: the Intel image, which is what the x86_64 download is; macos-13 was retired in December 2025, and a retired label leaves a
+# job queued for ever instead of failing it) and runs the unit tests. The game is the same GLFW + OpenGL client as on the other systems, and the launcher is the
 # same program with the system's own web view: WKWebView (Cocoa/WebKit), where Windows has WebView2 and Linux has WebKitGTK. The launcher is a FalconLauncher.app
 # bundle with the client inside it, so a Mac download is one thing that runs (Intel; Apple silicon runs it under Rosetta).
 name: macOS
@@ -15,7 +16,7 @@ permissions:
 
 jobs:
   build:
-    runs-on: macos-13
+    runs-on: macos-15-intel
     steps:
       - uses: actions/checkout@v4
 
