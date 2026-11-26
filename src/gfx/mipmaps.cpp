@@ -24,7 +24,9 @@ struct Tables {
         for (int i = 0; i < 1024; ++i) {
             const float c = static_cast<float>(i) / 1023.0f;
             const float srgb = c <= 0.0031308f ? c * 12.92f : static_cast<float>(1.055 * std::pow(static_cast<double>(c), 0.4166666666666667) - 0.055);
-            toSrgb[static_cast<std::size_t>(i)] = static_cast<std::uint8_t>(static_cast<std::int8_t>(std::floor(srgb * 255.0f + 0.5f)));
+            // (through int and clamped: a byte goes to 255, and converting an out-of-range float to a narrow signed type is undefined behaviour, which is why
+            // this table gave 127 for every bright entry when Apple's compiler built it)
+            toSrgb[static_cast<std::size_t>(i)] = static_cast<std::uint8_t>(std::clamp(static_cast<int>(std::lround(srgb * 255.0f)), 0, 255));
         }
     }
 };
