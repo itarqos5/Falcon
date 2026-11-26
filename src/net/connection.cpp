@@ -44,10 +44,10 @@ int closesocket(SOCKET s) { return ::close(s); }
 void startWinsock() {}
 #endif
 
-#ifdef _WIN32
-constexpr int kSendFlags = 0;
-#else
+#ifdef MSG_NOSIGNAL
 constexpr int kSendFlags = MSG_NOSIGNAL;
+#else
+constexpr int kSendFlags = 0;  // (macOS: SO_NOSIGPIPE on the socket does the same job)
 #endif
 
 }  // namespace
@@ -78,6 +78,9 @@ bool Connection::connect(const std::string& host, int port, std::string& error) 
     const int one = 1;
     setsockopt(s, IPPROTO_TCP, TCP_NODELAY, reinterpret_cast<const char*>(&one), sizeof one);
 #ifndef _WIN32
+#ifdef SO_NOSIGPIPE
+    setsockopt(s, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof one);  // (a server that hung up must not raise SIGPIPE in a write)
+#endif
     setsockopt(s, SOL_SOCKET, SO_KEEPALIVE, &one, sizeof one);  // (a server that vanished without a word is noticed in the end)
 #endif
     socket_ = static_cast<std::uintptr_t>(s);

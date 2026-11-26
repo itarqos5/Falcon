@@ -73,8 +73,15 @@ int connectSocket(const std::string& host, int port, int connectTimeoutMs, std::
     }
     int descriptor = -1;
     for (addrinfo* a = found; a != nullptr && descriptor < 0; a = a->ai_next) {
-        const int candidate = ::socket(a->ai_family, a->ai_socktype | SOCK_CLOEXEC, a->ai_protocol);
+        int type = a->ai_socktype;
+#ifdef SOCK_CLOEXEC
+        type |= SOCK_CLOEXEC;  // (macOS has none: the flag is set on the descriptor below instead)
+#endif
+        const int candidate = ::socket(a->ai_family, type, a->ai_protocol);
         if (candidate < 0) continue;
+#ifndef SOCK_CLOEXEC
+        fcntl(candidate, F_SETFD, fcntl(candidate, F_GETFD, 0) | FD_CLOEXEC);
+#endif
         const int flags = fcntl(candidate, F_GETFL, 0);
         fcntl(candidate, F_SETFL, flags | O_NONBLOCK);  // (to be able to stop waiting for an address that does not answer)
         int result = ::connect(candidate, a->ai_addr, a->ai_addrlen);
