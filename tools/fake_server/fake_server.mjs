@@ -1,5 +1,5 @@
 // A tiny offline-mode Minecraft 26.3 (protocol 777) server for looking at how Falcon draws other players without a real server: no world, a grass floor, and scripted players
-// (scenarios.mjs: walk, elytra, poses, ride, switch). It reads the game's registries from the horizon-launcher data folder and blocks.json from a vanilla server's --reports output
+// (scenarios.mjs: walk, elytra, poses, ride, switch, turn). It reads the game's registries from the horizon-launcher data folder and blocks.json from a vanilla server's --reports output
 // (FALCON_REPORTS, default %TEMP%/falcon-gen/out/reports).
 // usage: node fake_server.mjs <port> <scenario> [seconds]      (it stops by itself); then: Falcon.exe --connect 127.0.0.1:<port> --username Viewer --game-dir <scratch> ...
 // tools/fake_server/capture.ps1 does both with a hidden window and takes a picture.
@@ -198,6 +198,15 @@ const server = net.createServer((sock) => {
       } else if (state === 'config' && id === 3) {
         state = 'play';
         play(sock);
+      } else if (state === 'play' && (id === 31 || id === 32)) {
+        // What the client says it is looking along: a server that sends player_rotation (74) is answered with the same move packet the game sends back, so the log shows
+        // whether the client took the angles it was given (31 is a position and a rotation, 32 a rotation alone: floats, then the flags byte).
+        const base = idr[1];
+        if (payload.length >= base + (id === 31 ? 32 : 8)) {
+          const rd = (o) => payload.readFloatBE(base + o);
+          const yaw = rd(id === 31 ? 24 : 0), pitch = rd(id === 31 ? 28 : 4);
+          console.log(`client looks yaw=${yaw.toFixed(3)} pitch=${pitch.toFixed(3)} (${id === 31 ? 'move_pos_rot' : 'move_rot'})`);
+        }
       }
     }
   });

@@ -62,6 +62,23 @@ export function scenarios(h) {
     };
   };
 
+  // The server turns the viewer (player_rotation, 74): an absolute one at t=20, so it looks north at the player that was behind it, and a relative one at t=60 (+90 degrees,
+  // which the client has to add to its own), so it looks east at the other one. The fake server logs the angles the client says it looks along, so the handling is seen and
+  // not only compiled.
+  table.turn = (sock) => {
+    const behind = addPlayer({ id: 1, name: 'Behind', x: 0.5, y: 64, z: -6, yaw: 180, pitch: 0, head: 180 });
+    const east = addPlayer({ id: 2, name: 'East', x: 6, y: 64, z: 0.5, yaw: 270, pitch: 0, head: 270 });
+    for (const p of players) spawn(sock, p);
+    return {
+      view: { x: 0.5, y: 64, z: 0.5, yaw: 0, pitch: 5 },
+      tick: (t) => {
+        // ClientboundPlayerRotationPacket: the yaw, whether it is relative, the pitch, whether it is relative
+        if (t === 20) sock.write(frame(74, new W().f32(180).bool(false).f32(10).bool(false).buf()));
+        if (t === 60) sock.write(frame(74, new W().f32(90).bool(true).f32(-5).bool(true).buf()));
+      },
+    };
+  };
+
   // after a few seconds the server moves the viewer to another dimension: the old chunks and players must go and the new floor (stone) must show
   table.switch = (sock) => {
     const a = addPlayer({ id: 1, name: 'Stays', x: 0.5, y: 64, z: 5, yaw: 180, pitch: 0, head: 180 });
