@@ -253,6 +253,10 @@ bool Player::tryToStartFallFlying() {
     return false;
 }
 
+// The parts of LivingEntity.travel that are not here, because the system behind them is not ported: the levitation and slow-falling effects (so the air's gravity is the plain one),
+// the dolphin's grace in water, and the 0.2 lift of walking over powder snow in leather boots (powder snow has no stand-on collision shape yet). Everything else was checked
+// against 26.3: getFrictionInfluencedSpeed's 0.6 test and 0.21600002, computeModifiedFriction, the 0.91/0.98 air drag, 0.54600006 in water, and the lava's 0.5/0.8 by depth.
+
 // LivingEntity.travelInAir: walking, falling and creative flight.
 void Player::travelInAir(Vec3 input) {
     const BlockRegistry& registry = blockRegistry();
