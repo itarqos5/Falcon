@@ -516,9 +516,8 @@ void GameSession::interact(double dt, bool active) {
         // Minecraft.startUseItem tries the main hand and then the offhand, so a stack of blocks held off hand goes down when the main hand holds nothing
         // that can be put there.
         const auto placeFrom = [&](ItemStack& heldStack) -> bool {
-            bool placedNow = false;
-        const int heldBlock = heldStack.isEmpty() ? -1 : heldStack.type().blockIndex;
-        if (heldBlock >= 0 && inWorld && registry_->state(there).has(kStateReplaceable) && !insidePlayer) {
+            const int heldBlock = heldStack.isEmpty() ? -1 : heldStack.type().blockIndex;
+            if (heldBlock < 0 || !inWorld || !registry_->state(there).has(kStateReplaceable) || insidePlayer) return false;
             const std::array<double, 3> cursor = {eye[0] + look[0] * target_->distance - target_->x, eye[1] + look[1] * target_->distance - target_->y, eye[2] + look[2] * target_->distance - target_->z};
             Block placed = blockStateForPlacement({*registry_, heldBlock, *target_, player_.yaw, player_.pitch, player_.sneaking, cursor});
             // BlockItem.canPlace: a plant needs its soil, and a tall one (DoubleHighBlockItem) the cell above free as well.
@@ -528,26 +527,23 @@ void GameSession::interact(double dt, bool active) {
             const bool tall = support_ && support_->isLowerHalf(placed);
             const bool roomAbove = !tall || (place[1] + 1 < kMaxY && registry_->state(at(place[0], place[1] + 1, place[2])).has(kStateReplaceable));
             const bool stands = !support_ || support_->canSurvive(placed, place[0], place[1], place[2], at);
-            if (!registry_->isAir(placed) && roomAbove && stands) {
-                if (tall) {  // a tall plant or a door is two blocks: the upper half first, so the lower one finds its other half
-                    renderer_.setBlock(place[0], place[1] + 1, place[2], support_->upperHalf(placed));
-                }
-                setBlock(place[0], place[1], place[2], placed);
-                placedNow = true;
-                if (!remote_) connectChest(place[0], place[1], place[2]);  // a chest next to a single chest makes a double one
-                swingArm();
-                {  // the place sound of the new block
-                    const std::array<double, 3> where = {place[0] + 0.5, place[1] + 0.5, place[2] + 0.5};
-                    const BlockType& type = registry_->type(placed);
-                    playBlockSound(placed, "place", breakOrPlaceMix(type.soundVolume, type.soundPitch), SoundSource::Blocks, &where);
-                }
-                if (!creative() && !remote_) {
-                    heldStack.shrink(1);
-                    if (heldStack.isEmpty()) heldStack = ItemStack();
-                }
+            if (registry_->isAir(placed) || !roomAbove || !stands) return false;
+            if (tall) {  // a tall plant or a door is two blocks: the upper half first, so the lower one finds its other half
+                renderer_.setBlock(place[0], place[1] + 1, place[2], support_->upperHalf(placed));
             }
-        }
-            return placedNow;
+            setBlock(place[0], place[1], place[2], placed);
+            if (!remote_) connectChest(place[0], place[1], place[2]);  // a chest next to a single chest makes a double one
+            swingArm();
+            {  // the place sound of the new block
+                const std::array<double, 3> where = {place[0] + 0.5, place[1] + 0.5, place[2] + 0.5};
+                const BlockType& type = registry_->type(placed);
+                playBlockSound(placed, "place", breakOrPlaceMix(type.soundVolume, type.soundPitch), SoundSource::Blocks, &where);
+            }
+            if (!creative() && !remote_) {
+                heldStack.shrink(1);
+                if (heldStack.isEmpty()) heldStack = ItemStack();
+            }
+            return true;
         };
         if (!placeFrom(inventory_.selectedItem())) placeFrom(inventory_.offhand());
     }

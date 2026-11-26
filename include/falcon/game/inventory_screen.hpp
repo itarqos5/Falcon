@@ -33,6 +33,7 @@ private:
     void toggleBook();
     void drawBook(GuiGraphics& graphics, int mouseX, int mouseY);
     [[nodiscard]] bool insideBook(double x, double y) const;
+    [[nodiscard]] bool insideBookButton(double x, double y) const;
     // The row of the page under the point, its entry, or -1.
     [[nodiscard]] int bookEntryAt(double x, double y) const;
 

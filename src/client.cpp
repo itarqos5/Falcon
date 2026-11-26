@@ -645,11 +645,10 @@ int Client::run() {
 
         const auto now = Clock::now();
         const double millis = std::chrono::duration<double, std::milli>(now - start).count();
-        const double elapsedMillis = std::chrono::duration<double, std::milli>(now - last).count();
+        const double frameMillis = std::chrono::duration<double, std::milli>(now - last).count();
         // The world is stepped by at most four ticks a frame: a stall (a window dragged about, a machine that stopped the process for a moment) is not
         // replayed as one huge step of movement and physics.
-        const auto deltaTicks = std::clamp(static_cast<float>(elapsedMillis / 50.0), 0.0f, 4.0f);
-        const double frameMillis = elapsedMillis;
+        const auto deltaTicks = std::clamp(static_cast<float>(frameMillis / 50.0), 0.0f, 4.0f);
         last = now;
         // A frame that took more than a quarter of a second while a world is open (not one that waited for the window to come back): the log says what the game was doing.
         if (session != nullptr && session->ready() && frameMillis > 250.0 && frameMillis < 5000.0 && !window.background()) {

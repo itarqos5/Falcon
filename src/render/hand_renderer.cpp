@@ -454,11 +454,11 @@ void HandRenderer::render(WorldRenderer& world, const HandFrame& frame, const It
     const float equip = other ? 0.0f : equipProgress(frame.partialTick);  // (0: the offhand is where it rests; 1 would be below the screen)
     const float swayX = frame.pitch - (xBobO_ + (xBob_ - xBobO_) * static_cast<float>(frame.partialTick));
     const float swayY = frame.yaw - (yBobO_ + (yBob_ - yBobO_) * static_cast<float>(frame.partialTick));
+    const HeldModel& model = modelFor(stack);
     const float side = (frame.rightHanded ? 1.0f : -1.0f) * (other ? -1.0f : 1.0f);
     // The item's model comes nearer for the offhand (FIRST_PERSON_LEFT_HAND / RIGHT_HAND are the other way round from the main hand's).
-    const DisplayTransform& transform = other ? (frame.rightHanded ? modelFor(stack).firstLeft : modelFor(stack).firstRight)
-                                              : (frame.rightHanded ? modelFor(stack).firstRight : modelFor(stack).firstLeft);
-    const bool mirror = other ? frame.rightHanded : !frame.rightHanded;
+    const DisplayTransform& transform = other == frame.rightHanded ? model.firstLeft : model.firstRight;
+    const bool mirror = other != frame.rightHanded;
 
     if (!other) gl::Clear(gl::DEPTH_BUFFER_BIT);  // the hand is always in front of the world (once, before both of them)
     gl::Enable(gl::DEPTH_TEST);
@@ -478,7 +478,6 @@ void HandRenderer::render(WorldRenderer& world, const HandFrame& frame, const It
         if (!other) drawArm(frame, side, swing, equip, swayX, swayY);  // (an empty offhand is no arm on screen)
         return;
     }
-    const HeldModel& model = modelFor(stack);
     if (model.empty) return;
     const double s = side;
     const double sq = std::sqrt(static_cast<double>(swing));

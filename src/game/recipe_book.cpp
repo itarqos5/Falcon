@@ -5,6 +5,7 @@
 #include "falcon/world/recipes.hpp"
 
 #include <algorithm>
+#include <map>
 #include <utility>
 
 namespace falcon {
@@ -33,18 +34,14 @@ bool takeOne(Inventory& inventory, Item item) {
 // ask for the same item in two cells, which takes two). False when one of them cannot be had.
 bool chooseCells(const std::vector<Ingredient>& ingredients, const Inventory& inventory, std::vector<ItemStack>& out) {
     out.assign(ingredients.size(), ItemStack());
-    std::vector<std::pair<Item, int>> needed;  // how many of each item the cells chosen so far take
+    std::map<Item, int> taken;  // how many of each item the cells chosen so far take
     for (std::size_t cell = 0; cell < ingredients.size(); ++cell) {
         if (ingredients[cell].empty()) continue;
         bool chosen = false;
         for (const std::uint16_t id : ingredients[cell].items) {
             const Item item = static_cast<Item>(id);
-            int taken = 0;
-            for (const auto& [other, count] : needed) {
-                if (other == item) taken = count;
-            }
-            if (inventory.countOf(item) <= taken) continue;
-            needed.emplace_back(item, taken + 1);
+            if (inventory.countOf(item) <= taken[item]) continue;
+            ++taken[item];
             out[cell] = ItemStack(item, 1);
             chosen = true;
             break;

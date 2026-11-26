@@ -200,7 +200,7 @@ Image PlayerPreview::render(const View& view) const {
 
     // Fill them with a depth test, no culling, nearest texels and the skin's transparency cut out. The picture is the player's own skin when it is
     // known, and Steve until it has been downloaded (or for a player who has none).
-    const Image& skin = view.skin != nullptr && view.skin->width > 0 && view.skin->height > 0 ? *view.skin : skin_;
+    const Image& skin = view.skin != nullptr && !view.skin->empty() ? *view.skin : skin_;
     std::vector<float> depth(static_cast<std::size_t>(image.width) * static_cast<std::size_t>(image.height), -1e30f);
     const auto texel = [&](float u, float v, unsigned char out[4]) {
         const int tx = std::clamp(static_cast<int>(std::floor(u * static_cast<float>(skin.width))), 0, skin.width - 1);

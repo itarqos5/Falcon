@@ -44,6 +44,7 @@ constexpr int kBookGridX = 11, kBookGridY = 31, kBookCell = 25;
 constexpr int kBookButtonX = 104, kBookButtonY = 61, kBookButtonWidth = 20, kBookButtonHeight = 18;
 constexpr int kBookShift = 77;  // how far the window steps right to leave room for the page
 constexpr int kPageArrowY = 137, kPageArrowWidth = 23, kPageArrowHeight = 13;
+constexpr int kPageBackX = 14, kPageForwardX = 108;  // from the page's left edge
 }  // namespace
 
 void InventoryScreen::init() {
@@ -61,6 +62,11 @@ void InventoryScreen::toggleBook() {
 bool InventoryScreen::insideBook(double x, double y) const {
     const int px = leftPos_ - kBookWidth;
     return x >= px && x < px + kBookWidth && y >= topPos_ && y < topPos_ + kBookHeight;
+}
+
+bool InventoryScreen::insideBookButton(double x, double y) const {
+    return x >= leftPos_ + kBookButtonX && x < leftPos_ + kBookButtonX + kBookButtonWidth && y >= topPos_ + kBookButtonY &&
+           y < topPos_ + kBookButtonY + kBookButtonHeight;
 }
 
 int InventoryScreen::bookEntryAt(double x, double y) const {
@@ -89,8 +95,8 @@ void InventoryScreen::drawBook(GuiGraphics& g, int mouseX, int mouseY) {
         drawItem(g, session().itemIcons(), entries[static_cast<std::size_t>(first + i)].result, x + 4, y + 4);
     }
     if (const int pages = book_.pageCount(); pages > 1) {
-        g.blitSprite(book_.page() > 0 ? "recipe_book/page_backward" : "recipe_book/page_backward_highlighted", px + 14, py + kPageArrowY, kPageArrowWidth, kPageArrowHeight);
-        g.blitSprite(book_.page() < pages - 1 ? "recipe_book/page_forward" : "recipe_book/page_forward_highlighted", px + 108, py + kPageArrowY, kPageArrowWidth, kPageArrowHeight);
+        g.blitSprite(book_.page() > 0 ? "recipe_book/page_backward" : "recipe_book/page_backward_highlighted", px + kPageBackX, py + kPageArrowY, kPageArrowWidth, kPageArrowHeight);
+        g.blitSprite(book_.page() < pages - 1 ? "recipe_book/page_forward" : "recipe_book/page_forward_highlighted", px + kPageForwardX, py + kPageArrowY, kPageArrowWidth, kPageArrowHeight);
     }
     if (const int hovered = bookEntryAt(mouseX, mouseY); hovered >= 0) {
         const ItemStack& stack = entries[static_cast<std::size_t>(hovered)].result;
@@ -102,23 +108,22 @@ void InventoryScreen::drawBackground(GuiGraphics& g, int mouseX, int mouseY) {
     if (book_.open()) drawBook(g, mouseX, mouseY);
     g.blit(g.textures().get("gui/container/inventory.png"), leftPos_, topPos_, 0.0f, 0.0f, imageWidth_, imageHeight_, 256, 256);
     session().drawPlayerPreview(g, leftPos_ + 26, topPos_ + 8, leftPos_ + 75, topPos_ + 78, 30.0f, static_cast<float>(mouseX), static_cast<float>(mouseY));  // InventoryScreen: box (26, 8)-(75, 78), scale 30
-    const bool overButton = mouseX >= leftPos_ + kBookButtonX && mouseX < leftPos_ + kBookButtonX + kBookButtonWidth && mouseY >= topPos_ + kBookButtonY &&
-                            mouseY < topPos_ + kBookButtonY + kBookButtonHeight;
-    g.blitSprite(overButton || book_.open() ? "recipe_book/button_highlighted" : "recipe_book/button", leftPos_ + kBookButtonX, topPos_ + kBookButtonY, kBookButtonWidth, kBookButtonHeight);
+    const bool lit = book_.open() || insideBookButton(mouseX, mouseY);
+    g.blitSprite(lit ? "recipe_book/button_highlighted" : "recipe_book/button", leftPos_ + kBookButtonX, topPos_ + kBookButtonY, kBookButtonWidth, kBookButtonHeight);
 }
 
 bool InventoryScreen::mouseClicked(double x, double y, int button) {
     if (button == 0) {
-        if (x >= leftPos_ + kBookButtonX && x < leftPos_ + kBookButtonX + kBookButtonWidth && y >= topPos_ + kBookButtonY &&
-            y < topPos_ + kBookButtonY + kBookButtonHeight) {
+        if (insideBookButton(x, y)) {
             toggleBook();
             return true;
         }
         if (insideBook(x, y)) {
             const int px = leftPos_ - kBookWidth;
-            if (book_.pageCount() > 1 && y >= topPos_ + kPageArrowY && y < topPos_ + kPageArrowY + kPageArrowHeight &&
-                ((x >= px + 14 && x < px + 14 + kPageArrowWidth) || (x >= px + 108 && x < px + 108 + kPageArrowWidth))) {
-                book_.scroll(x < px + kBookWidth / 2 ? -1 : 1);
+            const bool overArrows = book_.pageCount() > 1 && y >= topPos_ + kPageArrowY && y < topPos_ + kPageArrowY + kPageArrowHeight;
+            if (const auto over = [&](int arrowX) { return x >= px + arrowX && x < px + arrowX + kPageArrowWidth; };
+                overArrows && (over(kPageBackX) || over(kPageForwardX))) {
+                book_.scroll(over(kPageBackX) ? -1 : 1);
                 return true;
             }
             if (const int entry = bookEntryAt(x, y); entry >= 0) {
