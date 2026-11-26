@@ -833,7 +833,19 @@ void test_mock_flow() {
     app.waitIdle();
     CHECK(parse(app.stateJson())["account"]["owns"].get<bool>());
     CHECK(parse(app.handleMessage(R"({"id":3,"method":"launch"})"))["ok"].get<bool>());
-    CHECK(waitFor(app, [](const json& s) { return s["game"]["status"] == "running"; }));
+    // "running" only lasts the scaled mock wait (a few dozen milliseconds at the test speed). A loaded
+    // machine can go a whole poll interval without looking, so the states the page was sent count too.
+    const auto passedThrough = [&](const char* status) {
+        return waitFor(app, [&](const json& live) {
+            if (live["game"]["status"] == status) return true;
+            std::lock_guard<std::mutex> lock(events.mutex);
+            for (const json& past : events.states) {
+                if (past["game"]["status"] == status) return true;
+            }
+            return false;
+        });
+    };
+    CHECK(passedThrough("running"));
     CHECK(waitFor(app, [](const json& s) { return s["game"]["status"] == "ready"; }));
     app.waitIdle();
     {
