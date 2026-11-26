@@ -975,7 +975,12 @@ void test_real_flow() {
 #ifdef _WIN32
     CHECK(readFile(home / "account.bin", saved) && saved.find("ms-refresh-SECRET") == std::string::npos);  // the token is not on disk in the clear
 #else
-    CHECK(readFile(home / "account.bin", saved) && saved == "ms-refresh-SECRET");  // (Linux: in a file only this user can read, see secure_store.cpp)
+    // (Linux and a Mac: in a file only this user can read, see secure_store.cpp, holding the sign-in as the launcher keeps it: the refresh token and the Minecraft one)
+    CHECK(readFile(home / "account.bin", saved));
+    const json signIn = parse(saved);
+    CHECK(signIn.is_object() && signIn["refresh"] == "ms-refresh-SECRET");
+    struct stat info{};
+    CHECK(stat((home / "account.bin").c_str(), &info) == 0 && (info.st_mode & 0777) == 0600);
 #endif
 
     // launch: the game's files come from Mojang, then the start fails (a fake exe) with a clear error and the state is sane again
