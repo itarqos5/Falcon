@@ -836,7 +836,11 @@ void Mobs::tickMob(Mob& m, const MobTick& in) {
     } else {
         const double yawRad = static_cast<double>(m.yaw) / static_cast<double>(kDegrees);
         const double fx = -std::sin(yawRad), fz = std::cos(yawRad);
-        if (m.wantsJump && m.inWater) {
+        // FloatGoal: an animal in water with its eyes under it paddles up, so it rises to the surface and bobs there instead of walking about the sea floor
+        // (the paddling is the jump the game's goal asks for, and the water's own drag and -0.02 below turn it into the bobbing).
+        const bool eyesUnderWater =
+            m.inWater && registry.state(level.block(fl(m.x), fl(m.y + static_cast<double>(m.height) * 0.85), fl(m.z))).has(kStateWater);
+        if (m.inWater && (m.wantsJump || eyesUnderWater)) {
             m.vy += 0.04;  // FloatGoal / JumpControl: it paddles up
         } else if (m.wantsJump && m.onGround) {
             m.vy = 0.42 * static_cast<double>(registry.state(level.block(fl(m.x), fl(m.y - 0.5), fl(m.z))).jumpFactor);
