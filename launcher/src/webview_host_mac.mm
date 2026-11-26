@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <cstring>
 #include <memory>
+#include <strings.h>  // (strncasecmp, which the address comparisons use)
 
 // The launcher's window on a Mac: AppKit and WKWebView. It mirrors webview_host_gtk.cpp line for line where the two engines allow it: the same custom
 // scheme (falcon://app/index.html answered from memory), the same shim in front of the page (window.chrome.webview over window.webkit.messageHandlers),
@@ -61,8 +62,8 @@ struct MacBridge {
 }  // namespace launcher
 
 // The Objective-C code below is at the file's global scope; these are the launcher's helpers it calls by their plain names.
-using falcon::launcher::fromNSString;
-using falcon::launcher::startsWithNoCase;
+using launcher::fromNSString;
+using launcher::startsWithNoCase;
 
 // -------------------------------------------------------------------------------------------------------------------------------
 // The Objective-C pieces (one file, so the C++ and the AppKit side can share the Bridge above without a header)
@@ -83,13 +84,13 @@ using falcon::launcher::startsWithNoCase;
 
 // The page, answered from memory for falcon://app/index.html (and /): there is nothing else to serve.
 @interface FalconSchemeHandler : NSObject <WKURLSchemeHandler> {
-    falcon::launcher::Blob _page;
+    launcher::Blob _page;
 }
-- (instancetype)initWithPage:(falcon::launcher::Blob)page;
+- (instancetype)initWithPage:(launcher::Blob)page;
 @end
 
 @implementation FalconSchemeHandler
-- (instancetype)initWithPage:(falcon::launcher::Blob)page {
+- (instancetype)initWithPage:(launcher::Blob)page {
     self = [super init];
     if (self != nil) _page = page;
     return self;
@@ -137,18 +138,18 @@ using falcon::launcher::startsWithNoCase;
 - (void)webView:(WKWebView*)webView didFailProvisionalNavigation:(WKNavigation*)navigation withError:(NSError*)error {
     (void)webView;
     (void)navigation;
-    if (isMain) falcon::launcher::logLine(std::string("the page could not be loaded: ") + fromNSString(error.localizedDescription));
+    if (isMain) launcher::logLine(std::string("the page could not be loaded: ") + fromNSString(error.localizedDescription));
 }
 
 - (void)webView:(WKWebView*)webView didFailNavigation:(WKNavigation*)navigation withError:(NSError*)error {
     (void)webView;
     (void)navigation;
-    if (isMain) falcon::launcher::logLine(std::string("the page broke while loading: ") + fromNSString(error.localizedDescription));
+    if (isMain) launcher::logLine(std::string("the page broke while loading: ") + fromNSString(error.localizedDescription));
 }
 
 - (void)webViewWebContentProcessDidTerminate:(WKWebView*)webView {
     if (!isMain) return;
-    falcon::launcher::logLine("the web process ended, the page is loaded again");
+    launcher::logLine("the web process ended, the page is loaded again");
     [webView reload];
 }
 
@@ -158,11 +159,11 @@ using falcon::launcher::startsWithNoCase;
     (void)webView;
     const std::string address = fromNSString(action.request.URL.absoluteString);
     if (isMain) {
-        if (address.rfind(falcon::launcher::kOrigin, 0) == 0) {
+        if (address.rfind(launcher::kOrigin, 0) == 0) {
             decisionHandler(WKNavigationActionPolicyAllow);
         } else {
             decisionHandler(WKNavigationActionPolicyCancel);
-            if (falcon::launcher::isSafeWebUrl(address)) falcon::launcher::openInBrowser(address);
+            if (launcher::isSafeWebUrl(address)) launcher::openInBrowser(address);
         }
         return;
     }
@@ -194,7 +195,7 @@ using falcon::launcher::startsWithNoCase;
     }
     if (action.navigationType == WKNavigationTypeLinkActivated || action.targetFrame == nil) {
         decisionHandler(WKNavigationActionPolicyCancel);
-        if (falcon::launcher::isSafeWebUrl(address)) falcon::launcher::openInBrowser(address);
+        if (launcher::isSafeWebUrl(address)) launcher::openInBrowser(address);
         return;
     }
     if (address.rfind("https://", 0) == 0 || address == "about:blank") {
@@ -207,14 +208,14 @@ using falcon::launcher::startsWithNoCase;
 - (void)webView:(WKWebView*)webView didFailProvisionalNavigation:(WKNavigation*)navigation withError:(NSError*)error {
     (void)webView;
     (void)navigation;
-    falcon::launcher::logLine(std::string("the sign-in page could not be loaded: ") + fromNSString(error.localizedDescription));
+    launcher::logLine(std::string("the sign-in page could not be loaded: ") + fromNSString(error.localizedDescription));
 }
 @end
 
 // The page's messages, handled on the main thread and answered through MacBridge::deliver.
 @interface FalconMessageHandler : NSObject <WKScriptMessageHandler> {
 @public
-    falcon::launcher::MacBridge* bridge;
+    launcher::MacBridge* bridge;
 }
 @end
 
