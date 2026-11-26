@@ -629,14 +629,27 @@ int Client::run() {
     bool memSteady = false;
     FrameQueue frameQueue;          // keeps an uncapped window from queueing frames far ahead of the graphics card
 
+    bool lastFocused = window.focused();
     while (!window.shouldClose()) {
         window.pollEvents();
 
+        // Coming back from another window: the time the game spent in the background is not time the world lived through. The clock starts afresh, so the
+        // first frame back is a frame and not a several-second step, and the swap interval is told again (drivers forget it while a window is away, and the
+        // frame rate then follows something other than the display).
+        const bool focusedNow = window.focused();
+        if (focusedNow != lastFocused) {
+            lastFocused = focusedNow;
+            last = Clock::now();
+            if (!window.background()) window.setVsync(gameOptions.enableVsync);
+        }
+
         const auto now = Clock::now();
         const double millis = std::chrono::duration<double, std::milli>(now - start).count();
-        const auto deltaTicks = static_cast<float>(
-            std::chrono::duration<double, std::milli>(now - last).count() / 50.0);
-        const double frameMillis = deltaTicks * 50.0;
+        const double elapsedMillis = std::chrono::duration<double, std::milli>(now - last).count();
+        // The world is stepped by at most four ticks a frame: a stall (a window dragged about, a machine that stopped the process for a moment) is not
+        // replayed as one huge step of movement and physics.
+        const auto deltaTicks = std::clamp(static_cast<float>(elapsedMillis / 50.0), 0.0f, 4.0f);
+        const double frameMillis = elapsedMillis;
         last = now;
         // A frame that took more than a quarter of a second while a world is open (not one that waited for the window to come back): the log says what the game was doing.
         if (session != nullptr && session->ready() && frameMillis > 250.0 && frameMillis < 5000.0 && !window.background()) {
